@@ -1,0 +1,31 @@
+# Blast Radius Configuration Example
+# Copy this to ~/.config/blastradius/config.yaml and customize.
+
+# Unix domain socket path (default: /tmp/blastradius.sock)
+socket_path: "/tmp/blastradius.sock"
+
+# Directories to scan for .env* files on startup.
+# If empty, falls back to your home directory.
+project_roots:
+  - "~/projects"
+  - "~/work"
+
+# Directories to always skip during scanning (performance + noise reduction).
+# These are merged with strong built-in defaults.
+skip_dirs:
+  - "node_modules"
+  - ".git"
+  - "vendor"
+  - "dist"
+  - "build"
+  - ".next"
+  - "target"
+
+# Ignore files to respect (in addition to built-in behavior).
+# .blastradiusignore is always useful for tool-specific exclusions.
+ignore_files:
+  - ".gitignore"
+  - ".blastradiusignore"
+
+# Future: log level
+log_level: "info"

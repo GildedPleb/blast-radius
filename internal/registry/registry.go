@@ -20,19 +20,31 @@ type Entry struct {
 	// No file paths, no plaintext, minimal by design.
 }
 
+// ScanState represents the current state of the discovery scan.
+type ScanState string
+
+const (
+	ScanStateNotStarted ScanState = "not_started"
+	ScanStateInProgress ScanState = "in_progress"
+	ScanStateCompleted  ScanState = "completed"
+	ScanStateFailed     ScanState = "failed"
+)
+
 // Registry is the in-memory source of truth for known secret hashes.
 // It is never persisted to disk.
 type Registry struct {
-	mu      sync.RWMutex
-	entries map[SecretHash]Entry
-	started time.Time
+	mu        sync.RWMutex
+	entries   map[SecretHash]Entry
+	started   time.Time
+	scanState ScanState
 }
 
 // New creates a new empty Registry.
 func New() *Registry {
 	return &Registry{
-		entries: make(map[SecretHash]Entry),
-		started: time.Now(),
+		entries:   make(map[SecretHash]Entry),
+		started:   time.Now(),
+		scanState: ScanStateNotStarted,
 	}
 }
 
@@ -120,5 +132,20 @@ func (r *Registry) Snapshot() map[string]any {
 	return map[string]any{
 		"tracked_hashes": len(r.entries),
 		"uptime":         r.Uptime().String(),
+		"scan_state":     string(r.scanState),
 	}
+}
+
+// SetScanState updates the current discovery scan state.
+func (r *Registry) SetScanState(state ScanState) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.scanState = state
+}
+
+// GetScanState returns the current scan state.
+func (r *Registry) GetScanState() ScanState {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.scanState
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -13,28 +14,51 @@ import (
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/discovery"
 	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
 // Daemon represents the background singleton process.
 type Daemon struct {
-	cfg      *config.Config
-	registry *registry.Registry
-	listener net.Listener
-	shutdown chan struct{}
+	cfg       *config.Config
+	registry  *registry.Registry
+	discovery *discovery.Manager
+	listener  net.Listener
+	shutdown  chan struct{}
 }
 
 // New creates a new Daemon instance.
 func New(cfg *config.Config, reg *registry.Registry) *Daemon {
+	dm := discovery.NewManager(cfg, reg)
 	return &Daemon{
-		cfg:      cfg,
-		registry: reg,
-		shutdown: make(chan struct{}),
+		cfg:       cfg,
+		registry:  reg,
+		discovery: dm,
+		shutdown:  make(chan struct{}),
 	}
 }
 
 // Run starts the Unix domain socket server and blocks until shutdown.
 func (d *Daemon) Run() error {
+	// Setup file logging (idiomatic location: ~/.local/state/blastradius/)
+	logPath := getDaemonLogPath()
+	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
+		return fmt.Errorf("failed to create log directory: %w", err)
+	}
+
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+	// Note: We intentionally do NOT close this file — it lives for the lifetime of the daemon.
+
+	log.SetOutput(logFile)
+	log.SetPrefix("blastradius: ")
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+
+	log.Printf("Daemon starting. Listening on %s (0600)", d.cfg.SocketPath)
+	log.Printf("Log file: %s", logPath)
+
 	socketPath := d.cfg.SocketPath
 
 	// Remove stale socket if it exists
@@ -59,7 +83,10 @@ func (d *Daemon) Run() error {
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
 
-	fmt.Printf("Blast Radius daemon started. Listening on %s (0600)\n", socketPath)
+	log.Printf("Blast Radius daemon started and listening on %s (0600)", socketPath)
+
+	// Run initial discovery on startup (Phase 1) — runs in background
+	go d.discovery.RunInitialDiscovery()
 
 	// Handle graceful shutdown (signals + internal HALT command)
 	sigCh := make(chan os.Signal, 1)
@@ -68,9 +95,9 @@ func (d *Daemon) Run() error {
 	go func() {
 		select {
 		case <-sigCh:
-			fmt.Println("\nReceived signal, shutting down daemon...")
+			log.Println("Received signal, shutting down daemon...")
 		case <-d.shutdown:
-			fmt.Println("\nReceived HALT command, shutting down daemon...")
+			log.Println("Received HALT command, shutting down daemon...")
 		}
 		d.listener.Close()
 	}()
@@ -82,7 +109,7 @@ func (d *Daemon) Run() error {
 			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
 				break
 			}
-			fmt.Printf("Accept error: %v\n", err)
+			log.Printf("Accept error: %v", err)
 			continue
 		}
 		go d.handleConnection(conn)
@@ -147,4 +174,15 @@ func (d *Daemon) Close() error {
 		return d.listener.Close()
 	}
 	return nil
+}
+
+// getDaemonLogPath returns the canonical location for daemon logs.
+// Uses XDG-style ~/.local/state/blastradius/daemon.log (respects our minimalism principles).
+func getDaemonLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback (should rarely happen)
+		return "/tmp/blastradius-daemon.log"
+	}
+	return filepath.Join(home, ".local", "state", "blastradius", "daemon.log")
 }
