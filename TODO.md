@@ -1,0 +1,1 @@
+- The skip files and ignore files are kind of stupid. rather the skip directories and ignore files are kind of stupid. And also, that should just be the single source of truth. There should not be strong defaults, et cetera.

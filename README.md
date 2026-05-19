@@ -8,7 +8,7 @@ Blast Radius helps developers avoid leaking secrets through common workflow mist
 - Thin Zsh integration layer
 - Five extensible pillars for analysis, alerting, redaction, and hygiene
 
-**Current Status:** Phase 0 complete (foundations).
+**Current Status:** Phase 1 complete + Phase 2 (Zsh + HUD) in progress.
 
 ## Phase 0 – Foundations (Completed)
 
@@ -56,9 +56,42 @@ go run ./cmd/blastradius status
 - Safe degradation on failure
 - Designed with a local attacker in mind
 
+## Zsh Integration (Phase 2)
+
+Blast Radius provides a thin, composable Zsh layer.
+
+### Quick Start
+
+```bash
+# Source the plugin (add to your ~/.zshrc)
+source /path/to/blast-radius/zsh/blastradius.zsh
+
+# Add a compact status indicator to your prompt
+PROMPT='$(blastradius_prompt_info) '$PROMPT
+```
+
+### Available Functions
+
+| Function                    | Description                                      |
+|----------------------------|--------------------------------------------------|
+| `blastradius_prompt_info`  | Returns a compact colored segment for your prompt (e.g. `[BR:142|completed]`) |
+| `blastradius_status`       | Shows full human-readable daemon status          |
+| `blastradius_is_running`   | Returns 0 if daemon is running                   |
+
+### Prompt Segment Example Output
+
+- `[BR:142|completed]` — Daemon healthy, 142 secrets tracked, scan finished
+- `[BR:off]` — Daemon not running
+
+The segment is designed to be **fast** and safe to call on every prompt.
+
+### Future Hook Support
+
+Skeletons for `preexec` and `precmd` are provided for upcoming features (command redaction, history hygiene).
+
 ## Next Phases (Planned)
 
-See `docs/PHASE0.md` and the full implementation plan for details on upcoming pillars.
+See the implementation plan for details on Pillars 1–5.
 
 ## License
 
