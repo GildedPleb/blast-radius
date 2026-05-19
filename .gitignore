@@ -1,0 +1,37 @@
+# Binaries
+blastradius
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# macOS
+.DS_Store
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Config (user-specific, though we don't persist secrets)
+config.yaml
+*.log
+
+# Temporary sockets
+/tmp/blastradius.sock
+*.sock
