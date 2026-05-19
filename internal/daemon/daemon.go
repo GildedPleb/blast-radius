@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -147,6 +148,29 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			}
 		case "PING":
 			response = map[string]string{"status": "pong"}
+		case "DUPLICATES":
+			dups := d.registry.FindDuplicates()
+			// Convert to serializable format (hash as hex string for readability)
+			serializable := make([]map[string]any, 0, len(dups))
+			for hash, projects := range dups {
+				projStrs := make([]string, len(projects))
+				for i, p := range projects {
+					projStrs[i] = string(p)
+				}
+				serializable = append(serializable, map[string]any{
+					"hash":     fmt.Sprintf("%x", hash),
+					"projects": projStrs,
+					"count":    len(projects),
+				})
+			}
+			response = map[string]any{
+				"status":    "ok",
+				"duplicates": serializable,
+				"total":     len(dups),
+			}
+		case "SCRUB_HISTORY":
+			// For now, we accept an optional path. If empty, we use common Zsh locations.
+			response = d.handleScrubHistory()
 		case "HALT", "STOP":
 			response = map[string]string{
 				"status":  "ok",
@@ -174,6 +198,116 @@ func (d *Daemon) Close() error {
 		return d.listener.Close()
 	}
 	return nil
+}
+
+// handleScrubHistory performs safe history file scrubbing for known secret hashes.
+// This implements Pillar 4 (History File Hygiene).
+func (d *Daemon) handleScrubHistory() map[string]any {
+	log.Println("Starting history scrub operation")
+
+	histFile := d.findHistoryFile()
+	if histFile == "" {
+		return map[string]any{
+			"status":  "error",
+			"message": "Could not determine history file location",
+		}
+	}
+
+	// Read original history
+	data, err := os.ReadFile(histFile)
+	if err != nil {
+		log.Printf("Failed to read history file %s: %v", histFile, err)
+		return map[string]any{
+			"status":  "error",
+			"message": fmt.Sprintf("failed to read history file: %v", err),
+		}
+	}
+
+	lines := strings.Split(string(data), "\n")
+	originalCount := len(lines)
+
+	// Build set of known hash hex strings for fast lookup
+	knownHashes := make(map[string]bool)
+	for _, hash := range d.registry.AllHashes() {
+		knownHashes[fmt.Sprintf("%x", hash)] = true
+	}
+
+	// Filter lines that do NOT contain any known hash
+	cleaned := make([]string, 0, len(lines))
+	removed := 0
+	for _, line := range lines {
+		shouldRemove := false
+		for h := range knownHashes {
+			if strings.Contains(line, h) {
+				shouldRemove = true
+				break
+			}
+		}
+		if shouldRemove {
+			removed++
+			continue
+		}
+		cleaned = append(cleaned, line)
+	}
+
+	if removed == 0 {
+		log.Printf("History scrub complete. No sensitive lines found in %s", histFile)
+		return map[string]any{
+			"status":        "ok",
+			"message":       "No sensitive entries found in history",
+			"file":          histFile,
+			"lines_removed": 0,
+		}
+	}
+
+	// Atomic write: write to temp file then rename
+	tmpFile := histFile + ".blastradius-tmp"
+	cleanContent := strings.Join(cleaned, "\n")
+	if err := os.WriteFile(tmpFile, []byte(cleanContent), 0600); err != nil {
+		log.Printf("Failed to write temp history file: %v", err)
+		return map[string]any{
+			"status":  "error",
+			"message": fmt.Sprintf("failed to write cleaned history: %v", err),
+		}
+	}
+
+	if err := os.Rename(tmpFile, histFile); err != nil {
+		os.Remove(tmpFile)
+		log.Printf("Failed to replace history file: %v", err)
+		return map[string]any{
+			"status":  "error",
+			"message": fmt.Sprintf("failed to atomically replace history file: %v", err),
+		}
+	}
+
+	log.Printf("History scrub complete. Removed %d sensitive line(s) from %s", removed, histFile)
+	return map[string]any{
+		"status":        "ok",
+		"message":       fmt.Sprintf("Scrubbed %d sensitive line(s) from history", removed),
+		"file":          histFile,
+		"lines_removed": removed,
+		"original_lines": originalCount,
+	}
+}
+
+// findHistoryFile attempts to locate the user's Zsh history file.
+func (d *Daemon) findHistoryFile() string {
+	// Common locations in order of preference
+	candidates := []string{
+		os.Getenv("HISTFILE"),
+		filepath.Join(os.Getenv("HOME"), ".zsh_history"),
+		filepath.Join(os.Getenv("HOME"), ".zhistory"),
+		filepath.Join(os.Getenv("HOME"), ".history"),
+	}
+
+	for _, p := range candidates {
+		if p != "" {
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+	return ""
 }
 
 // getDaemonLogPath returns the canonical location for daemon logs.

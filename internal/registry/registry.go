@@ -130,9 +130,10 @@ func (r *Registry) Snapshot() map[string]any {
 	defer r.mu.RUnlock()
 
 	return map[string]any{
-		"tracked_hashes": len(r.entries),
-		"uptime":         r.Uptime().String(),
-		"scan_state":     string(r.scanState),
+		"tracked_hashes":  len(r.entries),
+		"duplicate_hashes": r.DuplicateCount(),
+		"uptime":          r.Uptime().String(),
+		"scan_state":      string(r.scanState),
 	}
 }
 
@@ -148,4 +149,50 @@ func (r *Registry) GetScanState() ScanState {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.scanState
+}
+
+// FindDuplicates returns all hashes that appear in more than one project.
+// This is the core of Pillar 1 (Blast Radius Alerting).
+func (r *Registry) FindDuplicates() map[SecretHash][]ProjectID {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	dups := make(map[SecretHash][]ProjectID)
+	for hash, entry := range r.entries {
+		if len(entry.Projects) > 1 {
+			projects := make([]ProjectID, 0, len(entry.Projects))
+			for p := range entry.Projects {
+				projects = append(projects, p)
+			}
+			dups[hash] = projects
+		}
+	}
+	return dups
+}
+
+// DuplicateCount returns how many secret hashes are duplicated across projects.
+func (r *Registry) DuplicateCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	count := 0
+	for _, entry := range r.entries {
+		if len(entry.Projects) > 1 {
+			count++
+		}
+	}
+	return count
+}
+
+// AllHashes returns all currently tracked secret hashes.
+// Used by history scrubbing (Pillar 4).
+func (r *Registry) AllHashes() []SecretHash {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	hashes := make([]SecretHash, 0, len(r.entries))
+	for h := range r.entries {
+		hashes = append(hashes, h)
+	}
+	return hashes
 }
