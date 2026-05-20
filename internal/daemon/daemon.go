@@ -128,7 +128,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err != io.EOF {
-				fmt.Printf("Read error: %v\n", err)
+				log.Printf("Read error on client connection: %v", err)
 			}
 			return
 		}
@@ -155,7 +155,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			for hash, projects := range dups {
 				projStrs := make([]string, len(projects))
 				for i, p := range projects {
-					projStrs[i] = string(p)
+					projStrs[i] = d.discovery.GetProjectDisplayName(p)
 				}
 				serializable = append(serializable, map[string]any{
 					"hash":     fmt.Sprintf("%x", hash),

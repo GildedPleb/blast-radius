@@ -2,6 +2,7 @@ package registry
 
 import (
 	"crypto/sha256"
+	"strings"
 	"sync"
 	"time"
 )
@@ -10,10 +11,21 @@ import (
 // Plaintext is NEVER stored.
 type SecretHash [32]byte
 
-// ProjectID is a stable identifier for a project (typically a canonical directory path).
+// ProjectID is an **opaque** internal identifier for a project.
+//
+// It is deliberately NOT a filesystem path. This reduces the sensitivity
+// of data held in the central Registry.
+//
+// The DiscoveryManager is responsible for generating opaque ProjectIDs
+// and maintaining the mapping to human-friendly display names.
+//
+// This design follows the principle of minimal metadata and eliminates
+// unnecessary filesystem location data from the most important data structure.
 type ProjectID string
 
 // Entry holds minimal metadata for a discovered secret hash.
+// The Projects map uses opaque ProjectID values only.
+// Display names are resolved via DiscoveryManager when needed.
 type Entry struct {
 	Projects   map[ProjectID]struct{}
 	LastSeen   time.Time
@@ -195,4 +207,30 @@ func (r *Registry) AllHashes() []SecretHash {
 		hashes = append(hashes, h)
 	}
 	return hashes
+}
+
+// ProjectDisplayName returns a privacy-friendly representation of a ProjectID.
+// Since ProjectID is now opaque, this function provides a reasonable fallback
+// (last two path segments of whatever string form it has). Prefer using
+// DiscoveryManager.GetProjectDisplayName when available for accurate names.
+func ProjectDisplayName(id ProjectID) string {
+	p := string(id)
+	if p == "" {
+		return "(unknown project)"
+	}
+
+	// Normalize and split
+	p = strings.TrimSuffix(p, "/")
+	parts := strings.Split(p, "/")
+	if len(parts) == 0 {
+		return ".../unknown"
+	}
+
+	// Show the last two meaningful segments when possible.
+	// This gives good context (e.g. ".../bitcoin-helps/backend") while
+	// providing a layer of obfuscation from the true filesystem root.
+	if len(parts) >= 2 {
+		return ".../" + strings.Join(parts[len(parts)-2:], "/")
+	}
+	return ".../" + parts[len(parts)-1]
 }

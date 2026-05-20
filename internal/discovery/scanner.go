@@ -2,6 +2,8 @@ package discovery
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"log"
 	"os"
 	"path/filepath"
@@ -16,6 +18,10 @@ type Scanner struct {
 	registry    *registry.Registry
 	cfg         *config.Config
 	ignores     map[string]*IgnoreMatcher // per-root ignore matchers
+
+	// onProjectDiscovered is called when we find a new project root during scan.
+	// This allows the Manager to capture display names without the Registry seeing paths.
+	onProjectDiscovered func(opaqueID registry.ProjectID, displayName string)
 }
 
 // NewScanner creates a new Scanner.
@@ -75,7 +81,14 @@ func (s *Scanner) ScanDirectory(root string) error {
 
 		// Only process regular files starting with .env
 		if info.Mode().IsRegular() && strings.HasPrefix(filepath.Base(path), ".env") {
-			projectID := registry.ProjectID(filepath.Dir(path))
+			projectDir := filepath.Dir(path)
+			projectID := makeOpaqueProjectID(projectDir)
+			displayName := computeDisplayName(projectDir)
+
+			if s.onProjectDiscovered != nil {
+				s.onProjectDiscovered(projectID, displayName)
+			}
+
 			if err := s.processEnvFile(path, projectID); err != nil {
 				log.Printf("Warning: failed to process %s: %v", path, err)
 			}
@@ -117,4 +130,25 @@ func (s *Scanner) processEnvFile(path string, projectID registry.ProjectID) erro
 	}
 
 	return scanner.Err()
+}
+
+// makeOpaqueProjectID creates a stable opaque identifier from a directory path.
+// This is the single place that decides what ProjectID looks like.
+func makeOpaqueProjectID(absDir string) registry.ProjectID {
+	h := sha256.Sum256([]byte(absDir))
+	return registry.ProjectID(hex.EncodeToString(h[:8]))
+}
+
+// computeDisplayName creates a privacy-friendly name from the real path
+// at discovery time. We capture this once and throw the full path away.
+func computeDisplayName(absDir string) string {
+	absDir = strings.TrimSuffix(absDir, "/")
+	parts := strings.Split(absDir, "/")
+	if len(parts) == 0 {
+		return "unknown"
+	}
+	if len(parts) >= 2 {
+		return strings.Join(parts[len(parts)-2:], "/")
+	}
+	return parts[len(parts)-1]
 }

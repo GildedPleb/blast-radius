@@ -8,7 +8,9 @@ Blast Radius helps developers avoid leaking secrets through common workflow mist
 - Thin Zsh integration layer
 - Five extensible pillars for analysis, alerting, redaction, and hygiene
 
-**Current Status:** Phase 1 complete + Phase 2 (Zsh + HUD) in progress.
+**Current Status:** Phases 0–3 complete. Preparing for Phase 4 (Pillar 3 – CLI Output Redaction).
+
+See [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) for a detailed snapshot of architecture, decisions, invariants, and current capabilities.
 
 ## Phase 0 – Foundations (Completed)
 
