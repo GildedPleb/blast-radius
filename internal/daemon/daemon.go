@@ -171,6 +171,19 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		case "SCRUB_HISTORY":
 			// For now, we accept an optional path. If empty, we use common Zsh locations.
 			response = d.handleScrubHistory()
+		case "CHECK_HASH":
+			// Phase 4: Check if a SHA-256 hex hash is known in the registry
+			// Command format: CHECK_HASH <hexhash>
+			parts := strings.SplitN(command, " ", 2)
+			known := false
+			if len(parts) == 2 {
+				hashHex := strings.TrimSpace(parts[1])
+				known = d.registry.IsKnownHashHex(hashHex)
+			}
+			response = map[string]any{
+				"status": "ok",
+				"known":  known,
+			}
 		case "HALT", "STOP":
 			response = map[string]string{
 				"status":  "ok",

@@ -2,6 +2,7 @@ package registry
 
 import (
 	"crypto/sha256"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -233,4 +234,23 @@ func ProjectDisplayName(id ProjectID) string {
 		return ".../" + strings.Join(parts[len(parts)-2:], "/")
 	}
 	return ".../" + parts[len(parts)-1]
+}
+
+// IsKnownHashHex checks if a hex-encoded SHA-256 hash is in the registry.
+// Used by Phase 4 redaction detection (Zsh queries daemon for accuracy).
+// Returns false for invalid input.
+func (r *Registry) IsKnownHashHex(hexHash string) bool {
+	if len(hexHash) != 64 {
+		return false
+	}
+	var h SecretHash
+	for i := 0; i < 32; i++ {
+		var b byte
+		n, err := fmt.Sscanf(hexHash[i*2:i*2+2], "%02x", &b)
+		if err != nil || n != 1 {
+			return false
+		}
+		h[i] = b
+	}
+	return r.Has(h)
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/daemon"
 	"github.com/GildedPleb/blast-radius/internal/registry"
+	"github.com/GildedPleb/blast-radius/recorder"
 )
 
 const (
@@ -43,6 +44,7 @@ func PrintHelp() {
 	fmt.Println("  logs           Show recent daemon log output")
 	fmt.Println("  duplicates     Show secret hashes duplicated across multiple projects (Pillar 1)")
 	fmt.Println("  scrub-history  Scrub shell history of known secret values (Pillar 4)")
+	fmt.Println("  clear          Trigger or document Phase 4 redaction rebuild (Pillar 3)")
 	fmt.Println("  help           Show this help message")
 	fmt.Println()
 	fmt.Println("Examples:")
@@ -317,6 +319,26 @@ func RunScrubHistory() {
 	}
 }
 
+// RunClear provides CLI entrypoint for Phase 4 redaction rebuild.
+// In practice, the heavy lifting is done by the Zsh `blastradius_clear` function per-terminal.
+// This CLI command can be used to trigger a global awareness or future cross-terminal features.
+func RunClear() {
+	fmt.Println("Blast Radius Clear (Phase 4 - Pillar 3)")
+	fmt.Println("========================================")
+	fmt.Println("The primary redaction/rebuild is performed per-terminal via the Zsh function:")
+	fmt.Println("  br-clear   or   blastradius_clear")
+	fmt.Println()
+	fmt.Println("This triggers:")
+	fmt.Println("  - Full terminal + scrollback wipe")
+	fmt.Println("  - Replay of redacted session history (from live typescript capture)")
+	fmt.Println("  - HUD update and state reset")
+	fmt.Println()
+	fmt.Println("To enable automatic redaction after sensitive commands, ensure your Zsh hooks are installed:")
+	fmt.Println("  source ~/.config/blastradius/blastradius.zsh  (or wherever installed)")
+	fmt.Println("========================================")
+	fmt.Println("No plaintext secrets are ever stored or transmitted.")
+}
+
 // RunStart explicitly starts the daemon in the background.
 func RunStart() {
 	cfg, configPath, err := config.Load()
@@ -394,5 +416,65 @@ func RunDaemon() {
 	if err := d.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Daemon failed: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// RunCheckHash is used by Zsh redaction layer (Phase 4) to query if a SHA-256 hex is known.
+func RunCheckHash(hexHash string) {
+	cfg, _, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	conn, err := net.DialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
+	if err != nil {
+		// Daemon not running — treat as unknown (safe default)
+		fmt.Println(`{"known":false,"message":"daemon not running"}`)
+		return
+	}
+	defer conn.Close()
+
+	cmd := fmt.Sprintf("CHECK_HASH %s\n", hexHash)
+	_, err = conn.Write([]byte(cmd))
+	if err != nil {
+		fmt.Println(`{"known":false}`)
+		return
+	}
+
+	reader := bufio.NewReader(conn)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Println(`{"known":false}`)
+		return
+	}
+	fmt.Print(line) // already JSON
+}
+
+// RunRecorder launches the Go PTY recorder (simple CLI entry for #1).
+func RunRecorder(args []string) {
+	if len(args) == 0 {
+		fmt.Println("recorder start|stop")
+		return
+	}
+	switch args[0] {
+	case "start":
+		rec, err := recorder.NewRecorder()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "recorder start failed: %v\n", err)
+			os.Exit(1)
+		}
+		rec.StartNewWindow()
+		socket := os.Getenv("BR_RECORDER_SOCKET")
+		if socket == "" {
+			socket = filepath.Join(os.TempDir(), "br-recorder.sock")
+		}
+		fmt.Printf("Recorder started. Control socket: %s\n", socket)
+		rec.RunControlServer(socket)
+	case "stop":
+		// client stub: connect and send STOP
+		fmt.Println("use socket or kill for now")
+	default:
+		fmt.Println("unknown recorder cmd")
 	}
 }

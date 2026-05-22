@@ -1,3 +1,4 @@
+
 # blastradius.zsh
 #
 # Blast Radius - Zsh integration for Ambient OPSEC HUD
@@ -62,37 +63,185 @@ blastradius_prompt_info() {
 
 # Human-readable status (wrapper)
 blastradius_status() {
-    _blastradius status
+    if (( BR_PROTECTED )); then
+        echo "🟢 INSIDE Blast Radius Protected Mode (recorder active)"
+    else
+        echo "🔴 OUTSIDE Blast Radius Protected Mode (normal)"
+    fi
 }
 
-# === Hook Skeletons (for future Pillar integration) ===
+# Phase 4 - Zsh Integration (Protected Mode + Auto Window Management)
 
-# Called before every command execution
+# =============================================================================
+# Configuration
+# =============================================================================
+typeset -g BR_PROTECTED=0
+typeset -g BR_MAX_HISTORY=200
+typeset -ga BR_HISTORY=()
+typeset -g BR_RECORDER_SOCKET=""
+
+# =============================================================================
+# Status / Awareness
+# =============================================================================
+blastradius_status() {
+    if (( BR_PROTECTED )); then
+        echo "🟢 INSIDE Blast Radius Protected Mode"
+        [[ -n "$BR_TSFILE" ]] && echo "   Recording to: $BR_TSFILE"
+    else
+        echo "🔴 OUTSIDE Blast Radius Protected Mode (normal)"
+    fi
+}
+
+# =============================================================================
+# Enter Protected Mode (now uses Go PTY recorder)
+# =============================================================================
+br-start() {
+    if (( BR_PROTECTED )); then
+        echo "Already inside protected mode."
+        return 0
+    fi
+
+    BR_RECORDER_SOCKET="${BR_RECORDER_SOCKET:-/tmp/br-recorder.sock}"
+    export BR_RECORDER_SOCKET BR_INSIDE_RECORDER=1
+
+    if ! _blastradius recorder start >/dev/null 2>&1; then
+        echo "Failed to start recorder."
+        return 1
+    fi
+
+    BR_PROTECTED=1
+    echo "Entering Blast Radius Protected Mode (Go PTY recorder)..."
+    echo "Control socket: $BR_RECORDER_SOCKET"
+}
+
+# =============================================================================
+# Exit Protected Mode
+# =============================================================================
+br-stop() {
+    if (( BR_PROTECTED == 0 )); then
+        echo "Not inside protected mode."
+        return 0
+    fi
+
+    if [[ -n "$BR_RECORDER_SOCKET" ]]; then
+        printf 'STOP\n' | timeout 1 zsocket "$BR_RECORDER_SOCKET" 2>/dev/null || true
+    fi
+
+    BR_PROTECTED=0
+    unset BR_RECORDER_SOCKET BR_INSIDE_RECORDER
+    echo "Exiting Blast Radius Protected Mode."
+}
+
+# =============================================================================
+# Recorder socket helpers (robust zsocket + auto window flush)
+# =============================================================================
+_br_recorder_cmd() {
+    local cmd="$1"
+    [[ -z "$BR_RECORDER_SOCKET" ]] && return 1
+    zmodload zsh/net/socket 2>/dev/null || return 1
+    zsocket "$BR_RECORDER_SOCKET" 2>/dev/null || return 1
+    local fd=$REPLY
+    print -u $fd "$cmd"
+    if [[ "$cmd" == "FLUSH_WINDOW" ]]; then
+        local line
+        while read -r -u $fd line; do
+            [[ "$line" == "ERR" || "$line" == "OK" ]] && break
+            _blastradius check-hash "$line" >/dev/null 2>&1 || true
+        done
+    elif [[ "$cmd" == "REPLAY_REDACTED" ]]; then
+        local line
+        while read -r -u $fd line; do
+            [[ "$line" == "OK" ]] && break
+            print -r -- "$line"
+        done
+    fi
+    exec {fd}>&-
+}
+
+_br_flush_window() {
+    (( BR_PROTECTED )) || return 0
+    local data
+    data=$(_br_recorder_cmd "FLUSH_WINDOW")
+    # Treat every line as IO: immediately hash via daemon, discard plaintext
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && _blastradius check-hash "$(print -rn -- "$line" | sha256sum | cut -d' ' -f1)" >/dev/null 2>&1 || true
+    done <<< "$data"
+    _br_recorder_cmd "NEW_WINDOW"
+}
+
+# Legacy command buffer kept for safe degradation only
+_blastradius_record_cmd() {
+    local cmd="$1"
+    BR_HISTORY+=("$cmd")
+    if (( ${#BR_HISTORY[@]} > BR_MAX_HISTORY )); then
+        BR_HISTORY=("${BR_HISTORY[@]:1}")
+    fi
+}
+
+# =============================================================================
+# Core: blastradius_clear (Rebuild) — never replays secret-bearing IO
+# =============================================================================
+blastradius_clear() {
+    printf '\033[3J\033[2J\033[H'
+    echo ""
+    if (( BR_PROTECTED )) && [[ -n "$BR_RECORDER_SOCKET" ]]; then
+        echo "%F{242}--- Replaying redacted protected session ---%f"
+        _br_recorder_cmd "REPLAY_REDACTED"
+    else
+        echo "%F{242}--- Redaction applied via registry (all output treated as IO) ---%f"
+        echo "%F{242}Known secrets have been hashed immediately on flush; no plaintext retained.%f"
+    fi
+    echo ""
+    echo "%F{green}✓ Screen cleared. Future output protected.%f"
+}
+
+alias br-clear='blastradius_clear'
+
+# =============================================================================
+# Basic Detection
+# =============================================================================
+blastradius_might_contain_secret() {
+    local line="$1"
+    [[ "$line" =~ (aws_|ghp_|gho_|Bearer|token=|secret=|password=|apikey) ]] && return 0
+    [[ "$line" =~ =[[:space:]]*[A-Za-z0-9_\-\.\/+=]{12,} ]] && return 0
+    return 1
+}
+
+# =============================================================================
+# Hooks (only active when inside protected mode)
+# =============================================================================
 blastradius_preexec() {
-    # Placeholder for future use:
-    # - Detect sensitive commands (printenv, env, cat .env*)
-    # - Set internal state for post-command redaction (Pillar 3)
-    :
+    if (( BR_PROTECTED )); then
+        _blastradius_record_cmd "$1"
+    fi
 }
 
-# Called after every command completes (before new prompt)
 blastradius_precmd() {
-    # Placeholder for future use:
-    # - Trigger history hygiene (Pillar 4)
-    # - Update any cached HUD state
-    :
+    _br_flush_window
 }
 
-# Optional: Auto-install hooks if user wants (advanced)
-blastradius_install_hooks() {
+# =============================================================================
+# Installation
+# =============================================================================
+blastradius_install() {
     autoload -Uz add-zsh-hook
     add-zsh-hook preexec blastradius_preexec
     add-zsh-hook precmd  blastradius_precmd
-    echo "Blast Radius hooks installed (preexec + precmd)"
+
+    echo "Blast Radius hooks installed."
+    echo "Commands:"
+    echo "  br-start     → Enter protected recording mode (Go PTY)"
+    echo "  br-clear     → Clear terminal + rebuild redacted view"
+    echo "  blastradius_status"
 }
 
-# Helpful message on source
+# Auto-detect recorder on source (robust entry)
+if [[ -n "$BR_INSIDE_RECORDER" ]]; then
+    BR_PROTECTED=1
+    BR_RECORDER_SOCKET="${BR_RECORDER_SOCKET:-/tmp/br-recorder.sock}"
+fi
+
+# Auto message when sourced
 if [[ -o interactive ]]; then
-    # Only show in interactive shells
-    :
+    echo "Blast Radius loaded. Run 'blastradius_install' to activate hooks."
 fi

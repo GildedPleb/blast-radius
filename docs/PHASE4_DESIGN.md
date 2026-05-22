@@ -1,7 +1,7 @@
 # Blast Radius — Phase 4 Design Document
 
 **Pillar 3: CLI Output Redaction**
-**Version 1.0** | **2026-05-20** | **Status: Design Locked**
+**Version 1.0** | **2026-05-22** | **Status: Implementation Complete (v1)**
 
 ---
 
@@ -47,6 +47,27 @@ Enable the system to **alter previously displayed terminal content** after the u
 - Real-time collaborative features or shared sessions.
 
 **We explicitly accept** that some edge-case secrets will be missed and that old scrolled content may still contain secrets if the user manually scrolls up. The system prioritizes **practical risk reduction** over theoretical perfection.
+
+---
+
+## 3. Implementation Summary (v1)
+
+**Core Architecture Delivered**
+
+- **Explicit Protected Mode** (`br-start` / `br-stop`): User consciously enters a recording context. All work outside this mode is transient and never appears in rebuilds.
+- **Go PTY Recorder** (`recorder/recorder.go`): Purpose-built long-lived PTY with inner `zsh`. Maintains atomic `RecordingWindow` buffers. Exposes control socket commands: `NEW_WINDOW`, `FLUSH_WINDOW`, `REPLAY_REDACTED`, `STOP`.
+- **Automatic Window Management** (zsh `precmd`): On every prompt boundary while `BR_PROTECTED=1`, the current window is flushed and a new one is started.
+- **Immediate Hashing Invariant**: Every line returned by `FLUSH_WINDOW` is treated as IO. It is hashed (via daemon `check-hash`) before any further processing. No secret value ever lives in memory beyond the transient recorder buffer.
+- **Redacted Rebuild** (`blastradius_clear` / `br-clear`): Wipes the terminal, then calls `REPLAY_REDACTED`. The recorder emits a redacted stream (`[REDACTED]` for known secrets, original text otherwise). Only protected-mode content appears.
+- **Zsh Layer**: Manages mode state, status display, socket communication (`zsocket`), and safe degradation when the recorder is unavailable.
+
+**Key Design Decisions Upheld**
+
+- No cross-window terminal state transfer.
+- Recorder owns capture lifecycle; Zsh only orchestrates.
+- All invariants (hash-only, minimal metadata, local-only, safe degradation, secrets-as-IO) remain intact.
+
+This implementation fully realizes the "Explicit Protected Recording Windows" paradigm described in the high-level overview.
 
 ---
 

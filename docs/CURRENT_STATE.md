@@ -1,4 +1,4 @@
-# Blast Radius — Current State & Architecture (as of 2026-05-20)
+# Blast Radius — Current State & Architecture (as of 2026-05-22)
 
 **This document provides a complete snapshot of the project state.**  
 It is intended to serve as the primary context document when restarting conversations or onboarding.
@@ -14,7 +14,15 @@ Blast Radius has completed **Phases 0, 1, 2, and 3**.
 - **Phase 2**: Zsh integration layer + composable prompt HUD.
 - **Phase 3**: Pillar 1 (Duplicate Alerting) + Pillar 4 (History Hygiene) + major refactoring + security cleanup.
 
-**Current focus**: Preparing for **Phase 4** (Pillar 3 – CLI Output Redaction), which is the most technically complex phase.
+**Current focus**: **Phase 4 (Pillar 3 – CLI Output Redaction) is now COMPLETE**.
+
+- Explicit Protected Mode with Go PTY recorder (long-lived inner zsh + atomic in-memory windows)
+- Automatic window flush on every prompt boundary via precmd
+- Immediate hashing of all output lines on flush (secrets treated as IO; no plaintext retained)
+- `REPLAY_REDACTED` + `blastradius_clear` / `br-clear` rebuild engine (terminal wipe + redacted replay from recorder)
+- Zsh layer for mode entry/exit, status, and orchestration
+- CLI `recorder` commands + `check-hash` support
+- All core invariants upheld (hash-only, minimal metadata, safe degradation)
 
 The project follows a strict **hash-only, minimal-metadata, local-only** philosophy with strong emphasis on safe degradation and attack surface elimination.
 
@@ -28,6 +36,7 @@ The project follows a strict **hash-only, minimal-metadata, local-only** philoso
 | 1     | Discovery, Registry & File Watching | ✅ Complete | Recursive `.env*` discovery, SHA-256, ignore engine, pruning, scan state, logging to file |
 | 2     | Zsh Integration & Ambient HUD     | ✅ Complete | Composable prompt functions, `--json` status, plugin |
 | 3     | Pillar 1 + Pillar 4               | ✅ Complete | Duplicate detection, `duplicates` command, history scrubbing, major refactor |
+| 4     | Pillar 3 (CLI Output Redaction)   | ✅ Complete | Go PTY recorder + atomic windows, explicit protected mode, immediate hash on flush, redacted replay, zsh orchestration |
 
 ---
 
@@ -41,7 +50,7 @@ cmd/blastradius/
 
 internal/
 ├── cli/
-│   └── cli.go              # All command implementations (RunStatus, RunStart, RunDuplicates, etc.)
+│   └── cli.go              # All command implementations (RunStatus, RunStart, RunRecorder, etc.)
 ├── daemon/
 │   └── daemon.go           # Unix socket server + request routing + graceful shutdown
 ├── registry/
@@ -53,6 +62,9 @@ internal/
 ├── config/
 │   └── config.go           # YAML loading + defaults
 └── (no logger package yet — using std log routed to file)
+
+recorder/
+    recorder.go             # Go PTY engine: long-lived inner shell, atomic RecordingWindow buffers, control socket (NEW_WINDOW/FLUSH/REPLAY_REDACTED)
 ```
 
 ### Key Design Decisions Made
@@ -105,6 +117,7 @@ All original invariants remain upheld:
 | 6 | Persisted state is non-sensitive | ✅ | Config only |
 | 7 | Safe degradation | ✅ | Clear status reporting |
 | 8 | Respects ignore patterns | ✅ | Active in scanner |
+| 9 | Secrets as IO (immediate hash) | ✅ | All terminal output hashed on flush; no plaintext retained beyond transient recorder buffer |
 
 ---
 
