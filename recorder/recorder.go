@@ -27,15 +27,13 @@ type Recorder struct {
 	Cmd       *exec.Cmd
 	Current   *RecordingWindow
 	recent    [][]byte // bounded recent windows (raw IO, transient)
-	sessions  map[string]*RecordingWindow
-	mu        sync.Mutex
+	mu sync.Mutex
 	active    bool
 }
 
 func NewRecorder() (*Recorder, error) {
 	r := &Recorder{
-		sessions: make(map[string]*RecordingWindow),
-		recent:   make([][]byte, 0, 20),
+		recent: make([][]byte, 0, 20),
 	}
 
 	cmd := exec.Command("zsh")

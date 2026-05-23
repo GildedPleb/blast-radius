@@ -74,29 +74,7 @@ blastradius_prompt_info() {
 # Human-readable status (wrapper)
 blastradius_status() {
     if (( BR_PROTECTED )); then
-        echo "🟢 INSIDE Blast Radius Protected Mode (recorder active)"
-    else
-        echo "🔴 OUTSIDE Blast Radius Protected Mode (normal)"
-    fi
-}
-
-# Phase 4 - Zsh Integration (Protected Mode + Auto Window Management)
-
-# =============================================================================
-# Configuration
-# =============================================================================
-typeset -g BR_PROTECTED=0
-typeset -g BR_MAX_HISTORY=200
-typeset -ga BR_HISTORY=()
-typeset -g BR_RECORDER_SOCKET=""
-
-# =============================================================================
-# Status / Awareness
-# =============================================================================
-blastradius_status() {
-    if (( BR_PROTECTED )); then
         echo "🟢 INSIDE Blast Radius Protected Mode"
-        [[ -n "$BR_TSFILE" ]] && echo "   Recording to: $BR_TSFILE"
     else
         echo "🔴 OUTSIDE Blast Radius Protected Mode (normal)"
     fi
@@ -179,51 +157,8 @@ _br_flush_window() {
     _br_recorder_cmd "NEW_WINDOW"
 }
 
-# Legacy command buffer kept for safe degradation only
-_blastradius_record_cmd() {
-    local cmd="$1"
-    BR_HISTORY+=("$cmd")
-    if (( ${#BR_HISTORY[@]} > BR_MAX_HISTORY )); then
-        BR_HISTORY=("${BR_HISTORY[@]:1}")
-    fi
-}
-
-# =============================================================================
-# Core: blastradius_clear (Rebuild) — never replays secret-bearing IO
-# =============================================================================
-blastradius_clear() {
-    printf '\033[3J\033[2J\033[H'
-    echo ""
-    if (( BR_PROTECTED )) && [[ -n "$BR_RECORDER_SOCKET" ]]; then
-        echo "%F{242}--- Replaying redacted protected session ---%f"
-        _br_recorder_cmd "REPLAY_REDACTED"
-    else
-        echo "%F{242}--- Redaction applied via registry (all output treated as IO) ---%f"
-        echo "%F{242}Known secrets have been hashed immediately on flush; no plaintext retained.%f"
-    fi
-    echo ""
-    echo "%F{green}✓ Screen cleared. Future output protected.%f"
-}
-
-alias br-clear='blastradius_clear'
-
-# =============================================================================
-# Basic Detection
-# =============================================================================
-blastradius_might_contain_secret() {
-    local line="$1"
-    [[ "$line" =~ (aws_|ghp_|gho_|Bearer|token=|secret=|password=|apikey) ]] && return 0
-    [[ "$line" =~ =[[:space:]]*[A-Za-z0-9_\-\.\/+=]{12,} ]] && return 0
-    return 1
-}
-
-# =============================================================================
-# Hooks (only active when inside protected mode)
-# =============================================================================
 blastradius_preexec() {
-    if (( BR_PROTECTED )); then
-        _blastradius_record_cmd "$1"
-    fi
+    # no-op (protected mode uses recorder PTY)
 }
 
 blastradius_precmd() {
