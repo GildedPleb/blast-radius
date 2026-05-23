@@ -23,6 +23,28 @@ const (
 	daemonStartWait      = 500 * time.Millisecond
 )
 
+// sendDaemonCommand connects to the daemon, sends a single-line command, and returns the response line.
+func sendDaemonCommand(cmd string) (string, error) {
+	cfg, _, err := config.Load()
+	if err != nil {
+		return "", err
+	}
+	conn, err := net.DialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+
+	if _, err := conn.Write([]byte(cmd + "\n")); err != nil {
+		return "", err
+	}
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return line, nil
+}
+
 // PrintHelp displays the main help message and current configuration.
 func PrintHelp() {
 	cfg, configPath, _ := config.Load()
@@ -63,13 +85,7 @@ func PrintHelp() {
 
 // RunStatus queries the daemon for status without auto-starting it.
 func RunStatus(jsonOutput bool) {
-	cfg, _, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
-	}
-
-	conn, err := net.DialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
+	line, err := sendDaemonCommand("STATUS")
 	if err != nil {
 		if jsonOutput {
 			fmt.Println(`{"status":"not_running","message":"daemon not running"}`)
@@ -83,22 +99,6 @@ func RunStatus(jsonOutput bool) {
 			fmt.Println("===================")
 		}
 		return
-	}
-	defer conn.Close()
-
-	// Send STATUS command
-	_, err = conn.Write([]byte("STATUS\n"))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to send command: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Read response
-	reader := bufio.NewReader(conn)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read response: %v\n", err)
-		os.Exit(1)
 	}
 
 	var resp map[string]any
@@ -135,6 +135,7 @@ func RunStatus(jsonOutput bool) {
 			fmt.Printf("Scan state:   %s\n", scanState)
 		}
 	}
+	cfg, _, _ := config.Load()
 	fmt.Printf("Socket:     %s\n", cfg.SocketPath)
 	fmt.Println("===================")
 	fmt.Println("No plaintext secrets or hashes are stored on disk (invariant upheld).")
@@ -142,30 +143,10 @@ func RunStatus(jsonOutput bool) {
 
 // RunStop sends a HALT command to the running daemon for graceful shutdown.
 func RunStop() {
-	cfg, _, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
-	}
-
-	conn, err := net.DialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
+	line, err := sendDaemonCommand("HALT")
 	if err != nil {
 		fmt.Println("No running Blast Radius daemon found.")
 		return
-	}
-	defer conn.Close()
-
-	_, err = conn.Write([]byte("HALT\n"))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to send HALT command: %v\n", err)
-		os.Exit(1)
-	}
-
-	reader := bufio.NewReader(conn)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read response: %v\n", err)
-		os.Exit(1)
 	}
 
 	var resp map[string]any
@@ -200,30 +181,10 @@ func RunLogs() {
 
 // RunDuplicates queries the daemon for duplicate secret hashes across projects (Pillar 1).
 func RunDuplicates() {
-	cfg, _, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
-	}
-
-	conn, err := net.DialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
+	line, err := sendDaemonCommand("DUPLICATES")
 	if err != nil {
 		fmt.Println("No running Blast Radius daemon found. Start it with 'blastradius start'.")
 		return
-	}
-	defer conn.Close()
-
-	_, err = conn.Write([]byte("DUPLICATES\n"))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to send DUPLICATES command: %v\n", err)
-		os.Exit(1)
-	}
-
-	reader := bufio.NewReader(conn)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read response: %v\n", err)
-		os.Exit(1)
 	}
 
 	var resp map[string]any
@@ -274,32 +235,12 @@ func RunDuplicates() {
 
 // RunScrubHistory triggers history file scrubbing (Pillar 4).
 func RunScrubHistory() {
-	cfg, _, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
-	}
+	fmt.Println("Requesting history scrub (this may take a moment)...")
 
-	conn, err := net.DialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
+	line, err := sendDaemonCommand("SCRUB_HISTORY")
 	if err != nil {
 		fmt.Println("No running Blast Radius daemon found. Start it with 'blastradius start'.")
 		return
-	}
-	defer conn.Close()
-
-	fmt.Println("Requesting history scrub (this may take a moment)...")
-
-	_, err = conn.Write([]byte("SCRUB_HISTORY\n"))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to send SCRUB_HISTORY command: %v\n", err)
-		os.Exit(1)
-	}
-
-	reader := bufio.NewReader(conn)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read response: %v\n", err)
-		os.Exit(1)
 	}
 
 	var resp map[string]any
@@ -425,31 +366,10 @@ func RunDaemon() {
 
 // RunCheckHash is used by Zsh redaction layer (Phase 4) to query if a SHA-256 hex is known.
 func RunCheckHash(hexHash string) {
-	cfg, _, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
-	}
-
-	conn, err := net.DialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
+	line, err := sendDaemonCommand(fmt.Sprintf("CHECK_HASH %s", hexHash))
 	if err != nil {
 		// Daemon not running — treat as unknown (safe default)
 		fmt.Println(`{"known":false,"message":"daemon not running"}`)
-		return
-	}
-	defer conn.Close()
-
-	cmd := fmt.Sprintf("CHECK_HASH %s\n", hexHash)
-	_, err = conn.Write([]byte(cmd))
-	if err != nil {
-		fmt.Println(`{"known":false}`)
-		return
-	}
-
-	reader := bufio.NewReader(conn)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		fmt.Println(`{"known":false}`)
 		return
 	}
 	fmt.Print(line) // already JSON
@@ -558,16 +478,11 @@ func RunClipboard(args []string) {
 		}
 		hash := sha256.Sum256(out)
 		hashHex := fmt.Sprintf("%x", hash[:])
-		cfg, _, _ := config.Load()
-		conn, err := net.DialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
+		resp, err := sendDaemonCommand(fmt.Sprintf("CHECK_HASH %s", hashHex))
 		if err != nil {
 			fmt.Println(`{"status":"unknown","message":"daemon not running"}`)
 			return
 		}
-		defer conn.Close()
-		conn.Write([]byte(fmt.Sprintf("CHECK_HASH %s\n", hashHex)))
-		reader := bufio.NewReader(conn)
-		resp, _ := reader.ReadString('\n')
 		fmt.Print(resp)
 	case "clear":
 		// Clear clipboard on macOS
