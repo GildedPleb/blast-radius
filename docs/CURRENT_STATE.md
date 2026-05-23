@@ -14,7 +14,7 @@ Blast Radius has completed **Phases 0, 1, 2, and 3**.
 - **Phase 2**: Zsh integration layer + composable prompt HUD.
 - **Phase 3**: Pillar 1 (Duplicate Alerting) + Pillar 4 (History Hygiene) + major refactoring + security cleanup.
 
-**Current focus**: **Phase 4 (Pillar 3 – CLI Output Redaction) is now COMPLETE**.
+**Current focus**: All v1 phases complete (Phases 0–5).
 
 - Explicit Protected Mode with Go PTY recorder (long-lived inner zsh + atomic in-memory windows)
 - Automatic window flush on every prompt boundary via precmd
@@ -37,6 +37,7 @@ The project follows a strict **hash-only, minimal-metadata, local-only** philoso
 | 2     | Zsh Integration & Ambient HUD     | ✅ Complete | Composable prompt functions, `--json` status, plugin |
 | 3     | Pillar 1 + Pillar 4               | ✅ Complete | Duplicate detection, `duplicates` command, history scrubbing, major refactor |
 | 4     | Pillar 3 (CLI Output Redaction)   | ✅ Complete | Go PTY recorder + atomic windows, explicit protected mode, immediate hash on flush, redacted replay, zsh orchestration |
+| 5     | Pillar 5 + Pillar 2               | ✅ Complete | Extensible runtime hygiene commands (user-defined), auto prompt-boundary execution (opt-in per command), macOS clipboard detection + time-based clear, HUD integration |
 
 ---
 
@@ -142,7 +143,9 @@ blastradius status --json    # Machine readable
 blastradius stop             # Graceful shutdown
 blastradius duplicates       # Show cross-project secret duplication
 blastradius scrub-history    # Remove known secrets from Zsh history (atomic)
-blastradius logs             # View daemon log file
+  blastradius logs             # View daemon log file
+  blastradius env [name]       # Pillar 5 runtime hygiene (default: printenv)
+  blastradius clipboard        # Pillar 2 clipboard status / clear (macOS)
 ```
 
 ---
@@ -150,9 +153,7 @@ blastradius logs             # View daemon log file
 ## Known Limitations / Future Work
 
 - Full reactive file watching (`fsnotify`) is **not yet implemented** (initial discovery only).
-- Pillar 2 (Clipboard) — not started.
-- Pillar 3 (CLI Output Redaction) — **next major phase** (technically complex).
-- Pillar 5 (Runtime Hygiene) — not started.
+- All five pillars are now implemented in v1.
 - Zsh `preexec` / `precmd` hooks exist as skeletons only.
 - No editor/AI integration (out of v1 scope).
 - History scrubbing currently only supports Zsh.

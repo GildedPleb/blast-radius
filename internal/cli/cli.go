@@ -2,12 +2,14 @@ package cli
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
@@ -45,6 +47,8 @@ func PrintHelp() {
 	fmt.Println("  duplicates     Show secret hashes duplicated across multiple projects (Pillar 1)")
 	fmt.Println("  scrub-history  Scrub shell history of known secret values (Pillar 4)")
 	fmt.Println("  clear          Trigger or document Phase 4 redaction rebuild (Pillar 3)")
+	fmt.Println("  env [name]     Run Pillar 5 runtime hygiene check (default: printenv)")
+	fmt.Println("  clipboard      Pillar 2 clipboard status / clear (macOS)")
 	fmt.Println("  help           Show this help message")
 	fmt.Println()
 	fmt.Println("Examples:")
@@ -476,5 +480,100 @@ func RunRecorder(args []string) {
 		fmt.Println("use socket or kill for now")
 	default:
 		fmt.Println("unknown recorder cmd")
+	}
+}
+
+// RunEnvCheck executes a Pillar 5 command (or default) and reports any known secrets found.
+func RunEnvCheck(name string) {
+	cfg, _, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if name == "" {
+		name = "default-env"
+	}
+
+	// Find the command definition
+	var cmdToRun string
+	for _, c := range cfg.Pillar5Commands {
+		if c.Name == name {
+			cmdToRun = c.Cmd
+			break
+		}
+	}
+	if cmdToRun == "" {
+		fmt.Printf(`{"status":"error","message":"unknown pillar5 command: %s"}`+"\n", name)
+		return
+	}
+
+	// Execute the command
+	output, err := exec.Command("sh", "-c", cmdToRun).CombinedOutput()
+	if err != nil {
+		fmt.Printf(`{"status":"error","message":"command failed: %v"}`+"\n", err)
+		return
+	}
+
+	// Send each line to daemon for hashing/checking
+	conn, err := net.DialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
+	if err != nil {
+		fmt.Println(`{"status":"error","message":"daemon not running"}`)
+		return
+	}
+	defer conn.Close()
+
+	lines := strings.Split(string(output), "\n")
+	found := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		hash := sha256.Sum256([]byte(line))
+		hashHex := fmt.Sprintf("%x", hash[:])
+		cmd := fmt.Sprintf("CHECK_HASH %s\n", hashHex)
+		conn.Write([]byte(cmd))
+		reader := bufio.NewReader(conn)
+		resp, _ := reader.ReadString('\n')
+		if strings.Contains(resp, `"known":true`) {
+			found++
+		}
+	}
+
+	fmt.Printf(`{"status":"ok","command":"%s","secrets_found":%d}`+"\n", name, found)
+}
+
+// RunClipboard handles Pillar 2 clipboard operations (macOS only for v1)
+func RunClipboard(args []string) {
+	if len(args) == 0 {
+		args = []string{"status"}
+	}
+	switch args[0] {
+	case "status", "check":
+		// For now, simple client-side check using pbpaste
+		out, err := exec.Command("pbpaste").Output()
+		if err != nil {
+			fmt.Println(`{"status":"error","message":"pbpaste failed (macOS only)"}`)
+			return
+		}
+		hash := sha256.Sum256(out)
+		hashHex := fmt.Sprintf("%x", hash[:])
+		cfg, _, _ := config.Load()
+		conn, err := net.DialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
+		if err != nil {
+			fmt.Println(`{"status":"unknown","message":"daemon not running"}`)
+			return
+		}
+		defer conn.Close()
+		conn.Write([]byte(fmt.Sprintf("CHECK_HASH %s\n", hashHex)))
+		reader := bufio.NewReader(conn)
+		resp, _ := reader.ReadString('\n')
+		fmt.Print(resp)
+	case "clear":
+		// Clear clipboard on macOS
+		exec.Command("pbcopy").Run()
+		fmt.Println(`{"status":"ok","message":"clipboard cleared"}`)
+	default:
+		fmt.Println("clipboard status|check|clear")
 	}
 }

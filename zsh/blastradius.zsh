@@ -59,6 +59,16 @@ blastradius_prompt_info() {
     else
         print -n "${color}[BR:ok]${reset}"
     fi
+
+    # Pillar 2 clipboard status (simple icon)
+    local clip_json clip_status
+    clip_json=$(_blastradius clipboard status --json 2>/dev/null)
+    clip_status=$(echo "$clip_json" | grep -o '"known":[^,]*' | head -1 | cut -d':' -f2)
+    if [[ "$clip_status" == "true" ]]; then
+        print -n " %F{red}[CLIP:⚠]%f"
+    else
+        print -n " %F{green}[CLIP:ok]%f"
+    fi
 }
 
 # Human-readable status (wrapper)
@@ -218,6 +228,12 @@ blastradius_preexec() {
 
 blastradius_precmd() {
     _br_flush_window
+
+    # Pillar 5 - automatic runtime hygiene checks (per-command opt-in)
+    if (( BR_PROTECTED )); then
+        # Only run commands that have auto_on_prompt: true (currently only default-env)
+        _blastradius env default-env >/dev/null 2>&1 || true
+    fi
 }
 
 # =============================================================================
@@ -233,6 +249,8 @@ blastradius_install() {
     echo "  br-start     → Enter protected recording mode (Go PTY)"
     echo "  br-clear     → Clear terminal + rebuild redacted view"
     echo "  blastradius_status"
+    echo "  blastradius env [name]     → Run Pillar 5 check"
+    echo "  blastradius clipboard clear → Clear clipboard (Pillar 2)"
 }
 
 # Auto-detect recorder on source (robust entry)

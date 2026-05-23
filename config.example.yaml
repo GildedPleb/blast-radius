@@ -29,3 +29,17 @@ ignore_files:
 
 # Future: log level
 log_level: "info"
+
+# Pillar 5 - Runtime Environment Hygiene
+# Define any commands whose output should be scanned for secrets.
+# Only the first command (printenv) has auto_on_prompt enabled by default.
+pillar5_commands:
+  - name: "default-env"
+    cmd: "printenv"
+    auto_on_prompt: true
+  - name: "k8s-secrets"
+    cmd: "kubectl get secrets --ignore-not-found -o yaml"
+    auto_on_prompt: false
+
+# Clipboard auto-clear timeout in seconds (Pillar 2)
+clipboard_clear_seconds: 30

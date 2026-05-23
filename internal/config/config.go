@@ -25,6 +25,20 @@ type Config struct {
 
 	// LogLevel for future use.
 	LogLevel string `yaml:"log_level,omitempty"`
+
+	// Pillar5Commands defines user-specified commands whose output should be scanned for secrets.
+	// Only the first command defaults to auto_on_prompt: true (printenv).
+	Pillar5Commands []Pillar5Command `yaml:"pillar5_commands,omitempty"`
+
+	// ClipboardClearSeconds is the time after which detected secrets in clipboard are auto-cleared.
+	ClipboardClearSeconds int `yaml:"clipboard_clear_seconds,omitempty"`
+}
+
+// Pillar5Command represents a single command to execute for runtime hygiene checks.
+type Pillar5Command struct {
+	Name         string `yaml:"name"`
+	Cmd          string `yaml:"cmd"`
+	AutoOnPrompt bool   `yaml:"auto_on_prompt"`
 }
 
 // DefaultConfig returns a safe default configuration.
@@ -49,6 +63,10 @@ func DefaultConfig() *Config {
 		},
 		IgnoreFiles: []string{".gitignore", ".blastradiusignore"},
 		LogLevel:    "info",
+		Pillar5Commands: []Pillar5Command{
+			{Name: "default-env", Cmd: "printenv", AutoOnPrompt: true},
+		},
+		ClipboardClearSeconds: 30,
 	}
 }
 
