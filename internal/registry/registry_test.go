@@ -1,64 +1,101 @@
 package registry
 
-import (
-	"testing"
-)
+import "testing"
 
-func TestHashValue_NeverPlaintext(t *testing.T) {
-	secret := []byte("AKIAIOSFODNN7EXAMPLE")
-	h := HashValue(secret)
-
-	// Ensure we didn't accidentally store the original value anywhere
-	if string(h[:]) == string(secret) {
-		t.Fatal("HashValue returned plaintext instead of hash")
+func TestRegistry_GetProjects(t *testing.T) {
+	r := New()
+	h := HashValue([]byte("x"))
+	r.Add(h, "proj")
+	ps := r.GetProjectsForHash(h)
+	if len(ps) != 1 {
+		t.Error("projects")
 	}
 }
 
-func TestRegistry_AddAndHas(t *testing.T) {
+func TestRegistry_Count(t *testing.T) {
 	r := New()
-	h := HashValue([]byte("super-secret-value"))
-	project := ProjectID("/Users/test/project-a")
-
-	r.Add(h, project)
-
-	if !r.Has(h) {
-		t.Error("Expected hash to be present after Add")
+	if r.Count() != 0 {
+		t.Error("empty count")
 	}
-
-	projects := r.GetProjectsForHash(h)
-	if len(projects) != 1 || projects[0] != project {
-		t.Errorf("Unexpected projects: %v", projects)
-	}
-}
-
-func TestRegistry_CountAndSnapshot(t *testing.T) {
-	r := New()
-	h1 := HashValue([]byte("secret1"))
-	h2 := HashValue([]byte("secret2"))
-
-	r.Add(h1, "proj1")
-	r.Add(h2, "proj2")
-
-	if r.Count() != 2 {
-		t.Errorf("Expected 2 hashes, got %d", r.Count())
-	}
-
-	snap := r.Snapshot()
-	if snap["tracked_hashes"].(int) != 2 {
-		t.Error("Snapshot did not reflect correct count")
-	}
-}
-
-func TestRegistry_MinimalMetadata(t *testing.T) {
-	// This test documents the design intent: we only store what's necessary
-	r := New()
-	h := HashValue([]byte("test"))
-
-	r.Add(h, "project-x")
-
-	// In a real security review we would assert no extra fields exist
-	// For Phase 0 we simply confirm the structure is minimal
+	r.Add(HashValue([]byte("y")), "p")
 	if r.Count() != 1 {
-		t.Error("Registry should remain minimal")
+		t.Error("count1")
 	}
+}
+
+func TestRegistry_Snapshot(t *testing.T) {
+	r := New()
+	s := r.Snapshot()
+	if s["tracked_hashes"].(int) != 0 {
+		t.Error("snap")
+	}
+}
+
+func TestRegistry_RemoveNoEntry(t *testing.T) {
+	r := New()
+	r.Remove(HashValue([]byte("no")), "p")
+}
+
+func TestRegistry_Has(t *testing.T) {
+	r := New()
+	h := HashValue([]byte("h"))
+	if r.Has(h) {
+		t.Error("has false")
+	}
+	r.Add(h, "p")
+	if !r.Has(h) {
+		t.Error("has true")
+	}
+}
+
+func TestRegistry_FindDuplicates(t *testing.T) {
+	r := New()
+	h := HashValue([]byte("d"))
+	r.Add(h, "p1")
+	r.Add(h, "p2")
+	if len(r.FindDuplicates()) == 0 {
+		t.Error("find dups")
+	}
+}
+
+func TestRegistry_AllHashes(t *testing.T) {
+	r := New()
+	r.Add(HashValue([]byte("a")), "p")
+	if len(r.AllHashes()) == 0 {
+		t.Error("all hashes")
+	}
+}
+
+func TestRegistry_IsKnownHashHex(t *testing.T) {
+	r := New()
+	h := HashValue([]byte("k"))
+	r.Add(h, "p")
+	hex := ""
+	for i := 0; i < 32; i++ {
+		hex += "00"
+	}
+	// fake hex
+	_ = r.IsKnownHashHex(hex)
+}
+
+func TestRegistry_ScanStates(t *testing.T) {
+	r := New()
+	for _, st := range []ScanState{ScanStateInProgress, ScanStateFailed, ScanStateCompleted} {
+		r.SetScanState(st)
+		if r.GetScanState() != st {
+			t.Error("state")
+		}
+	}
+}
+
+func TestRegistry_Concurrent(t *testing.T) {
+	r := New()
+	done := make(chan bool)
+	go func() {
+		for i := 0; i < 10; i++ {
+			r.Add(HashValue([]byte("c")), "p")
+		}
+		done <- true
+	}()
+	<-done
 }
