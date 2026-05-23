@@ -99,3 +99,7 @@ func TestRegistry_Concurrent(t *testing.T) {
 	}()
 	<-done
 }
+
+func TestRegistry_ProjectDisplayName(t *testing.T) {
+	_ = ProjectDisplayName("unknown")
+}

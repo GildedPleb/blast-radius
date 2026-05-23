@@ -15,5 +15,11 @@ func TestLoad(t *testing.T) {
 
 func TestSave(t *testing.T) {
 	cfg := DefaultConfig()
-	_ = cfg.Save() // tolerate err
+	_ = cfg.Save()
+}
+
+func TestSave_ErrorPath(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.SocketPath = string([]byte{0})
+	_ = cfg.Save()
 }

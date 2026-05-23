@@ -29,3 +29,10 @@ func TestMightContain(t *testing.T) {
 	mightContainSecret("foo")
 }
 
+func TestNewRecorder_Error(t *testing.T) {
+	r, err := NewRecorder()
+	if err != nil || r == nil {
+		t.Error("new recorder")
+	}
+}
+
