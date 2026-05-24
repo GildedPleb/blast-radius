@@ -14,6 +14,7 @@ import (
 
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/daemon"
+	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/registry"
 	"github.com/GildedPleb/blast-radius/recorder"
 )
@@ -170,6 +171,7 @@ func RunLogs() {
 			fmt.Printf("Log location: %s\n", logPath)
 			return
 		}
+		logging.Printf("RunLogs: failed to read log file: %v", err)
 		fmt.Fprintf(os.Stderr, "Failed to read log file: %v\n", err)
 		os.Exit(1)
 	}
@@ -286,8 +288,11 @@ func RunClear() {
 
 // RunStart explicitly starts the daemon in the background.
 func RunStart() {
+	_ = logging.Init(logging.DefaultDaemonLogPath())
+
 	cfg, configPath, err := config.Load()
 	if err != nil {
+		logging.Printf("RunStart: failed to load config: %v", err)
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
@@ -297,10 +302,12 @@ func RunStart() {
 	fmt.Printf("Socket: %s\n", cfg.SocketPath)
 
 	if err := startDaemonInBackground(); err != nil {
+		logging.Printf("RunStart: failed to start daemon: %v", err)
 		fmt.Fprintf(os.Stderr, "Failed to start daemon: %v\n", err)
 		os.Exit(1)
 	}
 
+	logging.Println("RunStart: daemon start requested")
 	fmt.Println("Daemon start requested. Use 'blastradius status' to verify.")
 }
 
@@ -349,8 +356,11 @@ func getDaemonLogPath() string {
 
 // RunDaemon is the internal entrypoint for the background daemon process.
 func RunDaemon() {
+	_ = logging.Init(logging.DefaultDaemonLogPath())
+
 	cfg, _, err := config.Load()
 	if err != nil {
+		logging.Printf("RunDaemon: failed to load config: %v", err)
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		os.Exit(1)
 	}
@@ -359,6 +369,7 @@ func RunDaemon() {
 	d := daemon.New(cfg, reg)
 
 	if err := d.Run(); err != nil {
+		logging.Printf("RunDaemon: daemon failed: %v", err)
 		fmt.Fprintf(os.Stderr, "Daemon failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -377,14 +388,18 @@ func RunCheckHash(hexHash string) {
 
 // RunRecorder launches the Go PTY recorder (simple CLI entry for #1).
 func RunRecorder(args []string) {
+	_ = logging.Init(logging.DefaultDaemonLogPath())
+
 	if len(args) == 0 {
 		fmt.Println("recorder start|stop")
 		return
 	}
 	switch args[0] {
 	case "start":
+		logging.Printf("RunRecorder: starting recorder")
 		rec, err := recorder.NewRecorder()
 		if err != nil {
+			logging.Printf("RunRecorder: failed to start recorder: %v", err)
 			fmt.Fprintf(os.Stderr, "recorder start failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -394,9 +409,10 @@ func RunRecorder(args []string) {
 			socket = filepath.Join(os.TempDir(), "br-recorder.sock")
 		}
 		fmt.Printf("Recorder started. Control socket: %s\n", socket)
+		logging.Printf("RunRecorder: control socket = %s", socket)
 		rec.RunControlServer(socket)
 	case "stop":
-		// client stub: connect and send STOP
+		logging.Println("RunRecorder: stop requested (stub)")
 		fmt.Println("use socket or kill for now")
 	default:
 		fmt.Println("unknown recorder cmd")
@@ -405,14 +421,18 @@ func RunRecorder(args []string) {
 
 // RunEnvCheck executes a Pillar 5 command (or default) and reports any known secrets found.
 func RunEnvCheck(name string) {
-	cfg, _, err := config.Load()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-		os.Exit(1)
-	}
+	_ = logging.Init(logging.DefaultDaemonLogPath())
 
 	if name == "" {
 		name = "default-env"
+	}
+	logging.Printf("RunEnvCheck: running pillar5 command %q", name)
+
+	cfg, _, err := config.Load()
+	if err != nil {
+		logging.Printf("RunEnvCheck: failed to load config: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Find the command definition
@@ -424,6 +444,7 @@ func RunEnvCheck(name string) {
 		}
 	}
 	if cmdToRun == "" {
+		logging.Printf("RunEnvCheck: unknown pillar5 command: %s", name)
 		fmt.Printf(`{"status":"error","message":"unknown pillar5 command: %s"}`+"\n", name)
 		return
 	}
@@ -431,6 +452,7 @@ func RunEnvCheck(name string) {
 	// Execute the command
 	output, err := exec.Command("sh", "-c", cmdToRun).CombinedOutput()
 	if err != nil {
+		logging.Printf("RunEnvCheck: command failed: %v", err)
 		fmt.Printf(`{"status":"error","message":"command failed: %v"}`+"\n", err)
 		return
 	}
@@ -438,6 +460,7 @@ func RunEnvCheck(name string) {
 	// Send each line to daemon for hashing/checking
 	conn, err := net.DialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
 	if err != nil {
+		logging.Println("RunEnvCheck: daemon not running")
 		fmt.Println(`{"status":"error","message":"daemon not running"}`)
 		return
 	}
@@ -460,19 +483,23 @@ func RunEnvCheck(name string) {
 		}
 	}
 
+	logging.Printf("RunEnvCheck: command=%s, secrets_found=%d", name, found)
 	fmt.Printf(`{"status":"ok","command":"%s","secrets_found":%d}`+"\n", name, found)
 }
 
 // RunClipboard handles Pillar 2 clipboard operations (macOS only for v1)
 func RunClipboard(args []string) {
+	_ = logging.Init(logging.DefaultDaemonLogPath())
+
 	if len(args) == 0 {
 		args = []string{"status"}
 	}
 	switch args[0] {
 	case "status", "check":
-		// For now, simple client-side check using pbpaste
+		logging.Println("RunClipboard: checking clipboard")
 		out, err := exec.Command("pbpaste").Output()
 		if err != nil {
+			logging.Println("RunClipboard: pbpaste failed")
 			fmt.Println(`{"status":"error","message":"pbpaste failed (macOS only)"}`)
 			return
 		}
@@ -480,12 +507,13 @@ func RunClipboard(args []string) {
 		hashHex := fmt.Sprintf("%x", hash[:])
 		resp, err := sendDaemonCommand(fmt.Sprintf("CHECK_HASH %s", hashHex))
 		if err != nil {
+			logging.Println("RunClipboard: daemon not running")
 			fmt.Println(`{"status":"unknown","message":"daemon not running"}`)
 			return
 		}
 		fmt.Print(resp)
 	case "clear":
-		// Clear clipboard on macOS
+		logging.Println("RunClipboard: clearing clipboard")
 		exec.Command("pbcopy").Run()
 		fmt.Println(`{"status":"ok","message":"clipboard cleared"}`)
 	default:

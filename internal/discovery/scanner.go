@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
@@ -90,7 +90,7 @@ func (s *Scanner) ScanDirectory(root string) error {
 			}
 
 			if err := s.processEnvFile(path, projectID); err != nil {
-				log.Printf("Warning: failed to process %s: %v", path, err)
+				logging.Printf("Warning: failed to process %s: %v", path, err)
 			}
 		}
 		return nil

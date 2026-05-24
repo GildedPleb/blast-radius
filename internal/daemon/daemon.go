@@ -16,6 +16,7 @@ import (
 
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/discovery"
+	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
@@ -41,21 +42,11 @@ func New(cfg *config.Config, reg *registry.Registry) *Daemon {
 
 // Run starts the Unix domain socket server and blocks until shutdown.
 func (d *Daemon) Run() error {
-	// Setup file logging (idiomatic location: ~/.local/state/blastradius/)
+	// Setup file logging via logging package
 	logPath := getDaemonLogPath()
-	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
-		return fmt.Errorf("failed to create log directory: %w", err)
+	if err := logging.Init(logPath); err != nil {
+		return fmt.Errorf("failed to initialize logging: %w", err)
 	}
-
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to open log file: %w", err)
-	}
-	// Note: We intentionally do NOT close this file — it lives for the lifetime of the daemon.
-
-	log.SetOutput(logFile)
-	log.SetPrefix("blastradius: ")
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
 	log.Printf("Daemon starting. Listening on %s (0600)", d.cfg.SocketPath)
 	log.Printf("Log file: %s", logPath)
@@ -96,9 +87,9 @@ func (d *Daemon) Run() error {
 	go func() {
 		select {
 		case <-sigCh:
-			log.Println("Received signal, shutting down daemon...")
+			logging.Println("Received signal, shutting down daemon...")
 		case <-d.shutdown:
-			log.Println("Received HALT command, shutting down daemon...")
+			logging.Println("Received HALT command, shutting down daemon...")
 		}
 		d.listener.Close()
 	}()
@@ -110,7 +101,7 @@ func (d *Daemon) Run() error {
 			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
 				break
 			}
-			log.Printf("Accept error: %v", err)
+			logging.Printf("Accept error: %v", err)
 			continue
 		}
 		go d.handleConnection(conn)
@@ -128,7 +119,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("Read error on client connection: %v", err)
+				logging.Printf("Read error on client connection: %v", err)
 			}
 			return
 		}
@@ -216,7 +207,7 @@ func (d *Daemon) Close() error {
 // handleScrubHistory performs safe history file scrubbing for known secret hashes.
 // This implements Pillar 4 (History File Hygiene).
 func (d *Daemon) handleScrubHistory() map[string]any {
-	log.Println("Starting history scrub operation")
+	logging.Println("Starting history scrub operation")
 
 	histFile := d.findHistoryFile()
 	if histFile == "" {
@@ -229,7 +220,7 @@ func (d *Daemon) handleScrubHistory() map[string]any {
 	// Read original history
 	data, err := os.ReadFile(histFile)
 	if err != nil {
-		log.Printf("Failed to read history file %s: %v", histFile, err)
+		logging.Printf("Failed to read history file %s: %v", histFile, err)
 		return map[string]any{
 			"status":  "error",
 			"message": fmt.Sprintf("failed to read history file: %v", err),
@@ -264,7 +255,7 @@ func (d *Daemon) handleScrubHistory() map[string]any {
 	}
 
 	if removed == 0 {
-		log.Printf("History scrub complete. No sensitive lines found in %s", histFile)
+		logging.Printf("History scrub complete. No sensitive lines found in %s", histFile)
 		return map[string]any{
 			"status":        "ok",
 			"message":       "No sensitive entries found in history",
@@ -277,7 +268,7 @@ func (d *Daemon) handleScrubHistory() map[string]any {
 	tmpFile := histFile + ".blastradius-tmp"
 	cleanContent := strings.Join(cleaned, "\n")
 	if err := os.WriteFile(tmpFile, []byte(cleanContent), 0600); err != nil {
-		log.Printf("Failed to write temp history file: %v", err)
+		logging.Printf("Failed to write temp history file: %v", err)
 		return map[string]any{
 			"status":  "error",
 			"message": fmt.Sprintf("failed to write cleaned history: %v", err),
@@ -286,14 +277,14 @@ func (d *Daemon) handleScrubHistory() map[string]any {
 
 	if err := os.Rename(tmpFile, histFile); err != nil {
 		os.Remove(tmpFile)
-		log.Printf("Failed to replace history file: %v", err)
+		logging.Printf("Failed to replace history file: %v", err)
 		return map[string]any{
 			"status":  "error",
 			"message": fmt.Sprintf("failed to atomically replace history file: %v", err),
 		}
 	}
 
-	log.Printf("History scrub complete. Removed %d sensitive line(s) from %s", removed, histFile)
+	logging.Printf("History scrub complete. Removed %d sensitive line(s) from %s", removed, histFile)
 	return map[string]any{
 		"status":        "ok",
 		"message":       fmt.Sprintf("Scrubbed %d sensitive line(s) from history", removed),

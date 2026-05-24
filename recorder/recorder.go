@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/creack/pty"
 )
 
@@ -32,6 +33,11 @@ type Recorder struct {
 }
 
 func NewRecorder() (*Recorder, error) {
+	// Initialize separate recorder log
+	_ = logging.InitRecorder(logging.DefaultRecorderLogPath())
+
+	logging.RecorderPrintln("NewRecorder: starting PTY recorder")
+
 	r := &Recorder{
 		recent: make([][]byte, 0, 20),
 	}
@@ -58,6 +64,8 @@ func NewRecorder() (*Recorder, error) {
 	r.Cmd = cmd
 	r.active = true
 
+	logging.RecorderPrintf("NewRecorder: PTY started, PID=%d", cmd.Process.Pid)
+
 	// Start capturing in background
 	go r.captureLoop()
 
@@ -65,10 +73,12 @@ func NewRecorder() (*Recorder, error) {
 }
 
 func (r *Recorder) captureLoop() {
+	logging.RecorderPrintln("captureLoop: started")
 	buf := make([]byte, 4096)
 	for r.active {
 		n, err := r.PTY.Read(buf)
 		if err != nil {
+			logging.RecorderPrintf("captureLoop: read error: %v", err)
 			break
 		}
 		if n > 0 && r.Current != nil {
@@ -77,6 +87,7 @@ func (r *Recorder) captureLoop() {
 			r.Current.mu.Unlock()
 		}
 	}
+	logging.RecorderPrintln("captureLoop: exited")
 }
 
 func (r *Recorder) StartNewWindow() {
@@ -87,6 +98,7 @@ func (r *Recorder) StartNewWindow() {
 		StartTime: time.Now(),
 		Buffer:    &bytes.Buffer{},
 	}
+	logging.RecorderPrintln("StartNewWindow: new recording window created")
 }
 
 func (r *Recorder) FlushCurrentWindow() ([]byte, error) {
@@ -94,6 +106,7 @@ func (r *Recorder) FlushCurrentWindow() ([]byte, error) {
 	defer r.mu.Unlock()
 
 	if r.Current == nil {
+		logging.RecorderPrintln("FlushCurrentWindow: no active window")
 		return nil, fmt.Errorf("no active window")
 	}
 
@@ -101,6 +114,8 @@ func (r *Recorder) FlushCurrentWindow() ([]byte, error) {
 	data := make([]byte, r.Current.Buffer.Len())
 	copy(data, r.Current.Buffer.Bytes())
 	r.Current.mu.Unlock()
+
+	logging.RecorderPrintf("FlushCurrentWindow: flushed %d bytes", len(data))
 
 	// Store for redacted replay (bounded), then reset
 	if len(r.recent) >= 20 {
@@ -135,12 +150,15 @@ func (r *Recorder) Stop() error {
 
 // RunControlServer starts a Unix socket for Zsh/CLI control (new-window, flush, stop).
 func (r *Recorder) RunControlServer(socketPath string) error {
+	logging.RecorderPrintf("RunControlServer: listening on %s", socketPath)
+
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
 		return err
 	}
 	_ = os.Remove(socketPath)
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
+		logging.RecorderPrintf("RunControlServer: listen error: %v", err)
 		return err
 	}
 	defer ln.Close()
@@ -149,6 +167,7 @@ func (r *Recorder) RunControlServer(socketPath string) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			logging.RecorderPrintf("RunControlServer: accept error: %v", err)
 			continue
 		}
 		go r.handleConn(conn)
@@ -160,6 +179,9 @@ func (r *Recorder) handleConn(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	line, _ := reader.ReadString('\n')
 	line = line[:len(line)-1]
+
+	logging.RecorderPrintf("handleConn: received command %q", line)
+
 	switch line {
 	case "NEW_WINDOW":
 		r.StartNewWindow()
@@ -200,12 +222,15 @@ func (r *Recorder) handleReplayRedacted(conn net.Conn) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	logging.RecorderPrintln("handleReplayRedacted: starting redacted replay")
+
 	for _, win := range r.recent {
 		for _, line := range bytes.Split(win, []byte("\n")) {
 			if len(line) == 0 {
 				continue
 			}
 			if mightContainSecret(string(line)) {
+				logging.RecorderPrintf("REDACTED: %s", string(line))
 				conn.Write([]byte("%F{yellow}[REDACTED]%f\n"))
 			} else {
 				conn.Write(append(line, '\n'))
@@ -213,4 +238,5 @@ func (r *Recorder) handleReplayRedacted(conn net.Conn) {
 		}
 	}
 	conn.Write([]byte("OK\n"))
+	logging.RecorderPrintln("handleReplayRedacted: finished")
 }

@@ -1,12 +1,12 @@
 package discovery
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
@@ -37,7 +37,7 @@ func NewManager(cfg *config.Config, reg *registry.Registry) *Manager {
 
 // RunInitialDiscovery performs the first scan on configured roots.
 func (m *Manager) RunInitialDiscovery() {
-	log.Printf("Scan state changed: %s", registry.ScanStateInProgress)
+	logging.Printf("Scan state changed: %s", registry.ScanStateInProgress)
 	m.registry.SetScanState(registry.ScanStateInProgress)
 
 	roots := m.cfg.ProjectRoots
@@ -48,18 +48,18 @@ func (m *Manager) RunInitialDiscovery() {
 	var hadError bool
 	for _, root := range roots {
 		expanded := expandPath(root)
-		log.Printf("Scanning for .env* files in: %s", expanded)
+		logging.Printf("Scanning for .env* files in: %s", expanded)
 		if err := m.scanner.ScanDirectory(expanded); err != nil {
-			log.Printf("Error during scan of %s: %v", expanded, err)
+			logging.Printf("Error during scan of %s: %v", expanded, err)
 			hadError = true
 		}
 	}
 
 	if hadError {
-		log.Printf("Scan state changed: %s", registry.ScanStateFailed)
+		logging.Printf("Scan state changed: %s", registry.ScanStateFailed)
 		m.registry.SetScanState(registry.ScanStateFailed)
 	} else {
-		log.Printf("Scan state changed: %s", registry.ScanStateCompleted)
+		logging.Printf("Scan state changed: %s", registry.ScanStateCompleted)
 		m.registry.SetScanState(registry.ScanStateCompleted)
 	}
 }
