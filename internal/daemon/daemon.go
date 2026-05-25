@@ -18,6 +18,7 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/discovery"
 	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/registry"
+	"github.com/GildedPleb/blast-radius/internal/daemon/handlers"
 )
 
 // Daemon represents the background singleton process.
@@ -39,6 +40,34 @@ func New(cfg *config.Config, reg *registry.Registry) *Daemon {
 		shutdown:  make(chan struct{}),
 	}
 }
+
+// --- Accessors for handlers (keep Daemon encapsulation) ---
+
+func (d *Daemon) RegistrySnapshot() any                  { return d.registry.Snapshot() }
+func (d *Daemon) FindDuplicates() map[[32]byte][]string {
+	dups := d.registry.FindDuplicates()
+	out := make(map[[32]byte][]string, len(dups))
+	for h, ps := range dups {
+		strs := make([]string, len(ps))
+		for i, p := range ps {
+			strs[i] = string(p)
+		}
+		out[h] = strs
+	}
+	return out
+}
+func (d *Daemon) GetProjectDisplayName(p string) string { return d.discovery.GetProjectDisplayName(registry.ProjectID(p)) }
+func (d *Daemon) IsKnownHashHex(h string) bool          { return d.registry.IsKnownHashHex(h) }
+func (d *Daemon) AllHashes() [][32]byte {
+	hashes := d.registry.AllHashes()
+	out := make([][32]byte, len(hashes))
+	for i, h := range hashes {
+		out[i] = [32]byte(h)
+	}
+	return out
+}
+func (d *Daemon) Now() time.Time                        { return time.Now() }
+func (d *Daemon) TriggerShutdown()                      { close(d.shutdown) }
 
 // Run starts the Unix domain socket server and blocks until shutdown.
 func (d *Daemon) Run() error {
@@ -125,73 +154,40 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		}
 
 		command := line[:len(line)-1] // trim newline
-
-		var response any
-		var data []byte
-
-		switch command {
-		case "STATUS":
-			response = map[string]any{
-				"status":  "ok",
-				"message": "Blast Radius daemon is running",
-				"registry": d.registry.Snapshot(),
-				"time":    time.Now().Format(time.RFC3339),
-			}
-		case "PING":
-			response = map[string]string{"status": "pong"}
-		case "DUPLICATES":
-			dups := d.registry.FindDuplicates()
-			// Convert to serializable format (hash as hex string for readability)
-			serializable := make([]map[string]any, 0, len(dups))
-			for hash, projects := range dups {
-				projStrs := make([]string, len(projects))
-				for i, p := range projects {
-					projStrs[i] = d.discovery.GetProjectDisplayName(p)
-				}
-				serializable = append(serializable, map[string]any{
-					"hash":     fmt.Sprintf("%x", hash),
-					"projects": projStrs,
-					"count":    len(projects),
-				})
-			}
-			response = map[string]any{
-				"status":    "ok",
-				"duplicates": serializable,
-				"total":     len(dups),
-			}
-		case "SCRUB_HISTORY":
-			// For now, we accept an optional path. If empty, we use common Zsh locations.
-			response = d.handleScrubHistory()
-		case "CHECK_HASH":
-			// Phase 4: Check if a SHA-256 hex hash is known in the registry
-			// Command format: CHECK_HASH <hexhash>
-			parts := strings.SplitN(command, " ", 2)
-			known := false
-			if len(parts) == 2 {
-				hashHex := strings.TrimSpace(parts[1])
-				known = d.registry.IsKnownHashHex(hashHex)
-			}
-			response = map[string]any{
-				"status": "ok",
-				"known":  known,
-			}
-		case "HALT", "STOP":
-			response = map[string]string{
-				"status":  "ok",
-				"message": "Shutting down daemon...",
-			}
-			data, _ = json.Marshal(response)
-			conn.Write(append(data, '\n'))
-			close(d.shutdown) // trigger graceful shutdown
-			return
-		default:
-			response = map[string]string{
-				"status":  "error",
-				"message": fmt.Sprintf("unknown command: %s", command),
-			}
+		parts := strings.SplitN(command, " ", 2)
+		cmd := parts[0]
+		args := ""
+		if len(parts) == 2 {
+			args = parts[1]
 		}
 
-		data, _ = json.Marshal(response)
+		var handler handlers.CommandHandler
+		switch cmd {
+		case "STATUS":
+			handler = handlers.StatusHandler{}
+		case "PING":
+			handler = handlers.PingHandler{}
+		case "DUPLICATES":
+			handler = handlers.DuplicatesHandler{}
+		case "SCRUB_HISTORY":
+			handler = handlers.ScrubHistoryHandler{}
+		case "CHECK_HASH":
+			handler = handlers.CheckHashHandler{}
+		case "HALT", "STOP":
+			handler = handlers.HaltHandler{}
+		default:
+			handler = handlers.UnknownHandler{}
+		}
+
+		response, _ := handler.Handle(args, d)
+
+		if cmd == "HALT" || cmd == "STOP" {
+			data, _ := json.Marshal(response)
+			conn.Write(append(data, '\n'))
+			return
+		}
+
+		data, _ := json.Marshal(response)
 		conn.Write(append(data, '\n'))
 	}
 }
@@ -202,116 +198,6 @@ func (d *Daemon) Close() error {
 		return d.listener.Close()
 	}
 	return nil
-}
-
-// handleScrubHistory performs safe history file scrubbing for known secret hashes.
-// This implements Pillar 4 (History File Hygiene).
-func (d *Daemon) handleScrubHistory() map[string]any {
-	logging.Println("Starting history scrub operation")
-
-	histFile := d.findHistoryFile()
-	if histFile == "" {
-		return map[string]any{
-			"status":  "error",
-			"message": "Could not determine history file location",
-		}
-	}
-
-	// Read original history
-	data, err := os.ReadFile(histFile)
-	if err != nil {
-		logging.Printf("Failed to read history file %s: %v", histFile, err)
-		return map[string]any{
-			"status":  "error",
-			"message": fmt.Sprintf("failed to read history file: %v", err),
-		}
-	}
-
-	lines := strings.Split(string(data), "\n")
-	originalCount := len(lines)
-
-	// Build set of known hash hex strings for fast lookup
-	knownHashes := make(map[string]bool)
-	for _, hash := range d.registry.AllHashes() {
-		knownHashes[fmt.Sprintf("%x", hash)] = true
-	}
-
-	// Filter lines that do NOT contain any known hash
-	cleaned := make([]string, 0, len(lines))
-	removed := 0
-	for _, line := range lines {
-		shouldRemove := false
-		for h := range knownHashes {
-			if strings.Contains(line, h) {
-				shouldRemove = true
-				break
-			}
-		}
-		if shouldRemove {
-			removed++
-			continue
-		}
-		cleaned = append(cleaned, line)
-	}
-
-	if removed == 0 {
-		logging.Printf("History scrub complete. No sensitive lines found in %s", histFile)
-		return map[string]any{
-			"status":        "ok",
-			"message":       "No sensitive entries found in history",
-			"file":          histFile,
-			"lines_removed": 0,
-		}
-	}
-
-	// Atomic write: write to temp file then rename
-	tmpFile := histFile + ".blastradius-tmp"
-	cleanContent := strings.Join(cleaned, "\n")
-	if err := os.WriteFile(tmpFile, []byte(cleanContent), 0600); err != nil {
-		logging.Printf("Failed to write temp history file: %v", err)
-		return map[string]any{
-			"status":  "error",
-			"message": fmt.Sprintf("failed to write cleaned history: %v", err),
-		}
-	}
-
-	if err := os.Rename(tmpFile, histFile); err != nil {
-		os.Remove(tmpFile)
-		logging.Printf("Failed to replace history file: %v", err)
-		return map[string]any{
-			"status":  "error",
-			"message": fmt.Sprintf("failed to atomically replace history file: %v", err),
-		}
-	}
-
-	logging.Printf("History scrub complete. Removed %d sensitive line(s) from %s", removed, histFile)
-	return map[string]any{
-		"status":        "ok",
-		"message":       fmt.Sprintf("Scrubbed %d sensitive line(s) from history", removed),
-		"file":          histFile,
-		"lines_removed": removed,
-		"original_lines": originalCount,
-	}
-}
-
-// findHistoryFile attempts to locate the user's Zsh history file.
-func (d *Daemon) findHistoryFile() string {
-	// Common locations in order of preference
-	candidates := []string{
-		os.Getenv("HISTFILE"),
-		filepath.Join(os.Getenv("HOME"), ".zsh_history"),
-		filepath.Join(os.Getenv("HOME"), ".zhistory"),
-		filepath.Join(os.Getenv("HOME"), ".history"),
-	}
-
-	for _, p := range candidates {
-		if p != "" {
-			if _, err := os.Stat(p); err == nil {
-				return p
-			}
-		}
-	}
-	return ""
 }
 
 // getDaemonLogPath returns the canonical location for daemon logs.
