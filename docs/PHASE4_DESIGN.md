@@ -1,7 +1,7 @@
 # Blast Radius — Phase 4 Design Document
 
 **Pillar 3: CLI Output Redaction**
-**Version 1.0** | **2026-05-22** | **Status: Implementation Complete (v1)**
+**Version 1.0** | **2026-05-22** | **Status: Core v1 Complete – Polish Remaining**
 
 ---
 
@@ -15,6 +15,8 @@ Enable the system to **alter previously displayed terminal content** after the u
 
 ### Core User Story (Locked)
 
+#### Core
+
 1. User runs a command that prints secrets (e.g., `printenv`).
 2. User sees the **full, unaltered output** (non-interference requirement).
 3. User runs any subsequent command (thus signaling they are done with the previous output).
@@ -26,11 +28,28 @@ Enable the system to **alter previously displayed terminal content** after the u
    - Shows a new prompt.
 5. The terminal is now in a provably safer state for future copy/paste operations.
 
+#### Wrapper 1
+
+1. Protected mode is inactive in the HUD.
+2. User sets the command prompt to protected mode.
+3. Protected mode is now active in the HUD.
+4. User enters prompts (as per the Core user story above).
+5. User exits protected mode.
+6. Protected mode is now inactive in the HUD.
+
+#### Wrapper 2
+
+1. User configures blast radius to always enter protected mode immediately whenever a terminal is opened.
+2. User opens a new terminal.
+3. Protected mode is now active in the HUD.
+4. User enters prompts (as per the Core user story above).
+5. User closes the terminal.
+
 ### Success Criteria for v1
 
 - Catch ~95% of real secrets that appear in common developer workflows.
 - Never interfere with the user's original command output while they are actively viewing it.
-- Provide a powerful, composable `blastradius clear` function that can be triggered automatically or manually.
+- Provide a powerful, composable `blastradius clear` function that can be triggered automatically or manually and sources settings from the config.
 - Maintain the project's core invariants (hash-only, minimal metadata, local-only, safe degradation).
 
 ---
@@ -54,11 +73,13 @@ Enable the system to **alter previously displayed terminal content** after the u
 
 **Core Architecture Delivered**
 
+> **Final v1 Architecture**: Go Recorder owns protected-mode state (unbounded `Window` buffers, `SecretSpan` data, redaction logic). Zsh is the broker and display layer. No cross-terminal features. Inline-only redaction with color preservation. Evidence messages are HUD-only.
+
 - **Explicit Protected Mode** (`br-start` / `br-stop`): User consciously enters a recording context. All work outside this mode is transient and never appears in rebuilds.
-- **Go PTY Recorder** (`recorder/recorder.go`): Purpose-built long-lived PTY with inner `zsh`. Maintains atomic `RecordingWindow` buffers. Exposes control socket commands: `NEW_WINDOW`, `FLUSH_WINDOW`, `REPLAY_REDACTED`, `STOP`.
-- **Automatic Window Management** (zsh `precmd`): On every prompt boundary while `BR_PROTECTED=1`, the current window is flushed and a new one is started.
+- **Go PTY Recorder** (`recorder/recorder.go`): Purpose-built long-lived PTY with inner `zsh`. Maintains unbounded `Window` / `Line` / `SecretSpan` buffers. Exposes control socket commands: `NEW_WINDOW`, `FLUSH_WINDOW`, `REPLAY_REDACTED`, `STOP`, `RESET_HISTORY`.
+- **Automatic Window Management** (zsh `precmd`): On every prompt boundary while `BR_PROTECTED=1`, the current window is flushed and a new one is started. Rebuild only occurs when a secret has aged past the configured buffer.
 - **Immediate Hashing Invariant**: Every line returned by `FLUSH_WINDOW` is treated as IO. It is hashed (via daemon `check-hash`) before any further processing. No secret value ever lives in memory beyond the transient recorder buffer.
-- **Redacted Rebuild** (`blastradius_clear` / `br-clear`): Wipes the terminal, then calls `REPLAY_REDACTED`. The recorder emits a redacted stream (`[REDACTED]` for known secrets, original text otherwise). Only protected-mode content appears.
+- **Redacted Rebuild** (`blastradius_clear` / `br-clear`): Wipes the terminal, then calls `REPLAY_REDACTED`. Supports three inline-safe modes: replace secret with `[REDACTED]`, remove entire command+output, or replace with custom string. Original ANSI color is preserved around replaced content when `preserve_colors=true`. Evidence messages appear only in the HUD when `show_rebuild_evidence=true`.
 - **Zsh Layer**: Manages mode state, status display, socket communication (`zsocket`), and safe degradation when the recorder is unavailable.
 
 **Key Design Decisions Upheld**
@@ -71,7 +92,7 @@ This implementation fully realizes the "Explicit Protected Recording Windows" pa
 
 ---
 
-## 3. Core Philosophy & Invariants (Reinforced)
+## 4. Core Philosophy & Invariants (Reinforced)
 
 All previous invariants remain in force. The following are especially relevant to Phase 4:
 
@@ -84,7 +105,7 @@ All previous invariants remain in force. The following are especially relevant t
 
 ---
 
-## 4. Architecture Overview (Hybrid Model)
+## 5. Architecture Overview (Hybrid Model)
 
 ### High-Level Diagram
 
@@ -129,24 +150,23 @@ All previous invariants remain in force. The following are especially relevant t
 - Cross-terminal features (future) require a central point.
 - Analysis can be offloaded to the daemon, keeping the Zsh hot path lightweight.
 
-**Chosen Model**: Zsh owns per-terminal session history + rebuild engine. Daemon owns global registry + analysis. This gives the best balance of performance, resilience, and alignment with existing architecture.
+**Chosen Model**: Go Recorder owns protected-mode state (unbounded `Window` buffers + redaction logic). Zsh is the broker and display layer. Daemon owns the global secret hash registry. Cross-terminal features are out of scope.
 
 ---
 
-## 5. Key Design Decisions & Trade-offs
+## 6. Key Design Decisions & Trade-offs
 
-### 5.1 Recording Layer: Managed `script` (Initial) vs Go PTY
+### 6.1 Recording Layer: Go PTY Recorder (v1)
 
-**Decision**: Start with managed system `script` command for v1. Consider migrating to `github.com/creack/pty` in a later iteration.
+**Decision**: Use `github.com/creack/pty` long-lived recorder for v1 (PTY-middleman model accepted). The old "managed `script`" approach was evaluated and rejected.
 
 **Rationale**:
 
-- `script` already captures everything we need (full typescript with colors, escape sequences, control characters).
-- Faster to validate the end-to-end flow.
-- Lower initial complexity.
-- Trade-off: Slight external process overhead and need to manage typescript (or use named pipes for lower latency). Acceptable for v1.
+- Gives the recorder full ownership of protected-mode state (unbounded `Window` buffers + redaction logic) in a type-safe Go environment.
+- Exposes a clean Unix-socket control API (`NEW_WINDOW`, `FLUSH_WINDOW`, `REPLAY_REDACTED`, `STOP`, `RESET_HISTORY`).
+- Zsh remains the broker and display layer; the recorder owns data/IO/logic.
 
-### 5.2 Detection Strategy (v1)
+### 6.2 Detection Strategy (v1)
 
 **Decision**: Simple structural + prefix + length-based candidate extraction. No entropy calculation in v1.
 
@@ -157,7 +177,7 @@ All previous invariants remain in force. The following are especially relevant t
 - Target: ~95% coverage of common cases. We explicitly accept missing some edge cases.
 - Full details in Section 6.
 
-### 5.3 Rebuild Trigger & Frequency
+### 6.3 Rebuild Trigger & Frequency
 
 **Decision**: Config-driven via `blastradius clear` entrypoint.
 
@@ -170,7 +190,7 @@ All previous invariants remain in force. The following are especially relevant t
 - Gives users full control while still allowing automatic operation.
 - Buffer of 0 = immediate (before output prints) — allowed but noted as potentially surprising.
 
-### 5.4 What Gets Rebuilt
+### 6.4 What Gets Rebuilt
 
 **Decision**: The entire session history up to `history_length`.
 
@@ -178,7 +198,7 @@ All previous invariants remain in force. The following are especially relevant t
 
 - `history_length` and rebuild scope are the same setting. Keeping them unified simplifies mental model and configuration.
 
-### 5.5 Multi-Terminal Isolation
+### 6.5 Multi-Terminal Isolation
 
 **Decision**: Hybrid — Zsh manages per-terminal history buffers locally. Daemon tracks sessions at a high level for analysis only.
 
@@ -190,9 +210,9 @@ All previous invariants remain in force. The following are especially relevant t
 
 ---
 
-## 6. Secret Detection Strategy (v1)
+## 7. Secret Detection Strategy (v1)
 
-### 6.1 Layered Pipeline (High-Level)
+### 7.1 Layered Pipeline (High-Level)
 
 1. **High-Risk Command Context**
    - Commands: `printenv`, `env`, `set`, `cat .env*`, `printenv | grep`, and user-configurable additions.
@@ -212,7 +232,7 @@ All previous invariants remain in force. The following are especially relevant t
    - Hash candidates with SHA-256
    - Send to daemon for lookup against Secret Hash Registry
 
-### 6.2 What We Explicitly Do NOT Do in v1
+### 7.2 What We Explicitly Do NOT Do in v1
 
 - No Shannon entropy calculation
 - No full multi-line secret reconstruction
@@ -223,7 +243,7 @@ All previous invariants remain in force. The following are especially relevant t
 
 ---
 
-## 7. Session Management & Multi-Terminal Isolation
+## 8. Session Management & Multi-Terminal Isolation
 
 - Each Zsh instance maintains its own in-memory ring buffer: `[]HistoryEntry`
 - `HistoryEntry` = `{Command, RedactedOutput, Timestamp, Metadata}`
@@ -234,7 +254,7 @@ All previous invariants remain in force. The following are especially relevant t
 
 ---
 
-## 8. The `blastradius clear` Rebuild Engine
+## 9. The `blastradius clear` Rebuild Engine
 
 This is the single most important function in Phase 4.
 
@@ -254,7 +274,7 @@ This is the single most important function in Phase 4.
 
 ---
 
-## 9. Composability Model
+## 10. Composability Model
 
 All functionality is exposed as:
 
@@ -266,29 +286,30 @@ The user can mix and match behaviors. There are no "levels" — only composable 
 
 ---
 
-## 10. Data Models (High-Level)
+## 11. Data Models (High-Level)
 
-**HistoryEntry**
+**Window / Line / SecretSpan (Go Recorder owns this)**
 
 ```go
-type HistoryEntry struct {
-    Command        string
-    RedactedOutput string    // Never contains plaintext secrets
-    Timestamp      time.Time
-    Metadata       map[string]string
+type SecretSpan struct {
+    Hash   string
+    Start  int
+    Length int
+}
+type Line struct {
+    Raw     []byte
+    Secrets []SecretSpan
+}
+type Window struct {
+    StartTime time.Time
+    Command   string   // may contain secrets
+    Lines     []Line
 }
 ```
 
-**SessionState** (per Zsh)
+The recorder stores an unbounded `[]*Window`. Redaction policy (replace / remove_cmd / custom) is applied at `REPLAY_REDACTED` time using the stored `SecretSpan` locations. Line deletion is not supported; only inline replacement or full command+output removal.
 
-```go
-type SessionState struct {
-    ID           string
-    History      []HistoryEntry
-    PendingAlert bool
-    Config       SessionConfig
-}
-```
+**SessionState** (per Zsh) – removed; the recorder now owns the protected history model.
 
 **SecretCandidate** (sent to daemon)
 
@@ -302,27 +323,29 @@ type SecretCandidate struct {
 
 ---
 
-## 11. Configuration Schema (Proposed)
+## 12. Configuration Schema (Proposed)
 
 ```yaml
 redaction:
   automated: true
-  buffer: 1 # 0 = immediate, 1 = next command, etc.
-  history_length: 0 # 0 = keep forever, otherwise drop after N entries
+  buffer: 1
+  history_length: 0
   preserve_colors: true
-  show_rebuild_evidence: true # HUD message after rebuild
+  show_rebuild_evidence: true
+  redaction_mode: replace          # replace | remove_cmd | custom (inline only)
+  custom_replacement: "[REDACTED]"
 
 detection:
-  high_risk_commands: ["printenv", "env", "set", "cat .env*"]
+  # high_risk_commands deferred to future work (see TODO.md)
   min_candidate_length: 12
-  aggressive_unknown: false # Flag high-entropy strings not in registry
+  aggressive_unknown: false
 
-clear_reset_commands: ["clear", "reset", "tput reset"] # Auto-reset internal history
+clear_reset_commands: ["clear", "reset", "tput reset"]
 ```
 
 ---
 
-## 12. Security Considerations
+## 13. Security Considerations
 
 **Attack Surface Introduced by Phase 4**:
 
@@ -345,7 +368,7 @@ clear_reset_commands: ["clear", "reset", "tput reset"] # Auto-reset internal his
 
 ---
 
-## 13. Implementation Order (Recommended)
+## 14. Implementation Order (Recommended)
 
 1. **Foundation** — Managed `script` recording layer + per-terminal session buffer in Zsh.
 2. **Detection** — Structural candidate extraction + daemon lookup integration.
@@ -356,7 +379,7 @@ clear_reset_commands: ["clear", "reset", "tput reset"] # Auto-reset internal his
 
 ---
 
-## 14. Risks & Mitigations
+## 15. Risks & Mitigations
 
 | Risk                                      | Likelihood | Impact | Mitigation                                               |
 | ----------------------------------------- | ---------- | ------ | -------------------------------------------------------- |
@@ -364,19 +387,20 @@ clear_reset_commands: ["clear", "reset", "tput reset"] # Auto-reset internal his
 | Missed multi-line secrets                 | Medium     | Medium | Documented limitation; focus on common single-line cases |
 | Performance on very long histories        | Medium     | Medium | `history_length` + automatic trimming                    |
 | Color/formatting loss on rebuild          | Low        | Medium | Preserve ANSI codes during replay (priority)             |
-| PTY/session tracking bugs                 | Medium     | High   | Start with managed `script`; validate thoroughly         |
+| PTY/session tracking bugs                 | Medium     | High   | Go PTY recorder validated; `RESET_HISTORY` and trimming reduce risk |
 | User confusion about when rebuild happens | Medium     | Low    | Clear documentation + HUD evidence option                |
 
 ---
 
-## 15. Future Work (Post-v1)
+## 16. Future Work (Post-v1)
 
-- Go-native PTY implementation (`github.com/creack/pty`) for lower latency.
 - Entropy + more sophisticated pattern detection (optional aggressive mode).
-- Cross-terminal secret correlation.
 - Deeper terminal emulator integration (iTerm2, VS Code).
-- Encrypted / persistent session history (with user consent).
 - Plugin system for custom detectors.
+
+**Explicitly out of scope for Phase 4**:
+- Cross-terminal secret correlation or alerting.
+- Encrypted / persistent session history.
 
 ---
 

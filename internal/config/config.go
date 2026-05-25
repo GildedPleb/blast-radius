@@ -32,6 +32,22 @@ type Config struct {
 
 	// ClipboardClearSeconds is the time after which detected secrets in clipboard are auto-cleared.
 	ClipboardClearSeconds int `yaml:"clipboard_clear_seconds,omitempty"`
+
+	// Redaction holds Phase 4 Pillar 3 settings (shared with history scrubbing).
+	Redaction RedactionConfig `yaml:"redaction,omitempty"`
+}
+
+// RedactionConfig controls automated rebuild and redaction behavior.
+type RedactionConfig struct {
+	Automated           bool   `yaml:"automated"`
+	Buffer              int    `yaml:"buffer"`
+	HistoryLength       int    `yaml:"history_length"`
+	PreserveColors      bool   `yaml:"preserve_colors"`
+	ShowRebuildEvidence bool   `yaml:"show_rebuild_evidence"`
+	RedactionMode       string `yaml:"redaction_mode"`
+	CustomReplacement   string `yaml:"custom_replacement"`
+	ClearResetCommands  []string `yaml:"clear_reset_commands"`
+	WarningPersist      int    `yaml:"warning_persist"` // prompts to show ⚠️ before scrubbing
 }
 
 // Pillar5Command represents a single command to execute for runtime hygiene checks.
@@ -67,6 +83,17 @@ func DefaultConfig() *Config {
 			{Name: "default-env", Cmd: "printenv", AutoOnPrompt: true},
 		},
 		ClipboardClearSeconds: 30,
+		Redaction: RedactionConfig{
+			Automated:           true,
+			Buffer:              1,
+			HistoryLength:       0,
+			PreserveColors:      true,
+			ShowRebuildEvidence: true,
+			RedactionMode:       "replace",
+			CustomReplacement:   "[REDACTED]",
+			ClearResetCommands:  []string{"clear", "reset", "tput reset"},
+			WarningPersist:      1,
+		},
 	}
 }
 
