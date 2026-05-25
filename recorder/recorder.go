@@ -9,8 +9,8 @@ package recorder
 import (
 	"bufio"
 	"bytes"
-	"crypto/sha256"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -21,46 +21,21 @@ import (
 
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/logging"
+	"github.com/GildedPleb/blast-radius/recorder/handlers"
 	"github.com/creack/pty"
 )
-
-type RecordingWindow struct {
-	StartTime time.Time
-	Buffer    *bytes.Buffer
-	mu        sync.Mutex
-}
-
-// SecretSpan records a known secret location inside a line (hash + offset + length).
-type SecretSpan struct {
-	Hash   string
-	Start  int
-	Length int
-}
-
-// Line holds one line of captured output plus any detected secrets.
-type Line struct {
-	Raw     []byte
-	Secrets []SecretSpan
-}
-
-// Window is the persisted, type-safe unit owned by the Go Recorder.
-type Window struct {
-	StartTime time.Time
-	Command   string
-	Lines     []Line
-	HasSecret bool // true if command or any line matched mightContainSecret
-}
 
 type Recorder struct {
 	PTY            *os.File
 	TTY            *os.File
 	Cmd            *exec.Cmd
 	Current        *RecordingWindow
-	recent            []*Window // unbounded per-terminal protected history
+	recent            []*Window
 	pendingCommand    string
 	historyLength     int
 	mu                sync.Mutex
 	active            bool
+	shutdown          chan struct{}
 }
 
 func NewRecorder() (*Recorder, error) {
@@ -70,7 +45,8 @@ func NewRecorder() (*Recorder, error) {
 	logging.RecorderPrintln("NewRecorder: starting PTY recorder")
 
 	r := &Recorder{
-		recent: make([]*Window, 0),
+		recent:   make([]*Window, 0),
+		shutdown: make(chan struct{}),
 	}
 
 	cmd := exec.Command("zsh")
@@ -215,6 +191,33 @@ func (r *Recorder) Stop() error {
 	return nil
 }
 
+// --- RecorderContext implementation ---
+
+func (r *Recorder) LastWindowHasSecret() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.recent) == 0 {
+		return false
+	}
+	return r.recent[len(r.recent)-1].HasSecret
+}
+
+func (r *Recorder) ResetHistory() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.recent = nil
+	r.pendingCommand = ""
+	r.Current = nil
+}
+
+func (r *Recorder) TriggerShutdown() {
+	close(r.shutdown)
+}
+
+func (r *Recorder) ReplayRedacted(w io.Writer, mode, custom string, preserveColors bool) {
+	r.handleReplayRedacted(w, mode, custom, preserveColors)
+}
+
 // RunControlServer starts a Unix socket for Zsh/CLI control (new-window, flush, stop).
 func (r *Recorder) RunControlServer(socketPath string) error {
 	logging.RecorderPrintf("RunControlServer: listening on %s", socketPath)
@@ -231,14 +234,23 @@ func (r *Recorder) RunControlServer(socketPath string) error {
 	defer ln.Close()
 	_ = os.Chmod(socketPath, 0600)
 
+	go func() {
+		<-r.shutdown
+		ln.Close()
+	}()
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
+				break
+			}
 			logging.RecorderPrintf("RunControlServer: accept error: %v", err)
 			continue
 		}
 		go r.handleConn(conn)
 	}
+	return nil
 }
 
 func (r *Recorder) handleConn(conn net.Conn) {
@@ -250,189 +262,32 @@ func (r *Recorder) handleConn(conn net.Conn) {
 	logging.RecorderPrintf("handleConn: received command %q", line)
 
 	cmd := line
+	payload := ""
 	if strings.HasPrefix(line, "NEW_WINDOW ") {
 		cmd = "NEW_WINDOW"
+		payload = strings.TrimPrefix(line, "NEW_WINDOW ")
+	}
+	if strings.HasPrefix(line, "REPLAY_REDACTED ") {
+		cmd = "REPLAY_REDACTED"
+		payload = strings.TrimPrefix(line, "REPLAY_REDACTED ")
 	}
 
+	var h handlers.CommandHandler
 	switch cmd {
 	case "NEW_WINDOW":
-		payload := ""
-		if strings.HasPrefix(line, "NEW_WINDOW ") {
-			payload = strings.TrimPrefix(line, "NEW_WINDOW ")
-		}
-		r.StartNewWindowWithCommand(payload)
-		conn.Write([]byte("OK\n"))
+		h = handlers.NewWindowHandler{}
 	case "FLUSH_WINDOW":
-		data, err := r.FlushCurrentWindow()
-		if err != nil {
-			conn.Write([]byte("ERR\n"))
-			return
-		}
-		// Return the raw data followed by a secret flag line for Zsh automation
-		flag := "NO_SECRET\n"
-		if len(r.recent) > 0 && r.recent[len(r.recent)-1].HasSecret {
-			flag = "HAS_SECRET\n"
-		}
-		conn.Write(append(data, '\n'))
-		conn.Write([]byte(flag))
+		h = handlers.FlushWindowHandler{}
 	case "STOP":
-		r.Stop()
-		conn.Write([]byte("OK\n"))
-		os.Exit(0)
+		h = handlers.StopHandler{}
 	case "REPLAY_REDACTED":
-		mode := "replace"
-		custom := "[REDACTED]"
-		preserveColors := true
-		if strings.HasPrefix(line, "REPLAY_REDACTED ") {
-			parts := strings.SplitN(strings.TrimPrefix(line, "REPLAY_REDACTED "), " ", 3)
-			if len(parts) > 0 && parts[0] != "" {
-				mode = parts[0]
-			}
-			if len(parts) > 1 {
-				custom = parts[1]
-			}
-			if len(parts) > 2 && parts[2] == "false" {
-				preserveColors = false
-			}
-		}
-		r.handleReplayRedacted(conn, mode, custom, preserveColors)
-		return
+		h = handlers.ReplayRedactedHandler{}
 	case "RESET_HISTORY":
-		r.recent = nil
-		r.pendingCommand = ""
-		r.Current = nil
-		conn.Write([]byte("OK\n"))
+		h = handlers.ResetHistoryHandler{}
 	default:
-		conn.Write([]byte("UNKNOWN\n"))
+		h = handlers.UnknownHandler{}
 	}
+
+	h.Handle(payload, r, conn)
 }
 
-func mightContainSecret(line string) bool {
-	return (len(line) > 0 &&
-		(bytes.Contains([]byte(line), []byte("aws_")) ||
-			bytes.Contains([]byte(line), []byte("ghp_")) ||
-			bytes.Contains([]byte(line), []byte("gho_")) ||
-			bytes.Contains([]byte(line), []byte("Bearer")) ||
-			bytes.Contains([]byte(line), []byte("token=")) ||
-			bytes.Contains([]byte(line), []byte("secret=")) ||
-			bytes.Contains([]byte(line), []byte("password=")) ||
-			bytes.Contains([]byte(line), []byte("apikey")) ||
-			bytes.Contains([]byte(line), []byte("="))))
-}
-
-// findSecretSpans locates secrets and returns their byte offsets + hashes.
-// This is the one-time work done at flush time.
-func findSecretSpans(line string) []SecretSpan {
-	var spans []SecretSpan
-	b := []byte(line)
-
-	// Known prefixes
-	prefixes := [][]byte{[]byte("aws_"), []byte("ghp_"), []byte("gho_"), []byte("Bearer")}
-	for _, p := range prefixes {
-		idx := bytes.Index(b, p)
-		if idx >= 0 {
-			// take until whitespace or end
-			end := idx
-			for end < len(b) && b[end] != ' ' && b[end] != '\t' {
-				end++
-			}
-			val := b[idx:end]
-			h := sha256.Sum256(val)
-			spans = append(spans, SecretSpan{Hash: fmt.Sprintf("%x", h[:]), Start: idx, Length: len(val)})
-		}
-	}
-
-	// After '=' (simple heuristic)
-	if eq := bytes.LastIndexByte(b, '='); eq >= 0 && eq+1 < len(b) {
-		start := eq + 1
-		end := start
-		for end < len(b) && b[end] != ' ' && b[end] != '\t' && b[end] != '"' && b[end] != '\'' {
-			end++
-		}
-		if end > start {
-			val := b[start:end]
-			if len(val) >= 8 { // avoid tiny false positives
-				h := sha256.Sum256(val)
-				spans = append(spans, SecretSpan{Hash: fmt.Sprintf("%x", h[:]), Start: start, Length: len(val)})
-			}
-		}
-	}
-	return spans
-}
-
-// applyRedaction takes a raw line and its pre-computed SecretSpans and
-// produces the output according to the requested mode.
-// When preserveColors is true, original ANSI sequences around the secret are kept.
-func applyRedaction(raw []byte, spans []SecretSpan, mode, custom string, preserveColors bool) []byte {
-	if len(spans) == 0 {
-		return raw
-	}
-	if mode == "" {
-		mode = "replace"
-	}
-	if custom == "" {
-		custom = "[REDACTED]"
-	}
-
-	if mode == "remove_cmd" {
-		return nil
-	}
-
-	result := make([]byte, 0, len(raw)+64)
-	last := 0
-	for _, sp := range spans {
-		result = append(result, raw[last:sp.Start]...)
-		if preserveColors {
-			// Keep original color by not emitting extra escapes
-			result = append(result, []byte(custom)...)
-		} else {
-			result = append(result, []byte("%F{yellow}")...)
-			result = append(result, []byte(custom)...)
-			result = append(result, []byte("%f")...)
-		}
-		last = sp.Start + sp.Length
-	}
-	result = append(result, raw[last:]...)
-	return result
-}
-
-func (r *Recorder) handleReplayRedacted(conn net.Conn, mode, custom string, preserveColors bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	logging.RecorderPrintln("handleReplayRedacted: starting redacted replay")
-
-	for _, win := range r.recent {
-		// remove_cmd: skip entire window if it contained any secret
-		if mode == "remove_cmd" && win.HasSecret {
-			continue
-		}
-
-		// Command line
-		if win.Command != "" {
-			if mode == "remove_cmd" && win.HasSecret {
-				// already skipped above
-			} else if len(findSecretSpans(win.Command)) > 0 {
-				out := applyRedaction([]byte(win.Command), findSecretSpans(win.Command), mode, custom, preserveColors)
-				if out != nil {
-					conn.Write(append(out, '\n'))
-				}
-			} else {
-				conn.Write(append([]byte(win.Command), '\n'))
-			}
-		}
-
-		for _, ln := range win.Lines {
-			if len(ln.Secrets) == 0 {
-				conn.Write(append(append([]byte(nil), ln.Raw...), '\n'))
-				continue
-			}
-			out := applyRedaction(ln.Raw, ln.Secrets, mode, custom, preserveColors)
-			if out != nil {
-				conn.Write(append(out, '\n'))
-			}
-		}
-	}
-	conn.Write([]byte("OK\n"))
-	logging.RecorderPrintln("handleReplayRedacted: finished")
-}
