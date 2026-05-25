@@ -58,7 +58,6 @@ Enable the system to **alter previously displayed terminal content** after the u
 
 - Perfect detection of every possible secret format (especially complex multi-line secrets).
 - Surgical redaction of already-scrolled content in the terminal's internal scrollback buffer.
-- Cross-terminal secret correlation or alerting (e.g., "this secret appeared in 3 terminals").
 - Deep integration with specific terminal emulators (iTerm2 proprietary features, VS Code extensions, etc.).
 - Automatic redaction _before_ output is displayed to the user.
 - Support for Windows terminals or non-Zsh shells.
@@ -73,7 +72,7 @@ Enable the system to **alter previously displayed terminal content** after the u
 
 **Core Architecture Delivered**
 
-> **Final v1 Architecture**: Go Recorder owns protected-mode state (unbounded `Window` buffers, `SecretSpan` data, redaction logic). Zsh is the broker and display layer. No cross-terminal features. Inline-only redaction with color preservation. Evidence messages are HUD-only.
+> **Final v1 Architecture**: Go Recorder owns protected-mode state (unbounded `Window` buffers, `SecretSpan` data, redaction logic). Zsh is the broker and display layer. Inline-only redaction with color preservation. Evidence messages are HUD-only.
 
 - **Explicit Protected Mode** (`br-start` / `br-stop`): User consciously enters a recording context. All work outside this mode is transient and never appears in rebuilds.
 - **Go PTY Recorder** (`recorder/recorder.go`): Purpose-built long-lived PTY with inner `zsh`. Maintains unbounded `Window` / `Line` / `SecretSpan` buffers. Exposes control socket commands: `NEW_WINDOW`, `FLUSH_WINDOW`, `REPLAY_REDACTED`, `STOP`, `RESET_HISTORY`.
@@ -111,28 +110,28 @@ All previous invariants remain in force. The following are especially relevant t
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Terminal 1 (Zsh)                      │
+│                        Terminal 1 (Zsh)                     │
 │  ┌──────────────┐   ┌──────────────────┐   ┌──────────────┐ │
 │  │   Recording  │──▶│  Local Session   │◀──│  Rebuild     │ │
 │  │   Layer      │   │  History Buffer  │   │  Engine      │ │
 │  └──────────────┘   └──────────────────┘   └──────────────┘ │
-│         │                    │                    ▲          │
-│         ▼                    ▼                    │          │
+│         │                    │                    ▲         │
+│         ▼                    ▼                    │         │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │                    Unix Domain Socket                   │ │
+│  │                    Unix Domain Socket                  │ │
 │  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Go Daemon (Singleton)                     │
+│                    Go Daemon (Singleton)                    │
 │  ┌──────────────────┐  ┌──────────────────────────────┐     │
 │  │ Secret Hash      │  │ Analysis & Detection Engine  │     │
 │  │ Registry         │  │ (receives candidates)        │     │
 │  └──────────────────┘  └──────────────────────────────┘     │
 │  ┌──────────────────┐  ┌──────────────────────────────┐     │
-│  │ Cross-terminal   │  │ Configuration Service        │     │
-│  │ Features (future)│  │                              │     │
+│  │                  │  │ Configuration Service        │     │
+│  │ (Future Features)│  │                              │     │
 │  └──────────────────┘  └──────────────────────────────┘     │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -147,10 +146,9 @@ All previous invariants remain in force. The following are especially relevant t
 **Why not put everything in Zsh?**
 
 - The Secret Hash Registry must remain in the daemon (single source of truth, consistent with Phases 0–3).
-- Cross-terminal features (future) require a central point.
 - Analysis can be offloaded to the daemon, keeping the Zsh hot path lightweight.
 
-**Chosen Model**: Go Recorder owns protected-mode state (unbounded `Window` buffers + redaction logic). Zsh is the broker and display layer. Daemon owns the global secret hash registry. Cross-terminal features are out of scope.
+**Chosen Model**: Go Recorder owns protected-mode state (unbounded `Window` buffers + redaction logic). Zsh is the broker and display layer. Daemon owns the global secret hash registry.
 
 ---
 
@@ -206,7 +204,6 @@ All previous invariants remain in force. The following are especially relevant t
 
 - Performance (rebuild is local).
 - Resilience (one terminal dying doesn't affect others).
-- Still allows future cross-terminal features via the daemon.
 
 ---
 
@@ -332,7 +329,7 @@ redaction:
   history_length: 0
   preserve_colors: true
   show_rebuild_evidence: true
-  redaction_mode: replace          # replace | remove_cmd | custom (inline only)
+  redaction_mode: replace # replace | remove_cmd | custom (inline only)
   custom_replacement: "[REDACTED]"
 
 detection:
@@ -381,14 +378,14 @@ clear_reset_commands: ["clear", "reset", "tput reset"]
 
 ## 15. Risks & Mitigations
 
-| Risk                                      | Likelihood | Impact | Mitigation                                               |
-| ----------------------------------------- | ---------- | ------ | -------------------------------------------------------- |
-| Visible flicker on rebuild                | High       | Medium | Acceptable for v1; only happens on actual secret leaks   |
-| Missed multi-line secrets                 | Medium     | Medium | Documented limitation; focus on common single-line cases |
-| Performance on very long histories        | Medium     | Medium | `history_length` + automatic trimming                    |
-| Color/formatting loss on rebuild          | Low        | Medium | Preserve ANSI codes during replay (priority)             |
+| Risk                                      | Likelihood | Impact | Mitigation                                                          |
+| ----------------------------------------- | ---------- | ------ | ------------------------------------------------------------------- |
+| Visible flicker on rebuild                | High       | Medium | Acceptable for v1; only happens on actual secret leaks              |
+| Missed multi-line secrets                 | Medium     | Medium | Documented limitation; focus on common single-line cases            |
+| Performance on very long histories        | Medium     | Medium | `history_length` + automatic trimming                               |
+| Color/formatting loss on rebuild          | Low        | Medium | Preserve ANSI codes during replay (priority)                        |
 | PTY/session tracking bugs                 | Medium     | High   | Go PTY recorder validated; `RESET_HISTORY` and trimming reduce risk |
-| User confusion about when rebuild happens | Medium     | Low    | Clear documentation + HUD evidence option                |
+| User confusion about when rebuild happens | Medium     | Low    | Clear documentation + HUD evidence option                           |
 
 ---
 
@@ -399,7 +396,7 @@ clear_reset_commands: ["clear", "reset", "tput reset"]
 - Plugin system for custom detectors.
 
 **Explicitly out of scope for Phase 4**:
-- Cross-terminal secret correlation or alerting.
+
 - Encrypted / persistent session history.
 
 ---

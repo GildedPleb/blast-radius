@@ -4,7 +4,6 @@ import "fmt"
 
 // RunClear provides CLI entrypoint for Phase 4 redaction rebuild.
 // In practice, the heavy lifting is done by the Zsh `blastradius_clear` function per-terminal.
-// This CLI command can be used to trigger a global awareness or future cross-terminal features.
 func RunClear() {
 	fmt.Println("Blast Radius Clear (Phase 4 - Pillar 3)")
 	fmt.Println("========================================")
