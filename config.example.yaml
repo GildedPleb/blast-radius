@@ -69,5 +69,8 @@ redaction:
   show_rebuild_evidence: true
   redaction_mode: "replace"
   custom_replacement: "[REDACTED]"
-  clear_reset_commands: ["clear", "reset", "tput reset"]
+  # Additional commands (beyond the built-in clear/reset/tput clear/tput reset)
+  # that should also cause protected history to be reset.
+  # The four core commands are always honored and cannot be disabled.
+  clear_reset_commands: []
   warning_persist: 1

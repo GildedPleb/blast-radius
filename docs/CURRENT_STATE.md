@@ -19,7 +19,7 @@ Blast Radius has completed **Phases 0, 1, 2, and 3**.
 - Explicit Protected Mode with Go PTY recorder (long-lived inner zsh + atomic in-memory windows)
 - Automatic window flush on every prompt boundary via precmd
 - Immediate hashing of all output lines on flush (secrets treated as IO; no plaintext retained)
-- `REPLAY_REDACTED` + `blastradius_clear` / `br-clear` rebuild engine (terminal wipe + redacted replay from recorder)
+- `REPLAY_REDACTED` + automatic protected history reset on core clear commands (`clear`/`reset`/`tput clear`/`tput reset` + variants with args) inside the recorder; `blastradius redact [N]` for manual redacted rebuild
 - Zsh layer for mode entry/exit, status, and orchestration
 - CLI `recorder` commands + `check-hash` support
 - All core invariants upheld (hash-only, minimal metadata, safe degradation)

@@ -108,7 +108,9 @@ These decisions were reached after extensive discussion of security, composabili
 
 ### Clear / Reset Behavior
 
-- `blastradius clear` and reset commands continue to forward to the recorder to manage buffers.
+- Core terminal clear/reset commands (`clear`, `reset`, `tput clear`, `tput reset` and common argument forms) are now automatically recognized by the recorder on flush and cause protected history to be reset.
+- The public `blastradius clear` CLI command was removed (it was a legacy stub).
+- `clear_reset_commands` in config is now additive only; the four core commands are mandatory.
 
 ---
 
@@ -124,7 +126,7 @@ These decisions were reached after extensive discussion of security, composabili
 ## 7. Pillar Interaction (Confirmed)
 
 - **Pillar 3 (Redaction)**: `redact` command lives in coordinator. Automatic trigger count and timing logic remains inside the recorder.
-- **Pillar 4 & 5 (History & Runtime Hygiene)**: `scrub-history` and `env` remain globally available. `clear` and `redact` are gated by protection mode.
+- **Pillar 4 & 5 (History & Runtime Hygiene)**: `scrub-history` and `env` remain globally available. `redact` (and protection-related commands) are gated by protection mode. (The legacy `blastradius clear` command was removed.)
 - All other pillars only require protection-mode guards where appropriate.
 
 ---

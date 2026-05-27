@@ -83,20 +83,3 @@ func performClear(cmds []string) {
 }
 
 // parse helper not needed (inline atoi above for simplicity).
-
-// RunClear provides CLI entrypoint for Phase 4 redaction rebuild documentation.
-// The actual redaction is now driven by `blastradius redact` (and Zsh wrappers).
-func RunClear() {
-	fmt.Println("Blast Radius Clear (Phase 4 - Pillar 3)")
-	fmt.Println("========================================")
-	fmt.Println("Primary redaction/rebuild is performed via:")
-	fmt.Println("  blastradius redact [N]")
-	fmt.Println()
-	fmt.Println("  - N omitted or 0: full redacted replay of history")
-	fmt.Println("  - N>0: last N prompts replayed with original output (if buffer allows); older redacted")
-	fmt.Println()
-	fmt.Println("The buffer setting (redaction.buffer) controls the max N fidelity and plaintext lifetime.")
-	fmt.Println("See 'blastradius config redaction' and status --json for current values.")
-	fmt.Println("========================================")
-	fmt.Println("No plaintext secrets are ever stored or transmitted.")
-}

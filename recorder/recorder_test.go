@@ -192,4 +192,74 @@ func TestHandleReplayRedacted_MixedN(t *testing.T) {
 	}
 }
 
+func TestIsClearResetCommand_DefaultsAndConfig(t *testing.T) {
+	r := &Recorder{}
+
+	// Core mandatory commands must always work (even with arguments)
+	coreCases := []string{
+		"clear",
+		"clear -x",
+		"clear --quiet",
+		"reset",
+		"reset -Q",
+		"tput clear",
+		"tput clear -T xterm-256color",
+		"tput reset",
+		"tput reset -Q",
+		// tput [options] <cap> forms
+		"tput -T xterm clear",
+		"tput --quiet reset",
+		"tput -T screen-256color clear -x",
+		"tput -T xterm reset -Q",
+	}
+	for _, c := range coreCases {
+		if !r.isClearResetCommand(c) {
+			t.Errorf("core command %q must trigger history reset", c)
+		}
+	}
+
+	// Non-clear commands must not match
+	if r.isClearResetCommand("ls") ||
+		r.isClearResetCommand("echo hi") ||
+		r.isClearResetCommand("tput cols") ||
+		r.isClearResetCommand("tput") {
+		t.Error("non-clearing commands must not match")
+	}
+
+	// tput clear must be treated as a core clearer (not just "tput")
+	if !r.isClearResetCommand("tput clear") {
+		t.Error("tput clear must be recognized as a mandatory clearer")
+	}
+}
+
+func TestFlushAfterClearResetsHistory(t *testing.T) {
+	r := &Recorder{
+		recent: make([]*Window, 0),
+		Current: &RecordingWindow{
+			Buffer: &bytes.Buffer{},
+		},
+	}
+
+	// Seed some history
+	r.recent = append(r.recent, &Window{Command: "secret-echo", HasSecret: true})
+	r.pendingCommand = "clear"
+
+	// Simulate the flush that would happen for the "clear" command
+	// (we call the internal path after manually setting up a window)
+	r.Current.mu.Lock()
+	r.Current.Buffer.Write([]byte("screen cleared\n"))
+	r.Current.mu.Unlock()
+
+	data, err := r.FlushCurrentWindow()
+	if err != nil {
+		t.Fatalf("flush failed: %v", err)
+	}
+	_ = data
+
+	// Because the flushed command was "clear", recent must have been reset to nil
+	if len(r.recent) != 0 {
+		t.Errorf("expected protected history to be cleared after 'clear' command, got %d windows", len(r.recent))
+	}
+}
+
 

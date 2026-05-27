@@ -253,6 +253,8 @@ All previous invariants remain in force. The following are especially relevant t
 
 ## 9. The `blastradius clear` Rebuild Engine
 
+> **Implementation Note (post-v1)**: The public `blastradius clear` CLI command was removed (it had become a documentation stub pointing at `blastradius redact`). The four core clearing commands (`clear`, `reset`, `tput clear`, `tput reset`, including with arguments and `tput [options] <cap>` forms) now automatically reset protected-mode recorder history inside the Go PTY recorder on flush. `clear_reset_commands` is additive only; the core four cannot be disabled via config.
+
 This is the single most important function in Phase 4.
 
 **Responsibilities**:
@@ -337,7 +339,10 @@ detection:
   min_candidate_length: 12
   aggressive_unknown: false
 
-clear_reset_commands: ["clear", "reset", "tput reset"]
+clear_reset_commands: []
+# Note: The four core commands (clear, reset, tput clear, tput reset)
+# are now mandatory inside the recorder and cannot be disabled.
+# This list is only for additional user-defined clearing commands.
 ```
 
 ---

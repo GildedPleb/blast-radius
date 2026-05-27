@@ -158,6 +158,15 @@ func (r *Recorder) FlushCurrentWindow() ([]byte, error) {
 	}
 	r.recent = append(r.recent, win)
 
+	// If the just-flushed command was a terminal clear/reset (per the user's
+	// clear_reset_commands policy), drop the entire protected history (including
+	// the clearer itself). Future `redact` replays will start from a clean slate,
+	// exactly as the visual terminal was cleared.
+	if r.isClearResetCommand(win.Command) {
+		r.recent = nil
+		r.pendingCommand = ""
+	}
+
 	// Live re-read of history_length on every flush
 	if cfg, _, err := config.Load(); err == nil && cfg.Redaction.HistoryLength > 0 {
 		r.historyLength = cfg.Redaction.HistoryLength
@@ -214,6 +223,94 @@ func (r *Recorder) ResetHistory() {
 	r.recent = nil
 	r.pendingCommand = ""
 	r.Current = nil
+}
+
+// isClearResetCommand returns true if the given command line matches one of the
+// commands that should trigger a protected-mode history reset.
+//
+// The four core commands (clear, reset, tput clear, tput reset) are mandatory.
+// A user cannot disable history reset for these by configuring
+// redaction.clear_reset_commands — their list is only ever appended to the core set.
+//
+// Matching is token-based and argument-aware. It supports the common forms:
+//   - "clear" matches "clear", "clear -x", "clear --quiet"
+//   - "tput clear" matches "tput clear", "tput clear -T xterm-256color"
+//   - "tput -T xterm clear", "tput --quiet reset", "tput -T foo clear -x"
+//   - Same rules apply to "reset" / "tput reset" and any user-added commands.
+func (r *Recorder) isClearResetCommand(cmd string) bool {
+	c := strings.TrimSpace(cmd)
+	if c == "" {
+		return false
+	}
+
+	// These four are non-removable. The user may only add more commands.
+	core := []string{"clear", "reset", "tput clear", "tput reset"}
+
+	// User's configured list (if any) is appended only.
+	userList := []string{}
+	if cfg, _, err := config.Load(); err == nil && len(cfg.Redaction.ClearResetCommands) > 0 {
+		userList = cfg.Redaction.ClearResetCommands
+	}
+
+	// Build final list with deduplication (core entries are guaranteed first).
+	seen := make(map[string]bool, len(core)+len(userList))
+	list := make([]string, 0, len(core)+len(userList))
+	for _, e := range append(core, userList...) {
+		e = strings.TrimSpace(e)
+		if e != "" && !seen[e] {
+			seen[e] = true
+			list = append(list, e)
+		}
+	}
+
+	inputFields := strings.Fields(c)
+	if len(inputFields) == 0 {
+		return false
+	}
+
+	for _, entry := range list {
+		entryFields := strings.Fields(entry)
+		if len(entryFields) == 0 {
+			continue
+		}
+		// Input must be at least as long as the entry (to support arguments)
+		if len(inputFields) < len(entryFields) {
+			continue
+		}
+
+		// Check that the leading tokens match exactly.
+		match := true
+		for i := range entryFields {
+			if inputFields[i] != entryFields[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+
+		// Special case for any "tput <cap>" style entry (core or user-added).
+		// This supports the common `tput [options] <cap>` form:
+		//   tput -T xterm clear
+		//   tput --quiet reset
+		//   tput -T screen-256color clear -x
+		if len(entryFields) >= 2 && entryFields[0] == "tput" {
+			cap := entryFields[1]
+			// Find the first "tput" token, then look for the capability after it.
+			for i, tok := range inputFields {
+				if tok == "tput" {
+					for j := i + 1; j < len(inputFields); j++ {
+						if inputFields[j] == cap {
+							return true
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (r *Recorder) TriggerShutdown() {

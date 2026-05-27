@@ -4,7 +4,9 @@
 **Date:** 2026-06 (post CLI refactor)  
 
 > This plan was fully implemented. See `bug.md` for resolution summary and code for the actual realization of Phases A–E. All tests, invariants, and UX goals were met.
-**Related:** [bug.md](../bug.md) (the documented limitation), [docs/CLI_REFACTOR_DESIGN.md](CLI_REFACTOR_DESIGN.md), [docs/PHASE4_DESIGN.md](PHASE4_DESIGN.md), [docs/CURRENT_STATE.md](CURRENT_STATE.md)  
+**Related:** [bug.md](../bug.md) (the documented limitation), [docs/CLI_REFACTOR_DESIGN.md](CLI_REFACTOR_DESIGN.md), [docs/PHASE4_DESIGN.md](PHASE4_DESIGN.md), [docs/CURRENT_STATE.md](CURRENT_STATE.md)
+
+> **Note on superseded items**: Some tasks in this plan (e.g. "Update `clear.go` help / `RunClear` documentation") were superseded. The `blastradius clear` command was later removed entirely as irrelevant. The `clear_reset_commands` list is now additive only; core clear/reset behavior (including automatic protected history reset) is enforced inside the recorder.  
 **Goal:** Deliver first-class `blastradius redact [N]` (and automatic future-policy support) without relaxing any security, memory, or reliability invariants.
 
 ---

@@ -101,7 +101,7 @@ func DefaultConfig() *Config {
 			ShowRebuildEvidence: true,
 			RedactionMode:       "replace",
 			CustomReplacement:   "[REDACTED]",
-			ClearResetCommands:  []string{"clear", "reset", "tput reset"},
+			ClearResetCommands:  []string{},
 			WarningPersist:      1,
 		},
 	}
