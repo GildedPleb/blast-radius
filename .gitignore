@@ -1,5 +1,6 @@
-# Binaries
-blastradius
+# Binaries (only the built binary in the project root, not source directories)
+# Anchored with leading / so that cmd/blastradius/ source directory is not ignored.
+/blastradius
 *.exe
 *.exe~
 *.dll
