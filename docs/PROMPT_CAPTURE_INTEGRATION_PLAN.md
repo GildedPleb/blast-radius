@@ -1,35 +1,52 @@
-# Prompt Capture Integration Plan – Driving the Recorder from Outer Zsh
+# Prompt Capture Integration Plan – Making the Recorder's PTY Capture Real User Sessions
 
-**Status:** Design Phase  
+**Status:** Design Phase (Revised)  
 **Date:** 2026  
 **Related Documents:**
-- `docs/CLI_REFACTOR_DESIGN.md` (the "largest remaining item" explicitly called out)
+- `docs/CLI_REFACTOR_DESIGN.md`
 - `docs/PHASE4_DESIGN.md`
 - `docs/REDACT_N_PLAN.md`
 - `zsh/blastradius.zsh` (current placeholder `precmd`/`preexec`)
 
 ---
 
+**CRITICAL: THIS PLAN HAS BEEN REVISED BECAUSE THE PREVIOUS VERSION WAS WRONG.**
+
+The previous version recommended treating the recorder primarily as a state machine driven from the outer shell via hooks, with the PTY being secondary. 
+
+**That approach is rejected.**
+
+The entire reason this system exists is to capture the user's actual terminal session — both the commands typed **and the full output that appeared on screen** — so that `blastradius redact` can later produce a redacted reconstruction of what the user actually saw. 
+
+If an implementation only captures the commands the user typed and does not capture the output those commands produced, **it is a failure**. Full stop. "Command only" mode is not an acceptable MVP. It does not deliver the value proposition. 
+
+`script(1)` proves the model works: create a PTY, run the user's shell inside it, and record everything that flows through that PTY. We already have exactly that machinery in `recorder.NewRecorder()`. The job is to make it actually own the user's real interactive session instead of sitting idle in the background.
+
+---
+
 ## 1. Executive Summary & Goal
 
-The single largest piece of work remaining after the CLI refactor is to make **protected mode actually capture the user's real interactive session**.
+**The non-negotiable goal of this entire project is high-fidelity capture of the user's real terminal session (commands + output) for later redacted replay.**
 
 Currently:
-- `blastradius protection start` launches a recorder process with its own idle inner PTY zsh.
-- The recorder exposes a clean control protocol (`NEW_WINDOW`, `FLUSH_WINDOW`, `RESET_HISTORY`, `REPLAY_REDACTED`, ...).
-- `blastradius redact` and `status --json` work against this recorder.
-- However, **no actual user commands or output ever reach the recorder** because the outer interactive Zsh (where the user lives) does not drive the protocol on prompt boundaries.
+- `blastradius protection start` starts a recorder that creates a perfectly good PTY + inner zsh and has a `captureLoop` that can see everything written to that PTY.
+- That PTY is completely disconnected from the user's actual terminal.
+- The user's real commands and, more importantly, the **real output** those commands produced never enter the recorder.
+- `blastradius redact` therefore has nothing useful to replay.
 
-**Goal**: When a user runs `blastradius protection start` inside their normal shell and then runs normal commands, the recorder should receive:
-- The exact command the user typed (via `NEW_WINDOW`)
-- The output produced by that command (via `FLUSH_WINDOW`)
-- Automatic `RESET_HISTORY` on clear/reset commands
-- So that a subsequent `blastradius redact` produces a useful redacted rebuild of the actual session the user saw.
+**Goal (non-negotiable)**: After `blastradius protection start`, when the user runs normal commands in their interactive shell, the recorder must capture:
+- The exact command the user typed.
+- The **actual output** that appeared on their terminal as a result of that command (including from external binaries, pipes, scripts, etc.).
+- Automatic `RESET_HISTORY` behavior on clear/reset commands.
 
-This must be done while preserving the post-refactor invariants:
-- No `BR_PROTECTED` / `BR_RECORDER_SOCKET` leakage into child processes.
-- The `blastradius` binary remains the primary human + status interface.
-- High-frequency prompt hooks must be cheap (direct socket access is acceptable for capture; everything else goes through the CLI).
+Only then can `blastradius redact` produce a redacted version of the actual session the user experienced.
+
+**Failure condition**: Any implementation that only captures command strings while leaving output as empty or placeholder is a failure. It does not solve the problem this system was built to solve. "We'll add output later" is not acceptable. Output capture is the core requirement, not a stretch goal.
+
+Post-refactor invariants (preservation of these is desirable but secondary to output capture fidelity):
+- No `BR_PROTECTED` / `BR_RECORDER_SOCKET` leakage into child processes where possible.
+- The `blastradius` binary remains the primary interface.
+- The experience must remain usable.
 
 ---
 
@@ -61,139 +78,123 @@ From comments in the current `zsh/blastradius.zsh` and earlier designs:
 
 ---
 
-## 3. Recommended Approach (Pragmatic Path)
+## 3. Recommended Approach (Corrected)
 
-**Do not** attempt to make the user's existing interactive shell "teleport" into the recorder's PTY at runtime. This is extremely difficult, terminal-emulator dependent, and violates the "attach to whatever shell the user is already in" requirement.
+**The recorder's PTY is the correct capture mechanism.** It was built for exactly this purpose. `script(1)` demonstrates the model: create a PTY, spawn a shell on it, and everything the user types and everything the commands emit flows through that PTY and can be recorded.
 
-**Recommended Model**:
+The previous plan's recommendation to treat the recorder as "primarily a stateful engine driven from the outer Zsh" and to avoid putting the user inside the recorder's PTY was a mistake. It leads to fragile, incomplete output capture.
 
-Treat the **recorder primarily as a stateful redaction + replay engine**, not as a passive PTY sniffer for the main user shell.
+**Correct Model**:
 
-- The **outer interactive Zsh** (the one the human is typing in) becomes the authoritative source of commands and output for protected sessions.
-- On prompt boundaries it notifies the recorder (via the already-computed TTY-derived Unix socket) using the existing control protocol (with small, targeted extensions if needed).
-- The recorder's internal PTY + `captureLoop` is kept for:
-  - Future "launch a fully isolated recorded shell" use case (`blastradius protection exec` or similar).
-  - Backward compatibility / debugging.
-  - But it is **not** the primary data path for normal `protection start` usage inside an existing shell.
+When protection is active, the user's interactive session must produce output that flows through the recorder's PTY (or an equivalent capture path that delivers equivalent fidelity).
 
-This aligns with the post-CLI-refactor philosophy: the outer Zsh is thin but **not** brain-dead for the one thing it must do well (prompt-boundary observation).
+Two viable paths exist. They must be evaluated against the non-negotiable requirement of real output capture:
 
-### 3.1 Key Technical Decisions (to be confirmed or adjusted)
+**Path A (Preferred if achievable)**: Make `blastradius protection start` cause the user's real interactive shell to run inside the recorder's PTY.
+- This is the `script`-like model.
+- The `captureLoop` sees the actual bytes the user produced and received.
+- `NEW_WINDOW` / `FLUSH_WINDOW` can still be used for logical windowing and clear/reset handling, but the raw data comes from the PTY.
+- This delivers the highest fidelity.
 
-1. **Output Delivery on Flush**
-   - Preferred: Extend the protocol so the caller can supply the observed output when calling `FLUSH_WINDOW`.
-     - Example: `FLUSH_WINDOW <length>\n<raw bytes>` or a new `RECORD_OUTPUT <data>` followed by `FLUSH_WINDOW`.
-   - Alternative: Keep `FLUSH_WINDOW` parameter-less and have the Zsh send output via a separate channel. Less clean.
+**Path B (Fallback)**: The outer Zsh remains the user's shell, and high-quality output capture is achieved through other means (wrappers, redefinition of output builtins + side channels, `zsh/zpty` for command execution, etc.) that still feed faithful output into the recorder.
 
-2. **Direct Socket vs. CLI Passthrough for Hooks**
-   - High-frequency calls (`preexec`/`precmd` on every command) **must** use direct Unix socket access from Zsh (`zsocket` module or `socat`/`nc` one-shot).
-   - We explicitly document this as the narrow, accepted exception (already done in the current zsh file).
-   - The CLI binary is used for `protection start/stop`, `redact`, `status --json`, and any human-facing operations.
+**Path A is strongly preferred** because it is the same mechanism that already works in `script` and that the PTY code was written to support. Path B should only be chosen if Path A proves impossible or unacceptably destructive to the user experience.
 
-3. **Detecting "Protected Mode Active" from Zsh Without Env Vars**
-   - Use a lightweight cache (file or variable with short TTL) populated from `blastradius status --json`.
-   - Or simply attempt the socket connection and fail fast if the recorder isn't there for this TTY.
-   - Goal: zero leakage of protected-mode state into `printenv`, child processes, etc.
+The "do not teleport the user into the PTY" guidance from the previous version of this plan is hereby **withdrawn**.
 
-4. **Command vs. Full Output Capture (MVP slicing)**
-   - MVP can start with reliable **command capture** + placeholder output. This already gives value for history hygiene and some redaction use cases.
-   - Full faithful output replay is the stretch goal that makes `redact` "magical".
+### 3.1 Non-Negotiable Requirements
+
+1. **Output must be captured.** If `printenv | grep SECRET` runs under protection and the secret appears in the output, `blastradius redact` must be able to show a redacted version of that output. Command-only capture is not sufficient.
+2. The recorder must see the real bytes that went to the user's terminal, not a best-effort reconstruction from the outer shell.
+3. The solution must work for normal developer workflows (pipelines, external tools like `aws`, `curl`, `python`, `cat`, interactive tools where practical, etc.).
+4. "We'll capture output later" or "command capture is a good start" are not acceptable positions. Output capture is the primary deliverable.
+
+### 3.2 Key Technical Decisions
+
+1. **PTY as Primary Capture Vehicle**
+   - The existing `NewRecorder()` PTY + `captureLoop` should be the main source of truth for what the user saw.
+   - The control protocol (`NEW_WINDOW`, `FLUSH_WINDOW`, etc.) is still valuable for logical session structure and clear/reset handling, but raw data should come from the PTY where possible.
+
+2. **Process Model on `protection start`**
+   - The central question is no longer "how do we make the outer shell feed data."
+   - The central question is: "How do we make the user's interactive experience happen inside (or through) the recorder's PTY without making the tool unusable?"
+
+3. **"Attach to existing shell" vs. Fidelity**
+   - The desire to never replace or wrap the user's current shell process must be subordinate to the requirement to capture real output.
+   - If perfect "zero change to process model" is incompatible with faithful output capture, the process model must change.
+
+4. **No reliance on external `script`**
+   - We will not shell out to or depend on the system's `script` command. We have our own PTY machinery for a reason. We must own the capture path.
 
 ---
 
 ## 4. Phased Implementation Plan
 
-### Phase 0 – Protocol & Recorder Surface Hardening (Foundation)
+### Phase 0 – Make the PTY the Actual Capture Source (Foundation)
 
 **Objectives**
-- Make the control protocol friendly to an external driver that supplies output.
-- Ensure the recorder can operate in "externally driven" mode vs. "PTY driven" mode cleanly.
+- Stop launching an idle, disconnected PTY on `protection start`.
+- Make the recorder's PTY the place where the user's real session actually executes (or the primary source of captured data).
+- The `captureLoop` must see real user commands and real command output.
 
 **Tasks**
-- Add support for supplying output data with `FLUSH_WINDOW` (or introduce `RECORD_LINES` / `FLUSH_WINDOW` sequence).
-  - Update `FlushWindowHandler` and `FlushCurrentWindow` to accept optional payload.
-  - Keep backward compatibility for any existing direct callers.
-- Add a `RECORD_COMMAND_OUTPUT` or similar if separating concerns is cleaner.
-- Ensure `RESET_HISTORY` remains idempotent and safe to call from hooks.
-- Add a recorder mode / flag or detection so that when windows are driven externally, the internal PTY captureLoop can be a no-op or disabled for that session.
-- Add unit tests that drive the recorder purely through the control protocol (no PTY involved).
-- Update `RecorderContext` interface if needed (probably not).
+- Change the behavior of `blastradius protection start` (and the recorder startup path) so that the PTY created by `NewRecorder()` is connected to the user's interactive experience.
+- Decide between:
+  - Exec/replace model: The current shell is replaced by one whose controlling terminal is the recorder's PTY.
+  - Subshell/launch model: `protection start` launches a new protected zsh inside the recorder PTY that the user then works inside.
+- Ensure that when the user types commands inside this PTY-backed shell, the `captureLoop` naturally receives the output (this should "just work" once the process model is correct).
+- Keep the control socket for `REPLAY_REDACTED`, `RESET_HISTORY`, status, etc.
+- The logical windowing protocol (`NEW_WINDOW` / `FLUSH_WINDOW`) can still be used (driven either from the inner shell's hooks or from the recorder itself) for clear/reset detection and window boundaries.
+- Update `protection stop` to cleanly terminate the protected session.
 
 **Deliverables**
-- Protocol documented in a small `docs/RECORDER_PROTOCOL.md` or in the recorder package.
-- Recorder works correctly when driven 100% from the outside.
+- Running `blastradius protection start` results in the user's subsequent commands and their output actually being captured by the recorder's PTY.
+- `blastradius redact` after normal work produces a redacted replay containing real output, not just commands.
 
 **Risks**
-- Protocol churn. Mitigate by keeping the simple parameter-less forms working.
+- Process model / exec / controlling tty complexity.
+- UX differences from "just staying in my current shell."
 
 ---
 
-### Phase 1 – Minimal Zsh Hook Surface + Direct Socket Helper
+### Phase 1 – Zsh Integration as Supporting (Not Primary) Capture Layer
 
 **Objectives**
-- Give the outer Zsh the ability to talk to the recorder for its own TTY cheaply and reliably.
-- Implement the thinnest possible "am I protected for this TTY?" check.
+- Zsh hooks are useful for logical markers (`NEW_WINDOW`, clear/reset detection, `RESET_HISTORY` signaling) but are **not** the primary mechanism for delivering output bytes.
+- The real output must come from the PTY capture path.
 
 **Tasks**
-- In `zsh/blastradius.zsh`, implement a small internal function that:
-  - Computes (or caches) the TTY-derived recorder socket path using the same algorithm as Go (`getRecorderSocketPath` logic must be replicated or called via a fast CLI helper).
-  - Provides `_br_recorder_send <command> [payload]` using `zsocket` (preferred) or a fallback one-shot connector.
-- Add `blastradius_protection_status` (or rely on `status --json` with a fast path).
-- Implement skeleton `preexec` and `precmd` that:
-  - Check (cheaply) whether protection is active for this TTY.
-  - If yes: on `preexec` send `NEW_WINDOW $1` (or the full preexec args).
-  - On `precmd` send `FLUSH_WINDOW` (initially with no data or a marker).
-- Handle the case where the recorder socket disappears (protection was stopped externally) gracefully.
-- Add a config or env toggle (`BR_DISABLE_HOOKS` or similar, carefully) for debugging.
-
-**Important Sub-task**: Replicate or expose the TTY-to-socket hash algorithm so Zsh can compute the exact same path the Go side uses. This is critical for the "no env var" model.
+- Implement the thin Zsh layer for sending control commands (`NEW_WINDOW`, `RESET_HISTORY` when appropriate) over the TTY-derived socket.
+- This layer is now secondary — it provides structure and policy (clear commands, etc.), while the PTY provides the raw data.
+- Keep the "no env var leakage" and direct-socket (for control messages) discipline.
+- Document clearly that output fidelity comes from the PTY, not from these hooks.
 
 **Deliverables**
-- Zsh can successfully send `NEW_WINDOW` and `FLUSH_WINDOW` when protection is active.
-- No breakage for users who are not in protected mode.
-- Clear comments explaining the direct-socket exception.
+- Zsh can send the necessary control messages when protection is active.
+- It is obvious in the code and docs that these hooks are not responsible for output capture.
 
 ---
 
-### Phase 2 – Reliable Command + Output Capture in Zsh
+### Phase 2 – Deliver Faithful Output Capture via the PTY Path
 
-This is the hardest phase.
+This is the hardest and most important phase.
 
 **Objectives**
-- Capture the command the user actually typed (relatively easy via `preexec`).
-- Capture the output that appeared on the terminal as a result of that command (hard).
+- The user's real commands and the real output they produce must flow through the recorder's PTY when protection is active.
+- `blastradius redact` after normal work must be able to show redacted versions of actual command output, not just redacted command lines.
 
-**Tasks & Techniques to Evaluate**
+**Primary Focus**
+- Solve the process model problem so that the PTY created in `NewRecorder()` becomes the controlling terminal for the protected interactive session.
+- Once that is working, the `captureLoop` will naturally see the correct data. The problem largely reduces to "get the user inside the PTY" rather than "invent clever ways for the outer shell to ship bytes back."
 
-**Command Capture (easy)**
-- Use the `preexec` hook's arguments. Zsh provides the command in a very clean form here.
-
-**Output Capture Options** (need prototype + measurement):
-
-A. ** zle + POSTDISPLAY / temporary PS1 tricks**  
-   Limited; works better for short output.
-
-B. **Redefine `print`, `echo`, `printf` inside protected sessions** (with `unfunction` on exit).  
-   Surprisingly effective for many cases, but misses subprocess output and `cat` etc.
-
-C. **Use `script -q -f -` or `unbuffer -p`** as a lightweight wrapper when entering protection.  
-   The outer Zsh can detect this and adjust. Gives a clean stream that can be fed to the recorder.
-
-D. **Zsh `zsh/zpty` module** to create a controlled pty for the "work" the user does.  
-   Most powerful but also most complex and has its own edge cases.
-
-E. **Accept "command + exit status + duration" only** for v1, and treat output as "unknown" (redact still clears on `redact`, but cannot faithfully replay prior output).  
-   Honest degradation.
-
-F. **Send output as part of the next `NEW_WINDOW` or on `precmd` by reading the terminal scrollback** (very terminal dependent, fragile).
-
-**Recommended for the plan**: Prototype options B and C first (they have the best effort/reward ratio). Document the chosen technique(s) and their limitations clearly.
-
-Also implement automatic `RESET_HISTORY` when the flushed command matches the clear/reset policy (can be done in Zsh or let the recorder's existing `isClearResetCommand` logic catch it if we send the command name correctly).
+**Secondary / Supporting Work**
+- Use Zsh hooks inside the PTY-backed shell for `NEW_WINDOW`, clear/reset detection, and any logical markers.
+- Evaluate whether any of the old techniques (B, D, etc.) are still needed as supplements for edge cases.
+- Explicitly deprecate "command only" as an acceptable state.
 
 **Deliverables**
-- Working end-to-end: user types commands in a protected shell → `redact` shows a useful (even if imperfect) redacted reconstruction.
-- Clear documentation of capture fidelity and limitations.
+- End-to-end working system where `blastradius protection start` followed by normal work, followed by `blastradius redact`, produces a redacted reconstruction that includes the actual output the user saw (with secrets replaced).
+- Any implementation that only captures commands is rejected.
 
 ---
 
@@ -228,22 +229,20 @@ Also implement automatic `RESET_HISTORY` when the flushed command matches the cl
 
 ## 5. Critical Files & Components
 
-**Zsh side (primary new work)**
-- `zsh/blastradius.zsh` – the real implementation of the hooks + socket helper.
+**Recorder / PTY integration (highest priority)**
+- `recorder/recorder.go` — especially `NewRecorder()`, `captureLoop`, `RunControlServer`, and how protection start launches/attaches to it.
+- The process model around `blastradius protection start` (currently in `internal/cli/protection.go` and `internal/cli/recorder.go`).
 
-**Recorder / protocol side**
-- `recorder/recorder.go` (handleConn, FlushCurrentWindow, possibly new methods)
-- `recorder/handlers/flush_window.go` and related
-- Possibly a small protocol documentation file.
+**CLI / lifecycle**
+- `internal/cli/protection.go` — the actual behavior of `protection start` and `protection stop` is now the critical path.
+- How the recorder process is launched and whether the user's shell ends up connected to its PTY.
 
-**CLI side (thin support)**
-- Possibly new subcommands under `blastradius recorder` for debugging (`new-window`, `flush-window`, `reset-history`).
-- Or just document direct use of the socket for advanced users.
+**Zsh side (supporting)**
+- `zsh/blastradius.zsh` — now primarily for sending logical control messages (`NEW_WINDOW`, clear detection) rather than being the source of output data.
 
 **Tests & verification**
-- New recorder tests that are purely control-protocol driven.
-- Extremely thorough manual test matrix (different terminals, tmux, nested shells, long output, binary output, clear commands, etc.).
-- Possibly a small "record-and-replay" harness for automated testing of the Zsh hooks.
+- End-to-end manual test matrix is now the most important validation: real commands with real output, pipelines, external tools, `redact` showing redacted output.
+- Unit tests around PTY attachment and capture fidelity.
 
 ---
 
@@ -251,48 +250,65 @@ Also implement automatic `RESET_HISTORY` when the flushed command matches the cl
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| Unreliable / incomplete output capture | High | Be honest in docs and UI. Provide "command-only" mode as a safe baseline. Multiple capture strategies with fallback. |
-| Prompt latency / sluggish shell | Medium-High | Direct socket only (no CLI binary per prompt). Measure and optimize. Optional disable. |
-| Terminal / emulator differences | High | Heavy manual testing. Accept that some fancy terminals (iTerm2 image protocol, etc.) may not replay perfectly. |
-| Breaking users' existing precmd/preexec | Medium | Use `add-zsh-hook` if possible, or very clear load-order documentation. Provide escape hatches. |
-| Protocol instability during development | Medium | Version the protocol messages early or keep simple text forms stable. |
-| State drift between what the user saw and what the recorder thinks happened | High | The "source of truth" must be the outer Zsh's observation of its own output. |
+| Failure to capture real command output (only commands are captured) | **Critical / Project Failure** | This is not acceptable. The PTY must be the source of truth for output. Any design that cannot deliver this must be rejected or fundamentally reworked. |
+| Inability to give the user a usable interactive shell while capturing through the PTY | High | Evaluate exec vs. subshell launch models. Accept some UX difference if it is the price of correct capture. |
+| Terminal / emulator / job control differences when running inside the recorder PTY | High | Heavy manual testing across common environments (Terminal.app, iTerm2, VS Code, tmux, ssh). |
+| Breaking users' existing shell customizations | Medium | Document the supported model clearly. Provide escape hatches and a way to run an unprotected shell. |
+| State drift between what the user saw and what was captured | High | The PTY is the source of truth by construction. Do not layer fragile reconstruction on top of it. |
 
 ---
 
-## 7. Success Criteria
+## 7. Success Criteria (Pass/Fail)
 
-1. A user can do:
+**Mandatory (implementation is a failure without these):**
+
+1. A user runs:
    ```zsh
    blastradius protection start
    printenv | grep SECRET
-   some-other-command
+   aws sts get-caller-identity
    blastradius redact 0
    ```
-   and see a redacted version of the actual session (with secrets replaced) instead of an empty or stale replay.
+   and `redact` produces output that includes redacted versions of the **actual command output** (not just the commands the user typed). Secrets that appeared in command output must be replaced in the replay.
 
-2. `blastradius protection stop` cleanly stops capture.
-3. No environment variables are leaked.
-4. The experience feels "it just works" for common developer commands.
-5. The implementation is maintainable and the limitations are clearly documented.
+2. Normal pipelines, external binaries, and common developer commands have their output captured with high fidelity.
+
+**Strongly desired:**
+
+3. `blastradius protection stop` cleanly ends the protected session.
+4. Minimal or no leakage of protected-mode state into the environment / child processes.
+5. The experience is usable for real work (even if the process model changes somewhat compared to an unprotected shell).
+6. Limitations are clearly and honestly documented. "Output is not captured" is not an acceptable documented limitation for the primary use case.
+
+## 7.1 Definition of Done / Exit Criteria (Explicit)
+
+The work is **not complete** until all of the following are true:
+
+- A user can run `blastradius protection start`, execute normal commands that produce output (including external programs and pipelines), then run `blastradius redact`, and see the command output present in the replay (with secrets redacted).
+- The captured data for output comes primarily from the recorder's PTY `captureLoop`, not from hook-based reconstruction.
+- Command-only capture is not the shipped behavior.
+- The above works across the common environments the team actually uses.
 
 ---
 
 ## 8. Open Questions (to resolve before or during implementation)
 
-1. Exact wire format for supplying output on flush (length-prefixed binary? base64? separate messages?).
-2. Which output capture technique in Zsh gives the best fidelity/complexity ratio for v1?
-3. Should we still start the inner PTY at all on `protection start`, or only when using an explicit "exec" mode?
-4. How do we handle very large output in a single window (memory + protocol limits)?
-5. Do we want to expose a "raw passthrough" mode for power users who want to feed arbitrary data?
-6. Strategy for supporting bash/fish later (or explicitly scoping to Zsh only for this feature).
+1. **Process model**: Exec/replace the current shell into the recorder PTY, or launch a new protected subshell inside it? What is the least destructive usable UX?
+2. How do we cleanly exit protection and return the user to a normal shell (`protection stop`)?
+3. How do we handle job control, signals, terminal resize, and background jobs when the interactive shell is inside our PTY?
+4. How do we support common environments (tmux, screen, iTerm2, VS Code integrated terminal, SSH sessions) without losing capture or breaking usability?
+5. Is any hook-driven supplementation still required inside the PTY-backed shell, or does the PTY + logical window markers from the inner shell suffice?
+6. How do we handle very large output in a single window (memory + protocol limits)?
+7. Strategy for supporting bash/fish later.
 
 ---
 
 ## 9. Why This Is Worth Doing
 
-This is the piece that makes the entire Pillar 3 (redaction) story real for everyday interactive use, rather than a manual "start recorder + somehow drive it" experience. Completing it fulfills the original promise of the Phase 4 / redaction work in the context of the cleaner post-refactor architecture.
+The only reason this entire system (daemon, recorder, redaction engine, `blastradius redact`, etc.) exists is to let people work normally and later produce a redacted version of what actually appeared on their terminal.
 
-Once this is done, the system has a credible "enter protected mode, work normally, later scrub your terminal history" workflow.
+If we cannot capture real output, the feature is a lie. The PTY we already wrote is the correct tool to solve this. The job now is to stop launching it as an idle background process and make it the actual environment the user works inside when they say `protection start`.
+
+Anything less is not delivering the product.
 
 **End of Plan**
