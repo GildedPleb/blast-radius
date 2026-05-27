@@ -96,20 +96,59 @@ func applyRedaction(raw []byte, spans []SecretSpan, mode, custom string, preserv
 	return result
 }
 
-func (r *Recorder) handleReplayRedacted(w io.Writer, mode, custom string, preserveColors bool) {
+func (r *Recorder) handleReplayRedacted(w io.Writer, requestedRecent int, mode, custom string, preserveColors bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	logging.RecorderPrintln("handleReplayRedacted: starting redacted replay")
 
-	for _, win := range r.recent {
+	// Compute effective N: never expose more raw than the current buffer allows,
+	// and never more than available history. This upholds the invariant.
+	effectiveN := requestedRecent
+	buf := r.getCurrentBuffer()
+	if effectiveN > buf {
+		effectiveN = buf
+	}
+	if effectiveN > len(r.recent) {
+		effectiveN = len(r.recent)
+	}
+
+	for i, win := range r.recent {
+		ageFromEnd := len(r.recent) - 1 - i
+		isWithinN := ageFromEnd < effectiveN
+		hasRaw := len(win.Lines) > 0
+
+		if isWithinN && hasRaw {
+			// Keep last N (capped by buffer) fully original/raw.
+			// remove_cmd and other redaction modes do not affect these recent windows.
+			if win.Command != "" {
+				w.Write(append([]byte(win.Command), '\n'))
+			}
+			for _, ln := range win.Lines {
+				w.Write(append(append([]byte(nil), ln.Raw...), '\n'))
+			}
+			continue
+		}
+
+		// Older than effective N (or no raw left): emit redacted form.
+		// remove_cmd applies here.
 		if mode == "remove_cmd" && win.HasSecret {
 			continue
 		}
 
+		if len(win.RedactedLines) > 0 {
+			if win.RedactedCommand != "" {
+				w.Write(append([]byte(win.RedactedCommand), '\n'))
+			}
+			for _, rl := range win.RedactedLines {
+				w.Write(append([]byte(rl), '\n'))
+			}
+			continue
+		}
+
+		// Fallback for unsealed older windows (e.g. just after buffer change).
 		if win.Command != "" {
-			if mode == "remove_cmd" && win.HasSecret {
-			} else if len(findSecretSpans(win.Command)) > 0 {
+			if len(findSecretSpans(win.Command)) > 0 {
 				out := applyRedaction([]byte(win.Command), findSecretSpans(win.Command), mode, custom, preserveColors)
 				if out != nil {
 					w.Write(append(out, '\n'))
@@ -118,7 +157,6 @@ func (r *Recorder) handleReplayRedacted(w io.Writer, mode, custom string, preser
 				w.Write(append([]byte(win.Command), '\n'))
 			}
 		}
-
 		for _, ln := range win.Lines {
 			if len(ln.Secrets) == 0 {
 				w.Write(append(append([]byte(nil), ln.Raw...), '\n'))

@@ -32,4 +32,10 @@ type Window struct {
 	Command   string
 	Lines     []Line
 	HasSecret bool // true if command or any line matched mightContainSecret
+
+	// Sealed redacted form for windows that have aged out of the current `buffer` value.
+	// When RedactedLines is non-empty, this window no longer contains any secret plaintext
+	// in Lines (which will be nil after seal).
+	RedactedCommand string   // redacted command (or original if no secret)
+	RedactedLines   []string // always safe to emit; produced at seal time with default mode
 }

@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // getDaemonLogPath returns the canonical location for the daemon log file.
@@ -46,5 +48,27 @@ func startDaemonInBackground() error {
 	// Don't wait for it
 	go cmd.Wait()
 
+	return nil
+}
+
+// getRecorderSocketPath returns deterministic per-terminal recorder socket using TTY hash.
+func getRecorderSocketPath() string {
+	tty := os.Getenv("TTY")
+	if tty == "" {
+		tty = "/dev/tty"
+	}
+	// sanitize and hash
+	safe := strings.ReplaceAll(tty, "/", "_")
+	h := sha256.Sum256([]byte(safe))
+	home, _ := osUserHomeDir()
+	return filepath.Join(home, ".local", "state", "blastradius", fmt.Sprintf("recorder-%x.sock", h[:8]))
+}
+
+// ProtectionModeGuard returns error if no recorder socket for current TTY.
+func ProtectionModeGuard() error {
+	path := getRecorderSocketPath()
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return fmt.Errorf("protection mode not active for this terminal (run: blastradius protection start)")
+	}
 	return nil
 }

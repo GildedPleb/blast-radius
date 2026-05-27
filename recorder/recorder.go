@@ -166,6 +166,12 @@ func (r *Recorder) FlushCurrentWindow() ([]byte, error) {
 		r.recent = r.recent[len(r.recent)-r.historyLength:]
 	}
 
+	// Enforce raw retention / sealing based on live buffer setting.
+	// This both implements the automatic redaction grace period and
+	// guarantees that plaintext secret material is bounded (never grows
+	// unbounded across a long protected session).
+	r.enforceBufferRetention()
+
 	r.Current = &RecordingWindow{
 		StartTime: time.Now(),
 		Buffer:    &bytes.Buffer{},
@@ -214,8 +220,8 @@ func (r *Recorder) TriggerShutdown() {
 	close(r.shutdown)
 }
 
-func (r *Recorder) ReplayRedacted(w io.Writer, mode, custom string, preserveColors bool) {
-	r.handleReplayRedacted(w, mode, custom, preserveColors)
+func (r *Recorder) ReplayRedacted(w io.Writer, requestedRecent int, mode, custom string, preserveColors bool) {
+	r.handleReplayRedacted(w, requestedRecent, mode, custom, preserveColors)
 }
 
 // RunControlServer starts a Unix socket for Zsh/CLI control (new-window, flush, stop).
@@ -284,10 +290,116 @@ func (r *Recorder) handleConn(conn net.Conn) {
 		h = handlers.ReplayRedactedHandler{}
 	case "RESET_HISTORY":
 		h = handlers.ResetHistoryHandler{}
+	case "RECORDER_STATUS":
+		// Lightweight status for CLI visibility of retention (buffer + raw window count).
+		// Responds with a single JSON line (no OK sentinel needed for this query).
+		buf, raw, tot := r.recorderStats()
+		fmt.Fprintf(conn, `{"active":true,"buffer":%d,"current_raw_windows":%d,"total_windows":%d,"history_length":%d}`+"\n", buf, raw, tot, r.historyLength)
+		return
 	default:
 		h = handlers.UnknownHandler{}
 	}
 
 	h.Handle(payload, r, conn)
+}
+
+func (r *Recorder) recorderStats() (buffer, currentRawWindows, totalWindows int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	buffer = r.getCurrentBuffer()
+	for _, w := range r.recent {
+		if len(w.Lines) > 0 {
+			currentRawWindows++
+		}
+	}
+	totalWindows = len(r.recent)
+	return
+}
+
+// --- Buffer retention / sealing (unified raw retention + automatic redaction grace) ---
+
+// getCurrentBuffer returns the live `redaction.buffer` value (default 1).
+// This single value controls both auto redaction timing and how many recent
+// windows retain full raw secret-containing bytes.
+func (r *Recorder) getCurrentBuffer() int {
+	if cfg, _, err := config.Load(); err == nil {
+		if cfg.Redaction.Buffer < 0 {
+			return 0
+		}
+		return cfg.Redaction.Buffer
+	}
+	return 1
+}
+
+// getDefaultRedactionMode and custom for use when sealing (mode at seal time).
+func (r *Recorder) getDefaultRedactionMode() string {
+	if cfg, _, err := config.Load(); err == nil && cfg.Redaction.RedactionMode != "" {
+		return cfg.Redaction.RedactionMode
+	}
+	return "replace"
+}
+
+func (r *Recorder) getDefaultCustomReplacement() string {
+	if cfg, _, err := config.Load(); err == nil && cfg.Redaction.CustomReplacement != "" {
+		return cfg.Redaction.CustomReplacement
+	}
+	return "[REDACTED]"
+}
+
+// sealWindow builds the safe redacted representation using the default mode
+// at seal time, then discards Lines (and thus all secret plaintext bytes).
+// HasSecret is retained for remove_cmd decisions. Idempotent.
+func (r *Recorder) sealWindow(w *Window) {
+	if len(w.RedactedLines) > 0 {
+		return // already sealed
+	}
+
+	mode := r.getDefaultRedactionMode()
+	custom := r.getDefaultCustomReplacement()
+
+	if w.Command != "" {
+		if spans := findSecretSpans(w.Command); len(spans) > 0 {
+			w.RedactedCommand = string(applyRedaction([]byte(w.Command), spans, mode, custom, true))
+		} else {
+			w.RedactedCommand = w.Command
+		}
+	}
+
+	for _, ln := range w.Lines {
+		if len(ln.Secrets) == 0 {
+			w.RedactedLines = append(w.RedactedLines, string(ln.Raw))
+		} else {
+			red := applyRedaction(ln.Raw, ln.Secrets, mode, custom, true)
+			w.RedactedLines = append(w.RedactedLines, string(red))
+		}
+	}
+
+	// Discard secret material - this is the key step for the invariant.
+	// The backing []byte for old Raw become unreachable and can be GC'd.
+	w.Lines = nil
+}
+
+// enforceBufferRetention seals (discards raw secret data from) any windows
+// that have aged past the current buffer value. Called after every flush
+// (and trim). With buffer=0 all completed windows are sealed on next flush.
+// With buffer=2 exactly the last 2 retain raw (if they had secrets).
+func (r *Recorder) enforceBufferRetention() {
+	buf := r.getCurrentBuffer()
+
+	if buf <= 0 {
+		// Aggressive: seal every completed window on the next flush.
+		for i := range r.recent {
+			r.sealWindow(r.recent[i])
+		}
+		return
+	}
+	if len(r.recent) <= buf {
+		return
+	}
+	// Seal windows that have aged past the buffer.
+	sealUpTo := len(r.recent) - buf
+	for i := 0; i < sealUpTo; i++ {
+		r.sealWindow(r.recent[i])
+	}
 }
 

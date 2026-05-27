@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -10,12 +11,19 @@ type ReplayRedactedHandler struct{}
 func (ReplayRedactedHandler) Name() string { return "REPLAY_REDACTED" }
 
 func (ReplayRedactedHandler) Handle(args string, r RecorderContext, w io.Writer) error {
+	requestedRecent := 0
 	mode := "replace"
 	custom := "[REDACTED]"
 	preserveColors := true
 
 	if args != "" {
-		parts := strings.SplitN(args, " ", 3)
+		parts := strings.SplitN(args, " ", 4)
+		if len(parts) > 0 && parts[0] != "" {
+			if n, err := strconv.Atoi(parts[0]); err == nil && n >= 0 {
+				requestedRecent = n
+				parts = parts[1:]
+			}
+		}
 		if len(parts) > 0 && parts[0] != "" {
 			mode = parts[0]
 		}
@@ -27,6 +35,6 @@ func (ReplayRedactedHandler) Handle(args string, r RecorderContext, w io.Writer)
 		}
 	}
 
-	r.ReplayRedacted(w, mode, custom, preserveColors)
+	r.ReplayRedacted(w, requestedRecent, mode, custom, preserveColors)
 	return nil
 }

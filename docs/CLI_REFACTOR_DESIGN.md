@@ -154,19 +154,22 @@ After careful review, the five phases are kept **separate** rather than combined
 
 ### 9.2 Detailed Phased Plan
 
-**Phase 0 – Design (Current State)**  
-- This design document is complete and approved.  
-- All architectural decisions, justifications, and constraints are captured.  
+**Phase 0 – Design (Current State)**
+
+- This design document is complete and approved.
+- All architectural decisions, justifications, and constraints are captured.
 - No code changes are made in this phase.
 
 **Phase 1 – Coordinator Skeleton, TTY Discovery & Protection Lifecycle**
 
-**Objectives**  
-- Establish the new coordinator as the single entry point.  
-- Implement TTY-derived per-terminal recorder discovery.  
+**Objectives**
+
+- Establish the new coordinator as the single entry point.
+- Implement TTY-derived per-terminal recorder discovery.
 - Implement the core protection mode lifecycle commands.
 
 **Detailed Tasks**
+
 - Create the new coordinator package structure under `cmd/blastradius`.
 - Implement deterministic TTY-to-socket path calculation (including hash or sanitization strategy).
 - Add `protection start` command:
@@ -183,23 +186,27 @@ After careful review, the five phases are kept **separate** rather than combined
 - Update help text and command registration for the new `protection` subcommand group.
 
 **Deliverables**
+
 - Working `blastradius protection start` and `protection stop` commands.
 - TTY discovery logic with tests.
 - Protection guard helper ready for reuse.
 - Updated CLI help output.
 
 **Risks & Mitigations**
+
 - TTY name variations across terminal emulators → Test on macOS Terminal, iTerm2, VS Code, and tmux.
 - Socket file cleanup on abrupt termination → Use signal handling and `defer` cleanup in recorder.
 
 **Phase 2 – Daemon Lifecycle, Unified Status & Redact Command**
 
-**Objectives**  
-- Move daemon lifecycle ownership into the coordinator.  
-- Create the single unified `status --json` command.  
+**Objectives**
+
+- Move daemon lifecycle ownership into the coordinator.
+- Create the single unified `status --json` command.
 - Implement the `redact` command with protection-mode guard.
 
 **Detailed Tasks**
+
 - Move `start`, `stop`, `halt`, and daemon-related status logic into the coordinator.
 - Ensure the coordinator never auto-starts the daemon (explicit user action only).
 - Design and implement the unified `status` command:
@@ -216,23 +223,27 @@ After careful review, the five phases are kept **separate** rather than combined
 - Update all existing daemon-related CLI tests to target the coordinator.
 
 **Deliverables**
+
 - Working `blastradius start/stop` for daemon.
 - Stable `blastradius status --json` containing global + protection state.
 - Working `blastradius redact` command (protection-mode only).
 - All daemon lifecycle tests passing under new coordinator.
 
 **Risks & Mitigations**
+
 - JSON schema changes breaking Zsh → Freeze the top-level keys early and document them.
 - Status command performance when recorder is slow to respond → Implement short timeouts with graceful degradation.
 
 **Phase 3 – Full Command Migration (Clean Break)**
 
-**Objectives**  
-- Move every remaining command into the coordinator.  
-- Remove the old dispatcher entirely.  
+**Objectives**
+
+- Move every remaining command into the coordinator.
+- Remove the old dispatcher entirely.
 - Apply protection-mode guards consistently.
 
 **Detailed Tasks**
+
 - Migrate all existing commands into the coordinator:
   - `duplicates`, `scrub-history`, `env`, `clipboard`, `logs`, `check-hash`, `clear`, `help`, etc.
 - Apply the protection-mode guard to any command that requires an active recorder session.
@@ -244,23 +255,25 @@ After careful review, the five phases are kept **separate** rather than combined
 - Delete or archive old dispatcher code.
 
 **Deliverables**
+
 - All user-facing commands working under the new coordinator.
 - Old dispatcher removed.
 - Protection-mode guards applied where required.
 - Full test suite passing.
 
 **Risks & Mitigations**
+
 - Large surface area of moved code → Migrate command-by-command with tests after each migration.
 - Inconsistent error behavior → Centralize error formatting and messaging helpers.
 
-**Phase 4 – Zsh Integration & Thin Broker**
+\*\*Phase 5
 
-**Objectives**  
-- Make Zsh call only the CLI binary.  
-- Remove all direct recorder socket usage and environment variable state from Zsh.  
+- Make Zsh call only the CLI binary.
+- Remove all direct recorder socket usage and environment variable state from Zsh.
 - Achieve the thinnest possible Zsh layer.
 
 **Detailed Tasks**
+
 - Update `zsh/blastradius.zsh`:
   - Replace all direct `zsocket` calls with calls to `blastradius status --json`, `blastradius redact`, etc.
   - Remove or deprecate `BR_PROTECTED`, `BR_SESSION_HAS_SECRETS`, and `BR_RECORDER_SOCKET` variables.
@@ -271,22 +284,26 @@ After careful review, the five phases are kept **separate** rather than combined
 - Update Zsh documentation and examples.
 
 **Deliverables**
+
 - Dramatically reduced Zsh layer (target: well under 100 lines focused purely on formatting).
 - All Zsh functionality working exclusively through the CLI binary.
 - No environment variable leakage of protected-mode state.
 
 **Risks & Mitigations**
+
 - Performance regression in prompt → Profile `status --json` calls and consider lightweight caching if needed.
 - Loss of functionality during transition → Maintain a feature-parity checklist for Zsh.
 
 **Phase 5 – Polish, Documentation & Final Validation**
 
-**Objectives**  
-- Ensure production readiness.  
-- Update all documentation.  
+**Objectives**
+
+- Ensure production readiness.
+- Update all documentation.
 - Perform final validation and cleanup.
 
 **Detailed Tasks**
+
 - Implement consistent, high-quality error messages for all protection-mode failures.
 - Ensure deterministic socket cleanup on `protection stop` and on recorder crash.
 - Run full test suite, linting (`go vet`, `golangci-lint`), and coverage checks.
@@ -297,12 +314,14 @@ After careful review, the five phases are kept **separate** rather than combined
 - Tag the release and update version information if applicable.
 
 **Deliverables**
+
 - Production-ready coordinator CLI.
 - Complete, up-to-date documentation.
 - All tests and linters passing.
 - User-facing migration guidance.
 
 **Risks & Mitigations**
+
 - Documentation drift → Treat documentation updates as first-class deliverables in this phase.
 - Edge-case terminal behavior → Allocate explicit testing time for uncommon environments (remote SSH, containerized shells, etc.).
 

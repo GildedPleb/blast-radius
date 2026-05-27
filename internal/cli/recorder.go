@@ -27,7 +27,12 @@ func RunRecorder(args []string) {
 			osExit(1)
 		}
 		rec.StartNewWindow()
-		socket := os.Getenv("BR_RECORDER_SOCKET")
+		socket := ""
+		if len(args) > 1 {
+			socket = args[1]
+		} else {
+			socket = os.Getenv("BR_RECORDER_SOCKET")
+		}
 		if socket == "" {
 			socket = filepath.Join(os.TempDir(), "br-recorder.sock")
 		}

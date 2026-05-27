@@ -14,6 +14,7 @@ type fakeContext struct {
 	replayCustom        string
 	replayPreserve      bool
 	replayWriter        io.Writer
+	replayRequested     int
 	resetCalled         bool
 }
 
@@ -38,11 +39,12 @@ func (f *fakeContext) TriggerShutdown() {
 	f.shutdownCalled = true
 }
 
-func (f *fakeContext) ReplayRedacted(w io.Writer, mode, custom string, preserve bool) {
+func (f *fakeContext) ReplayRedacted(w io.Writer, requestedRecent int, mode, custom string, preserve bool) {
 	f.replayMode = mode
 	f.replayCustom = custom
 	f.replayPreserve = preserve
 	f.replayWriter = w
+	f.replayRequested = requestedRecent // record for assertions if needed
 	if w != nil {
 		w.Write([]byte("REDACTED_LINE\n"))
 	}

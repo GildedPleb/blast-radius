@@ -16,11 +16,13 @@ const (
 
 // Overridable for testing (DI via var assignment)
 var (
-	configLoad          = config.Load
-	netDialTimeout      = net.DialTimeout
-	execCommand         = exec.Command
-	osReadFile          = os.ReadFile
-	osUserHomeDir       = os.UserHomeDir
-	sendDaemonCommandFn = realSendDaemonCommand
-	osExit              = os.Exit
+	configLoad            = config.Load
+	netDialTimeout        = net.DialTimeout
+	execCommand           = exec.Command
+	osReadFile            = os.ReadFile
+	osUserHomeDir         = os.UserHomeDir
+	sendDaemonCommandFn       = realSendDaemonCommand
+	sendRecorderCommandFn     = realSendRecorderCommand
+	sendRecorderReplayRequestFn = realSendRecorderReplayRequest
+	osExit                    = os.Exit
 )

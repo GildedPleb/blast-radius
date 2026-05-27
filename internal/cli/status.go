@@ -3,6 +3,8 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 )
 
 // RunStatus queries the daemon for status without auto-starting it.
@@ -58,7 +60,45 @@ func RunStatus(jsonOutput bool) {
 		}
 	}
 	cfg, _, _ := configLoad()
-	fmt.Printf("Socket:     %s\n", cfg.SocketPath)
+	recorderPath := getRecorderSocketPath()
+	protected := false
+	if _, err := os.Stat(recorderPath); err == nil {
+		protected = true
+	}
+
+	recorderInfo := ""
+	recJSON := "{}"
+	if protected {
+		if recLine, err := sendRecorderCommand("RECORDER_STATUS"); err == nil {
+			recJSON = strings.TrimSpace(recLine)
+			recorderInfo = recLine
+		}
+	}
+
+	if jsonOutput {
+		// Best-effort merge; keep simple for compatibility
+		fmt.Printf(`{"daemon":%s,"protected":%v,"recorder_socket":"%s","recorder":%s}`, line, protected, recorderPath, recJSON)
+		return
+	}
+	fmt.Printf("Protected (this terminal): %v\n", protected)
+	if cfg != nil {
+		fmt.Printf("Socket:     %s\n", cfg.SocketPath)
+	}
+	if recorderInfo != "" {
+		// Pretty print key retention numbers for visibility of the invariant
+		var rec map[string]any
+		if json.Unmarshal([]byte(recorderInfo), &rec) == nil {
+			if b, ok := rec["buffer"].(float64); ok {
+				fmt.Printf("Redaction buffer: %d (raw retention window)\n", int(b))
+			}
+			if raw, ok := rec["current_raw_windows"].(float64); ok {
+				fmt.Printf("Current raw windows: %d (plaintext secret lifetime bound)\n", int(raw))
+			}
+			if tot, ok := rec["total_windows"].(float64); ok {
+				fmt.Printf("Total history windows: %d\n", int(tot))
+			}
+		}
+	}
 	fmt.Println("===================")
 	fmt.Println("No plaintext secrets or hashes are stored on disk (invariant upheld).")
 }

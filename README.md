@@ -8,7 +8,7 @@ Blast Radius helps developers avoid leaking secrets through common workflow mist
 - Thin Zsh integration layer
 - Five extensible pillars for analysis, alerting, redaction, and hygiene
 
-**Current Status:** Phases 0–3 complete. Preparing for Phase 4 (Pillar 3 – CLI Output Redaction).
+**Current Status:** All phases complete. Single CLI coordinator, TTY discovery, thin Zsh broker. See docs/CLI_REFACTOR_DESIGN.md.
 
 See [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) for a detailed snapshot of architecture, decisions, invariants, and current capabilities.
 
@@ -29,6 +29,7 @@ See [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) for a detailed snapshot of ar
 4. The background process is a true singleton.
 5. Only non-sensitive configuration is persisted.
 6. Failures degrade safely with clear status reporting.
+7. **Plaintext secret lifetime in the recorder is explicitly bounded** by `redaction.buffer` (default 1). Windows are sealed (raw bytes discarded) as they age out; `status --json` surfaces the current raw window count for audit. `redact [N]` fidelity is capped by the same bound.
 
 ## Building & Running
 
@@ -102,3 +103,10 @@ To be determined. Currently under active development.
 ---
 
 **Note:** This project is in early development. Interfaces and behavior will evolve.
+
+## Migration (post phase 5)
+- Single entrypoint: `blastradius`
+- Protection: `blastradius protection start|stop`
+- Zsh: source new thin blastradius.zsh (no BR_* vars)
+- Old recorder direct removed (clean break)
+

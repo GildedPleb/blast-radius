@@ -9,6 +9,6 @@ type RecorderContext interface {
 	LastWindowHasSecret() bool
 	Stop() error
 	TriggerShutdown()
-	ReplayRedacted(io.Writer, string, string, bool)
+	ReplayRedacted(io.Writer, int, string, string, bool) // requestedRecent (N), mode, custom, preserveColors
 	ResetHistory()
 }

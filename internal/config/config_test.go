@@ -7,6 +7,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.SocketPath == "" || len(cfg.SkipDirs) == 0 || len(cfg.Pillar5Commands) == 0 {
 		t.Error("defaults missing required fields")
 	}
+	if cfg.Redaction.Buffer != 1 {
+		t.Errorf("expected default redaction.buffer=1 (unified retention), got %d", cfg.Redaction.Buffer)
+	}
 }
 
 func TestLoad(t *testing.T) {

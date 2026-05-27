@@ -1,10 +1,17 @@
 package cli
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/GildedPleb/blast-radius/internal/config"
+)
 
 // PrintHelp displays the main help message and current configuration.
 func PrintHelp() {
 	cfg, configPath, _ := configLoad()
+	if cfg == nil {
+		cfg = &config.Config{SocketPath: "/tmp/blastradius.sock"}
+	}
 
 	fmt.Println("Blast Radius - Secret exposure reduction tool")
 	fmt.Println()
@@ -26,6 +33,7 @@ func PrintHelp() {
 	fmt.Println("  duplicates     Show secret hashes duplicated across multiple projects (Pillar 1)")
 	fmt.Println("  scrub-history  Scrub shell history of known secret values (Pillar 4)")
 	fmt.Println("  clear          Trigger or document Phase 4 redaction rebuild (Pillar 3)")
+	fmt.Println("  redact [N]     Rebuild view keeping last N prompts raw (others redacted); protection only")
 	fmt.Println("  env [name]     Run Pillar 5 runtime hygiene check (default: printenv)")
 	fmt.Println("  clipboard      Pillar 2 clipboard status / clear (macOS)")
 	fmt.Println("  help           Show this help message")

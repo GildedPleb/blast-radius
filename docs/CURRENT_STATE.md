@@ -36,7 +36,7 @@ The project follows a strict **hash-only, minimal-metadata, local-only** philoso
 | 1     | Discovery, Registry & File Watching | ✅ Complete | Recursive `.env*` discovery, SHA-256, ignore engine, pruning, scan state, logging to file |
 | 2     | Zsh Integration & Ambient HUD     | ✅ Complete | Composable prompt functions, `--json` status, plugin |
 | 3     | Pillar 1 + Pillar 4               | ✅ Complete | Duplicate detection, `duplicates` command, history scrubbing, major refactor |
-| 4     | Pillar 3 (CLI Output Redaction)   | ✅ Complete | Go PTY recorder + atomic windows, explicit protected mode, immediate hash on flush, redacted replay, zsh orchestration |
+| 4     | Pillar 3 (CLI Output Redaction)   | ✅ Complete | Go PTY recorder + sealed windows + unified buffer (retention + timing), `redact [N]` mixed replay, live status of raw window count, zsh + CLI orchestration |
 | 5     | Pillar 5 + Pillar 2               | ✅ Complete | Extensible runtime hygiene commands (user-defined), auto prompt-boundary execution (opt-in per command), macOS clipboard detection + time-based clear, HUD integration |
 
 ---
@@ -65,7 +65,7 @@ internal/
 └── (no logger package yet — using std log routed to file)
 
 recorder/
-    recorder.go             # Go PTY engine: long-lived inner shell, atomic RecordingWindow buffers, control socket (NEW_WINDOW/FLUSH/REPLAY_REDACTED)
+    recorder.go             # Go PTY engine: long-lived inner shell, atomic windows + sealing, buffer-driven raw retention, control socket (NEW_WINDOW/FLUSH/REPLAY_REDACTED/RECORDER_STATUS)
 ```
 
 ### Key Design Decisions Made
