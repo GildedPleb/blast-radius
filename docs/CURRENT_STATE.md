@@ -1,5 +1,10 @@
 # Blast Radius — Current State & Architecture (as of 2026-05-22)
 
+> **Note:** This snapshot predates the CLI refactor (see `docs/CLI_REFACTOR_DESIGN.md`, 2026-05-25).
+> The single-coordinator model (`blastradius` as the only entrypoint, `protection start/stop`,
+> unified `status --json`, TTY-derived recorder sockets, thin Zsh) is the current architecture.
+> Many details below (dispatcher, auto-start behavior, direct Zsh sockets) are now historical.
+
 **This document provides a complete snapshot of the project state.**  
 It is intended to serve as the primary context document when restarting conversations or onboarding.
 

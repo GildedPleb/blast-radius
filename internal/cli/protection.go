@@ -33,8 +33,14 @@ func runProtectionStart() {
 
 	socket := getRecorderSocketPath()
 	if _, err := os.Stat(socket); err == nil {
-		fmt.Println("protection already active for this terminal")
-		return
+		// Socket file exists — verify the recorder is actually listening.
+		// If a previous recorder died uncleanly we have a stale socket.
+		if _, err := sendRecorderCommand("RECORDER_STATUS"); err == nil {
+			fmt.Println("protection already active for this terminal")
+			return
+		}
+		// Stale socket — clean it up so we can start fresh.
+		_ = os.Remove(socket)
 	}
 
 	// Ensure state dir
@@ -79,9 +85,17 @@ func runProtectionStop() {
 		return
 	}
 
-	// Send stop via socket (reuse recorder control)
-	// For simplicity use direct stop; real impl would send STOP
 	fmt.Println("stopping protection...")
-	os.Remove(socket)
+
+	// Best-effort graceful shutdown: send STOP (handler will kill inner PTY
+	// zsh + close listener + TriggerShutdown). Ignore errors (socket may be
+	// half-gone or recorder already exiting).
+	_, _ = sendRecorderCommand("STOP")
+
+	// Always unlink the socket so getRecorderSocketPath() + ProtectionModeGuard
+	// immediately see protection as inactive. The recorder's own listener
+	// close (via shutdown chan) will also clean up on its side.
+	_ = os.Remove(socket)
+
 	fmt.Println("Protection stopped.")
 }

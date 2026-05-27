@@ -15,7 +15,7 @@ See [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) for a detailed snapshot of ar
 ## Phase 0 – Foundations (Completed)
 
 - Singleton background daemon using Unix domain sockets with strict `0600` permissions
-- Clean `blastradius status` command (auto-starts daemon if needed)
+- Clean `blastradius status` command (never auto-starts the daemon)
 - In-memory `SecretHashRegistry` (SHA-256 only, never stores plaintext)
 - Configuration loading from `~/.config/blastradius/config.yaml` (non-sensitive only)
 - All Phase 0 invariants upheld and documented
@@ -104,9 +104,12 @@ To be determined. Currently under active development.
 
 **Note:** This project is in early development. Interfaces and behavior will evolve.
 
-## Migration (post phase 5)
-- Single entrypoint: `blastradius`
-- Protection: `blastradius protection start|stop`
-- Zsh: source new thin blastradius.zsh (no BR_* vars)
-- Old recorder direct removed (clean break)
+## Migration (post CLI refactor)
+- Single entrypoint: `blastradius` (coordinator owns daemon + recorder lifecycle)
+- Protection mode is explicit: `blastradius protection start|stop`
+- All state for humans and Zsh comes from `blastradius status --json`
+- Zsh layer is now a thin formatting + hook broker (no leaked BR_* env vars, no direct recorder sockets except the narrow high-frequency capture path)
+- Clean break: the old multi-interface model is gone
+
+See `docs/CLI_REFACTOR_DESIGN.md` for the full architecture and rationale.
 

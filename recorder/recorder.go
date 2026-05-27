@@ -14,9 +14,11 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
@@ -337,9 +339,25 @@ func (r *Recorder) RunControlServer(socketPath string) error {
 	defer ln.Close()
 	_ = os.Chmod(socketPath, 0600)
 
+	// Install signal handler so that external kills (or `protection stop`
+	// sending STOP which eventually leads to process exit) produce
+	// deterministic socket cleanup. The shutdown chan already drives
+	// graceful close of the listener.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		logging.RecorderPrintln("RunControlServer: received termination signal, cleaning up")
+		r.TriggerShutdown()
+		_ = os.Remove(socketPath)
+	}()
+
 	go func() {
 		<-r.shutdown
 		ln.Close()
+		// Best-effort removal (may already be gone from the signal path).
+		_ = os.Remove(socketPath)
+		signal.Stop(sigCh)
 	}()
 
 	for {
