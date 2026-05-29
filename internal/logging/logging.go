@@ -6,6 +6,14 @@ import (
 	"path/filepath"
 )
 
+// test seams for coverage of fatal wrappers without killing the test process.
+var (
+	logPrintf = log.Printf
+	logPrintln = log.Println
+	logFatalf = log.Fatalf
+	logFatal  = log.Fatal
+)
+
 // Init sets up logging to the given file path with the standard daemon format.
 // It creates the parent directory if needed and configures the global logger.
 func Init(logPath string) error {
@@ -32,7 +40,7 @@ func DefaultDaemonLogPath() string {
 // changing behavior. Existing code using the global log package will continue to
 // work after Init is called.
 
-func Printf(format string, v ...any) { log.Printf(format, v...) }
-func Println(v ...any)                 { log.Println(v...) }
-func Fatalf(format string, v ...any)   { log.Fatalf(format, v...) }
-func Fatal(v ...any)                   { log.Fatal(v...) }
+func Printf(format string, v ...any) { logPrintf(format, v...) }
+func Println(v ...any)                 { logPrintln(v...) }
+func Fatalf(format string, v ...any)   { logFatalf(format, v...) }
+func Fatal(v ...any)                   { logFatal(v...) }

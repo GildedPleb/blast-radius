@@ -7,9 +7,15 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 || cli.IsHelp(os.Args[1]) {
+	run(os.Args)
+}
+
+// run contains the actual entrypoint logic so it can be unit tested.
+// It is intentionally unexported.
+func run(args []string) {
+	if len(args) < 2 || cli.IsHelp(args[1]) {
 		cli.PrintHelp()
 		return
 	}
-	cli.Run(os.Args[1:])
+	cli.Run(args[1:])
 }

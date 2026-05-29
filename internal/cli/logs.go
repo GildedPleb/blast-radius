@@ -9,7 +9,7 @@ import (
 
 // RunLogs prints recent daemon log output.
 func RunLogs() {
-	logPath := getDaemonLogPath()
+	logPath := getDaemonLogPathFn()
 
 	data, err := osReadFile(logPath)
 	if err != nil {

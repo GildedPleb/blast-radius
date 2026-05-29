@@ -1,6 +1,9 @@
 package registry
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestRegistry_GetProjects(t *testing.T) {
 	r := New()
@@ -101,5 +104,69 @@ func TestRegistry_Concurrent(t *testing.T) {
 }
 
 func TestRegistry_ProjectDisplayName(t *testing.T) {
-	_ = ProjectDisplayName("unknown")
+	cases := []struct {
+		id   ProjectID
+		want string // prefix check is enough
+	}{
+		{"", "(unknown project)"},
+		{"foo", ".../foo"},
+		{"a/b", ".../a/b"},
+		{"/home/user/my-project", ".../user/my-project"},
+		{"p1/p2/p3", ".../p2/p3"},
+	}
+	for _, c := range cases {
+		got := ProjectDisplayName(c.id)
+		if got != c.want {
+			t.Errorf("ProjectDisplayName(%q) = %q, want %q", c.id, got, c.want)
+		}
+	}
+}
+
+func TestRegistry_Remove_Success(t *testing.T) {
+	r := New()
+	h := HashValue([]byte("to-remove"))
+	r.Add(h, "projX")
+	r.Add(h, "projY")
+	if r.Count() != 1 {
+		t.Fatalf("pre: count=%d", r.Count())
+	}
+	r.Remove(h, "projX")
+	// still has projY so entry remains
+	ps := r.GetProjectsForHash(h)
+	if len(ps) != 1 || ps[0] != "projY" {
+		t.Errorf("after partial remove: %v", ps)
+	}
+	r.Remove(h, "projY")
+	if r.Has(h) {
+		t.Error("full remove should drop the hash entry")
+	}
+}
+
+func TestRegistry_DuplicateCount(t *testing.T) {
+	r := New()
+	h1 := HashValue([]byte("dup1"))
+	h2 := HashValue([]byte("dup2"))
+	r.Add(h1, "p1")
+	r.Add(h1, "p2")
+	r.Add(h2, "p3")
+	if r.DuplicateCount() != 1 {
+		t.Errorf("DuplicateCount = %d, want 1", r.DuplicateCount())
+	}
+}
+
+func TestRegistry_IsKnownHashHex_Happy(t *testing.T) {
+	r := New()
+	h := HashValue([]byte("known-hex"))
+	r.Add(h, "px")
+	// compute the real hex of h
+	hex := ""
+	for _, b := range h {
+		hex += fmt.Sprintf("%02x", b)
+	}
+	if !r.IsKnownHashHex(hex) {
+		t.Error("IsKnownHashHex happy path failed")
+	}
+	if r.IsKnownHashHex("not64chars") {
+		t.Error("short hex should be false")
+	}
 }

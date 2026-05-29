@@ -6,7 +6,7 @@ import (
 )
 
 func TestRunStatus(t *testing.T) {
-	defer resetTestOverrides()
+	defer resetTestOverrides(t)
 	restore := silenceOutput()
 	defer restore()
 
@@ -22,7 +22,7 @@ func TestRunStatus(t *testing.T) {
 // always contains the stable top-level keys documented in the schema comment
 // (the key fix for the "unified status output" gap in the CLI refactor).
 func TestRunStatus_UnifiedJSONShape(t *testing.T) {
-	defer resetTestOverrides()
+	defer resetTestOverrides(t)
 	restore := silenceOutput()
 	defer restore()
 

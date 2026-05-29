@@ -12,6 +12,9 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
+// test hook to control UserHomeDir for fast coverage of len(targets)==0 without walking real home.
+var userHomeDir = os.UserHomeDir
+
 // Manager owns the residue (crumbs) scanning logic and last result cache.
 // Scans are on-demand only (no background goroutine per v1 plan decision).
 type Manager struct {
@@ -51,7 +54,7 @@ func (m *Manager) RunScan() *ScanResult {
 	targets := m.cfg.ResidueHunter.TargetDirs
 	if len(targets) == 0 {
 		// sensible defaults even if user left the list empty
-		home, _ := os.UserHomeDir()
+		home, _ := userHomeDir()
 		targets = []string{
 			filepath.Join(home, "Downloads"),
 			filepath.Join(home, "Documents"),

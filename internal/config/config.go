@@ -7,6 +7,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Test hooks for improved testability (consistent with cli and daemon packages).
+var (
+	userHomeDir = os.UserHomeDir
+	osReadFile  = os.ReadFile
+	osWriteFile = os.WriteFile
+	osMkdirAll  = os.MkdirAll
+)
+
 // Config holds user configuration. It must NEVER contain secrets or discovered hashes.
 type Config struct {
 	// SocketPath allows overriding the default Unix socket location.
@@ -92,14 +100,14 @@ func DefaultConfig() *Config {
 func Load() (cfg *Config, configPath string, err error) {
 	cfg = DefaultConfig()
 
-	home, err := os.UserHomeDir()
+	home, err := userHomeDir()
 	if err != nil {
 		return cfg, "", nil
 	}
 
 	configPath = filepath.Join(home, ".config", "blastradius", "config.yaml")
 
-	data, err := os.ReadFile(configPath)
+	data, err := osReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cfg, configPath, nil
@@ -127,13 +135,13 @@ func Load() (cfg *Config, configPath string, err error) {
 
 // Save writes the configuration (for future use).
 func (c *Config) Save() error {
-	home, err := os.UserHomeDir()
+	home, err := userHomeDir()
 	if err != nil {
 		return err
 	}
 
 	dir := filepath.Join(home, ".config", "blastradius")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := osMkdirAll(dir, 0700); err != nil {
 		return err
 	}
 
@@ -144,5 +152,5 @@ func (c *Config) Save() error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	return osWriteFile(path, data, 0600)
 }

@@ -17,7 +17,7 @@ func getDaemonLogPath() string {
 
 // startDaemonInBackground launches the daemon process detached and redirects its output to the log file.
 func startDaemonInBackground() error {
-	exe, err := os.Executable()
+	exe, err := osExecutable()
 	if err != nil {
 		return err
 	}
@@ -25,7 +25,7 @@ func startDaemonInBackground() error {
 	cmd := execCommand(exe, "daemon")
 
 	// Redirect daemon output to log file (prevents terminal pollution)
-	logPath := getDaemonLogPath()
+	logPath := getDaemonLogPathFn()
 	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
 		return fmt.Errorf("failed to create log dir: %w", err)
 	}

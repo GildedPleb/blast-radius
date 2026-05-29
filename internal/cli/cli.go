@@ -17,13 +17,15 @@ const (
 
 // Overridable for testing (DI via var assignment)
 var (
-	configLoad        = config.Load
-	netDialTimeout    = net.DialTimeout
-	execCommand       = exec.Command
-	osReadFile        = os.ReadFile
-	osUserHomeDir     = os.UserHomeDir
+	configLoad          = config.Load
+	netDialTimeout      = net.DialTimeout
+	execCommand         = exec.Command
+	osReadFile          = os.ReadFile
+	osUserHomeDir       = os.UserHomeDir
+	osExecutable        = os.Executable
+	getDaemonLogPathFn  = getDaemonLogPath
 	sendDaemonCommandFn = realSendDaemonCommand
-	osExit            = os.Exit
+	osExit              = os.Exit
 )
 
 // Run is the single coordinator entrypoint for all CLI commands. It owns

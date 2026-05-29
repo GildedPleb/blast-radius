@@ -3,7 +3,7 @@ package cli
 import "testing"
 
 func TestRunDuplicates(t *testing.T) {
-	defer resetTestOverrides()
+	defer resetTestOverrides(t)
 	restore := silenceOutput()
 	defer restore()
 

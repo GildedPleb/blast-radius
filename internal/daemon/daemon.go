@@ -22,6 +22,20 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/daemon/handlers"
 )
 
+// Test hooks (following the same pattern used successfully in internal/cli).
+// These allow unit tests to inject controllable behavior without changing
+// production code or public API.
+var (
+	netListen     = net.Listen
+	osRemove      = os.Remove
+	osMkdirAll    = os.MkdirAll
+	osChmod       = os.Chmod
+	signalNotify  = signal.Notify
+	signalStop    = signal.Stop
+	userHomeDir   = os.UserHomeDir
+	getDaemonLogPathFn = getDaemonLogPath
+)
+
 // Daemon represents the background singleton process.
 type Daemon struct {
 	cfg       *config.Config
@@ -91,7 +105,7 @@ func (d *Daemon) RunCrumbsScan() *residue.ScanResult {
 // Run starts the Unix domain socket server and blocks until shutdown.
 func (d *Daemon) Run() error {
 	// Setup file logging via logging package
-	logPath := getDaemonLogPath()
+	logPath := getDaemonLogPathFn()
 	if err := logging.Init(logPath); err != nil {
 		return fmt.Errorf("failed to initialize logging: %w", err)
 	}
@@ -102,23 +116,23 @@ func (d *Daemon) Run() error {
 	socketPath := d.cfg.SocketPath
 
 	// Remove stale socket if it exists
-	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+	if err := osRemove(socketPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove stale socket: %w", err)
 	}
 
 	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
+	if err := osMkdirAll(filepath.Dir(socketPath), 0700); err != nil {
 		return fmt.Errorf("failed to create socket directory: %w", err)
 	}
 
-	ln, err := net.Listen("unix", socketPath)
+	ln, err := netListen("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("failed to listen on unix socket: %w", err)
 	}
 	d.listener = ln
 
 	// Enforce strict permissions (owner read/write only)
-	if err := os.Chmod(socketPath, 0600); err != nil {
+	if err := osChmod(socketPath, 0600); err != nil {
 		ln.Close()
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
@@ -130,7 +144,7 @@ func (d *Daemon) Run() error {
 
 	// Handle graceful shutdown (signals + internal HALT command)
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signalNotify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		select {
@@ -224,7 +238,7 @@ func (d *Daemon) Close() error {
 // getDaemonLogPath returns the canonical location for daemon logs.
 // Uses XDG-style ~/.local/state/blastradius/daemon.log (respects our minimalism principles).
 func getDaemonLogPath() string {
-	home, err := os.UserHomeDir()
+	home, err := userHomeDir()
 	if err != nil {
 		// Fallback (should rarely happen)
 		return "/tmp/blastradius-daemon.log"
