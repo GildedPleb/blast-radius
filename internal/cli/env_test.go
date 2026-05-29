@@ -108,3 +108,37 @@ func TestRunEnvCheck_HappyPath(t *testing.T) {
 	// - printing the final success JSON with secrets_found
 	RunEnvCheck("default-env")
 }
+
+// TestRunEnvCheck_DirectExec verifies the hard security invariant:
+// Pillar 5 commands are always executed via direct argv (never through "sh -c").
+// This eliminates shell injection risk from user config.
+func TestRunEnvCheck_DirectExec(t *testing.T) {
+	defer resetTestOverrides(t)
+	restore := silenceOutput()
+	defer restore()
+
+	calledWith := ""
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		calledWith = name
+		if len(arg) > 0 {
+			calledWith += " " + strings.Join(arg, " ")
+		}
+		return exec.Command("true") // harmless
+	}
+
+	cfg := defaultTestConfig()
+	cfg.Pillar5Commands = []config.Pillar5Command{
+		{Name: "direct-echo", Cmd: "echo hello world"},
+	}
+	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
+	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) { return nil, errForTest }
+
+	RunEnvCheck("direct-echo")
+
+	if !strings.HasPrefix(calledWith, "echo ") {
+		t.Errorf("expected direct exec of 'echo ...', got %q (shell injection risk)", calledWith)
+	}
+	if strings.Contains(calledWith, "sh -c") {
+		t.Error("shell was incorrectly used for a Pillar 5 command")
+	}
+}

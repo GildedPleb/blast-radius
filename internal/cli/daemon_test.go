@@ -12,11 +12,12 @@ func TestRunDaemon(t *testing.T) {
 	restore := silenceOutput()
 	defer restore()
 
-	// Force a quick failure path (bad socket) so we don't actually start a listener
-	// but still execute the early parts of RunDaemon.
-	cfg := defaultTestConfig()
-	cfg.SocketPath = filepath.Join(t.TempDir(), "cannot-create-this", "deep", "socket.sock") // will fail in daemon.Run
+	// Force a quick failure path (bad socket) via the test seam so we don't actually
+	// start a listener but still execute the early parts of RunDaemon.
+	badPath := filepath.Join(t.TempDir(), "cannot-create-this", "deep", "socket.sock")
+	config.SocketPathFn = func() string { return badPath }
 
+	cfg := defaultTestConfig()
 	configLoad = func() (*config.Config, string, error) {
 		return &cfg, "", nil
 	}

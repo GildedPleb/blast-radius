@@ -17,9 +17,6 @@ var (
 
 // Config holds user configuration. It must NEVER contain secrets or discovered hashes.
 type Config struct {
-	// SocketPath allows overriding the default Unix socket location.
-	SocketPath string `yaml:"socket_path,omitempty"`
-
 	// ProjectRoots is a list of directories to monitor.
 	ProjectRoots []string `yaml:"project_roots,omitempty"`
 
@@ -36,6 +33,9 @@ type Config struct {
 
 	// Pillar5Commands defines user-specified commands whose output should be scanned for secrets.
 	// Only the first command defaults to auto_on_prompt: true (printenv).
+	//
+	// All commands are executed with direct argv (no shell) as a hard invariant.
+	// For complex logic (pipes etc.), use a wrapper script you control.
 	Pillar5Commands []Pillar5Command `yaml:"pillar5_commands,omitempty"`
 
 	// ClipboardClearSeconds is the time after which detected secrets in clipboard are auto-cleared.
@@ -46,6 +46,11 @@ type Config struct {
 }
 
 // Pillar5Command represents a single command to execute for runtime hygiene checks.
+//
+// Commands are always executed via direct exec (no shell) as a hard security
+// invariant. This prevents shell metacharacter injection and arbitrary command
+// execution from user configuration. If you need pipes or complex logic, point
+// at a wrapper script you control instead of putting shell syntax here.
 type Pillar5Command struct {
 	Name         string `yaml:"name"`
 	Cmd          string `yaml:"cmd"`
@@ -63,8 +68,8 @@ type ResidueHunterConfig struct {
 // DefaultConfig returns a safe default configuration.
 func DefaultConfig() *Config {
 	home, _ := os.UserHomeDir()
+
 	return &Config{
-		SocketPath:   "/tmp/blastradius.sock",
 		ProjectRoots: []string{home},
 		SkipDirs: []string{
 			"node_modules",
@@ -119,10 +124,6 @@ func Load() (cfg *Config, configPath string, err error) {
 		return nil, configPath, err
 	}
 
-	if cfg.SocketPath == "" {
-		cfg.SocketPath = DefaultConfig().SocketPath
-	}
-
 	// Ensure residue hunter has sensible defaults even if user only partially populated the block
 	if !cfg.ResidueHunter.Enabled && len(cfg.ResidueHunter.TargetDirs) == 0 {
 		def := DefaultConfig().ResidueHunter
@@ -153,4 +154,34 @@ func (c *Config) Save() error {
 	}
 
 	return osWriteFile(path, data, 0600)
+}
+
+// --- Hard-coded socket path (security invariant) ---
+
+const socketFileName = "blastradius.sock"
+
+// SocketPathFn is the function used to resolve the socket path.
+// It is overridable by tests for hermetic per-test socket locations.
+// Production code should call SocketPath() instead of using this directly.
+var SocketPathFn = defaultSocketPath
+
+// defaultSocketPath returns the canonical secure location under the user's
+// XDG state directory. This path is a hard security invariant for production.
+func defaultSocketPath() string {
+	home, err := userHomeDir()
+	if err != nil || home == "" {
+		// Extremely rare fallback. In practice this should never be hit.
+		return "/tmp/blastradius.sock"
+	}
+	return filepath.Join(home, ".local", "state", "blastradius", socketFileName)
+}
+
+// SocketPath returns the location of the Unix domain socket used for
+// daemon <-> CLI communication.
+//
+// This is intentionally not configurable by users. The path is a hard
+// security invariant (private directory + strict permissions + capability token).
+// Allowing overrides would re-introduce the attack surface we worked to eliminate.
+func SocketPath() string {
+	return SocketPathFn()
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/logging"
 )
 
@@ -11,7 +12,7 @@ import (
 func RunStart() {
 	_ = logging.Init(logging.DefaultDaemonLogPath())
 
-	cfg, configPath, err := configLoad()
+	_, configPath, err := configLoad()
 	if err != nil {
 		logging.Printf("RunStart: failed to load config: %v", err)
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
@@ -20,7 +21,7 @@ func RunStart() {
 
 	fmt.Printf("Starting Blast Radius daemon...\n")
 	fmt.Printf("Config: %s\n", configPath)
-	fmt.Printf("Socket: %s\n", cfg.SocketPath)
+	fmt.Printf("Socket: %s\n", config.SocketPath())
 
 	if err := startDaemonInBackground(); err != nil {
 		logging.Printf("RunStart: failed to start daemon: %v", err)

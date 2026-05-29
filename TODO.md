@@ -1,3 +1,8 @@
 - The skip files and ignore files are kind of stupid. rather the skip directories and ignore files are kind of stupid. And also, that should just be the single source of truth. There should not be strong defaults, et cetera.
 - Automatically create and populate a config.yaml.
-- High-risk command context (printenv, env, cat .env*, etc.) – treat entire output as sensitive for hygiene checks (Pillar 4)
+- High-risk command context (printenv, env, cat .env\*, etc.) – treat entire output as sensitive for hygiene checks (Pillar 4)
+- Documentation audit
+- File Structure audit
+- Security Audit
+- Architecture audit
+- Test Audit

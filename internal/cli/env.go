@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/logging"
 )
 
@@ -26,36 +27,53 @@ func RunEnvCheck(name string) {
 		osExit(1)
 	}
 
-	// Find the command definition
-	var cmdToRun string
+	// Find the command definition.
+	var cmd config.Pillar5Command
 	for _, c := range cfg.Pillar5Commands {
 		if c.Name == name {
-			cmdToRun = c.Cmd
+			cmd = c
 			break
 		}
 	}
-	if cmdToRun == "" {
+	if cmd.Name == "" {
 		logging.Printf("RunEnvCheck: unknown pillar5 command: %s", name)
 		fmt.Printf(`{"status":"error","message":"unknown pillar5 command: %s"}`+"\n", name)
 		return
 	}
 
-	// Execute the command
-	output, err := execCommand("sh", "-c", cmdToRun).CombinedOutput()
-	if err != nil {
-		logging.Printf("RunEnvCheck: command failed: %v", err)
-		fmt.Printf(`{"status":"error","message":"command failed: %v"}`+"\n", err)
+	// Hard security invariant: commands are always executed via direct exec (no shell).
+	// This eliminates an entire class of injection and arbitrary execution risks from config.
+	parts := strings.Fields(cmd.Cmd)
+	if len(parts) == 0 {
+		fmt.Printf(`{"status":"error","message":"empty command"}`+"\n")
+		return
+	}
+	output, runErr := execCommand(parts[0], parts[1:]...).CombinedOutput()
+	if runErr != nil {
+		logging.Printf("RunEnvCheck: command failed: %v", runErr)
+		fmt.Printf(`{"status":"error","message":"command failed: %v"}`+"\n", runErr)
 		return
 	}
 
 	// Send each line to daemon for hashing/checking
-	conn, err := netDialTimeout("unix", cfg.SocketPath, socketConnectTimeout)
+	socketPath := config.SocketPath()
+	conn, err := netDialTimeout("unix", socketPath, socketConnectTimeout)
 	if err != nil {
 		logging.Println("RunEnvCheck: daemon not running")
 		fmt.Println(`{"status":"error","message":"daemon not running"}`)
 		return
 	}
 	defer conn.Close()
+
+	// Send AUTH handshake (required after 2026 security hardening).
+	// Use the same sibling .auth file as the high-level sendDaemonCommand path.
+	if tokenBytes, readErr := os.ReadFile(socketPath + ".auth"); readErr == nil {
+		authLine := "AUTH " + strings.TrimSpace(string(tokenBytes)) + "\n"
+		conn.Write([]byte(authLine))
+	}
+	// If we can't read the token we still try the CHECK_HASH lines; the daemon
+	// will reject them with the standard auth error. Existing callers treat
+	// any failure here as "daemon not running" which is acceptable.
 
 	lines := strings.Split(string(output), "\n")
 	found := 0

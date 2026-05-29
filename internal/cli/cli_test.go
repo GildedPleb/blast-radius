@@ -138,14 +138,16 @@ func TestRealSendDaemonCommand(t *testing.T) {
 		t.Error("expected read error after server close")
 	}
 
-	// happy path: full roundtrip via pipe
+	// happy path: full roundtrip via pipe (now includes AUTH handshake)
 	c, s = net.Pipe()
 	netDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
 		return c, nil
 	}
+	readAuthTokenForSocket = func(string) (string, error) { return "testtoken123", nil }
 	go func() {
 		r := bufio.NewReader(s)
-		// consume the command line sent by real impl
+		// consume AUTH + the real command line
+		_, _ = r.ReadString('\n')
 		_, _ = r.ReadString('\n')
 		_, _ = s.Write([]byte(`{"status":"ok","pong":true}` + "\n"))
 		s.Close()

@@ -1,8 +1,10 @@
 # Blast Radius Configuration Example
 # Copy this to ~/.config/blastradius/config.yaml and customize.
 
-# Unix domain socket path (default: /tmp/blastradius.sock)
-socket_path: "/tmp/blastradius.sock"
+# The Unix domain socket path is a hard-coded security invariant:
+# ~/.local/state/blastradius/blastradius.sock
+# (private 0700 directory + 0600 socket + capability token auth).
+# It is not user-configurable.
 
 # Directories to scan for .env* files on startup.
 # If empty, falls back to your home directory.
@@ -32,7 +34,15 @@ log_level: "info"
 
 # Pillar 5 - Runtime Environment Hygiene
 # Define any commands whose output should be scanned for secrets.
-# Only the first command (printenv) has auto_on_prompt enabled by default.
+#
+# HARD SECURITY INVARIANT:
+# Commands are **always** executed with direct exec (no shell / sh -c ever).
+# This is not configurable. It eliminates an entire class of injection and
+# arbitrary code execution risks from user configuration.
+#
+# Recommended pattern for complex needs (pipes, redirection, etc.):
+#   - Write a small wrapper script you control (e.g. ~/bin/scan-env)
+#   - Reference the script here with its absolute or PATH-resolvable name
 pillar5_commands:
   - name: "default-env"
     cmd: "printenv"

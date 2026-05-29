@@ -59,6 +59,8 @@ It is a cleanup pillar that operates on the record of past actions.
 
 This pillar periodically (or on prompt) runs user-defined commands (most commonly `printenv`) and scans their output for known secrets. It tells you, right now, whether dangerous material is sitting in your shell or tool environments.
 
+**Hard security invariant**: Commands listed under `pillar5_commands` are always executed via direct `exec` (never through a shell). This eliminates shell metacharacter injection and arbitrary code execution risks from configuration. If you need pipes or complex logic, point at a wrapper script you control.
+
 **Core question it answers**: "What secrets are currently readable by running `printenv` or similar introspection commands?"
 
 This is the "can I safely run printenv right now without burning anything?" check.

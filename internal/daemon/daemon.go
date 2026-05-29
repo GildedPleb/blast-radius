@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,6 +36,16 @@ var (
 	signalStop    = signal.Stop
 	userHomeDir   = os.UserHomeDir
 	getDaemonLogPathFn = getDaemonLogPath
+
+	// writeAuthToken / readAuthToken / removeAuthToken allow tests to intercept
+	// token file I/O without touching the real filesystem.
+	writeAuthToken  = realWriteAuthToken
+	readAuthToken   = realReadAuthToken
+	removeAuthToken = realRemoveAuthToken
+
+	// authenticateConnection lets pipe-based handler tests bypass the AUTH
+	// requirement while still exercising the real command dispatch logic.
+	authenticateConnection = realAuthenticateConnection
 )
 
 // Daemon represents the background singleton process.
@@ -44,6 +56,10 @@ type Daemon struct {
 	residue   *residue.Manager
 	listener  net.Listener
 	shutdown  chan struct{}
+
+	// authToken is the hex capability token written at startup.
+	// All client connections must present it as the first "AUTH ..." line.
+	authToken string
 }
 
 // New creates a new Daemon instance.
@@ -110,34 +126,54 @@ func (d *Daemon) Run() error {
 		return fmt.Errorf("failed to initialize logging: %w", err)
 	}
 
-	log.Printf("Daemon starting. Listening on %s (0600)", d.cfg.SocketPath)
+	socketPath := config.SocketPath()
+	log.Printf("Daemon starting. Listening on %s (0600 + token auth)", socketPath)
 	log.Printf("Log file: %s", logPath)
-
-	socketPath := d.cfg.SocketPath
 
 	// Remove stale socket if it exists
 	if err := osRemove(socketPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove stale socket: %w", err)
 	}
+	// Also remove any leftover auth token from a previous unclean shutdown
+	_ = removeAuthToken(socketPath) // best effort
 
-	// Ensure parent directory exists
+	// Ensure parent directory exists (0700 — private to user)
 	if err := osMkdirAll(filepath.Dir(socketPath), 0700); err != nil {
 		return fmt.Errorf("failed to create socket directory: %w", err)
 	}
 
+	// SECURITY: Close the Listen→Chmod race window.
+	// We temporarily set a restrictive umask so the socket inode is created 0600
+	// (owner r/w only). We still do the explicit Chmod afterward for defense-in-depth
+	// and to make the intent unmistakable in logs/audits.
+	oldMask := syscall.Umask(0077)
 	ln, err := netListen("unix", socketPath)
+	syscall.Umask(oldMask) // restore immediately (umask is process-global)
 	if err != nil {
 		return fmt.Errorf("failed to listen on unix socket: %w", err)
 	}
 	d.listener = ln
 
-	// Enforce strict permissions (owner read/write only)
+	// Belt-and-suspenders: enforce 0600 even if umask didn't apply perfectly.
 	if err := osChmod(socketPath, 0600); err != nil {
 		ln.Close()
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
 
-	log.Printf("Blast Radius daemon started and listening on %s (0600)", socketPath)
+	// SECURITY (2026): write a fresh capability token next to the socket.
+	// Clients must present it as the first message on every connection.
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {
+		ln.Close()
+		return fmt.Errorf("failed to generate auth token: %w", err)
+	}
+	d.authToken = hex.EncodeToString(token)
+	if err := writeAuthToken(socketPath, d.authToken); err != nil {
+		ln.Close()
+		return fmt.Errorf("failed to write auth token: %w", err)
+	}
+
+	log.Printf("Blast Radius daemon started and listening on %s (0600 + token auth)", socketPath)
 
 	// Run initial discovery on startup (Phase 1) — runs in background
 	go d.discovery.RunInitialDiscovery()
@@ -154,6 +190,7 @@ func (d *Daemon) Run() error {
 			logging.Println("Received HALT command, shutting down daemon...")
 		}
 		d.listener.Close()
+		_ = removeAuthToken(socketPath) // best effort cleanup of capability token
 	}()
 
 	for {
@@ -177,6 +214,26 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
 
+	// SECURITY (2026): every connection must begin with a valid AUTH line.
+	// The authenticateConnection hook is overridable so net.Pipe tests can
+	// bypass it while still exercising the real command dispatch.
+	firstLine, err := reader.ReadString('\n')
+	if err != nil {
+		return
+	}
+	if !authenticateConnection(firstLine, d.authToken) {
+		// Auth failed — tell the client and close. Do not process any commands.
+		resp := map[string]string{
+			"status":  "error",
+			"message": "authentication required or invalid token",
+		}
+		data, _ := json.Marshal(resp)
+		conn.Write(append(data, '\n'))
+		return
+	}
+
+	// Auth succeeded — now process commands on this connection (supports
+	// the multi-CHECK_HASH pattern used by the env command).
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
@@ -244,4 +301,44 @@ func getDaemonLogPath() string {
 		return "/tmp/blastradius-daemon.log"
 	}
 	return filepath.Join(home, ".local", "state", "blastradius", "daemon.log")
+}
+
+// --- Capability token helpers (Phase D security hardening) ---
+
+const authTokenSuffix = ".auth"
+
+// realWriteAuthToken writes the hex token next to the socket with 0600.
+func realWriteAuthToken(socketPath, hexToken string) error {
+	authPath := socketPath + authTokenSuffix
+	return os.WriteFile(authPath, []byte(hexToken), 0600)
+}
+
+// realReadAuthToken reads the sibling .auth file.
+func realReadAuthToken(socketPath string) (string, error) {
+	data, err := os.ReadFile(socketPath + authTokenSuffix)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// realRemoveAuthToken removes the sibling .auth file (best effort, ignores not-exist).
+func realRemoveAuthToken(socketPath string) error {
+	authPath := socketPath + authTokenSuffix
+	err := os.Remove(authPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+// realAuthenticateConnection returns true if the first line from the client
+// is a valid "AUTH <token>" that matches what the daemon wrote at startup.
+func realAuthenticateConnection(firstLine, expectedToken string) bool {
+	firstLine = strings.TrimSpace(firstLine)
+	if !strings.HasPrefix(firstLine, "AUTH ") {
+		return false
+	}
+	provided := strings.TrimSpace(firstLine[5:])
+	return provided == expectedToken && expectedToken != ""
 }

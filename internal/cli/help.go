@@ -10,7 +10,7 @@ import (
 func PrintHelp() {
 	cfg, configPath, _ := configLoad()
 	if cfg == nil {
-		cfg = &config.Config{SocketPath: "/tmp/blastradius.sock"}
+		cfg = &config.Config{} // defensive; SocketPath is now a hard-coded invariant
 	}
 
 	fmt.Println("Blast Radius - Secret exposure reduction tool")
@@ -18,7 +18,7 @@ func PrintHelp() {
 	fmt.Printf("Config: %s\n", configPath)
 	fmt.Println()
 	fmt.Println("Settings:")
-	fmt.Printf("  Socket:        %s\n", cfg.SocketPath)
+	fmt.Printf("  Socket:        %s\n", config.SocketPath())
 	if len(cfg.ProjectRoots) > 0 {
 		fmt.Printf("  Project Roots: %v\n", cfg.ProjectRoots)
 	} else {

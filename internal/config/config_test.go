@@ -4,12 +4,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
-	if cfg.SocketPath == "" || len(cfg.SkipDirs) == 0 || len(cfg.Pillar5Commands) == 0 {
+	if len(cfg.SkipDirs) == 0 || len(cfg.Pillar5Commands) == 0 {
 		t.Error("defaults missing required fields")
 	}
 	if !cfg.ResidueHunter.FlagSuspiciousFilenames || len(cfg.ResidueHunter.TargetDirs) == 0 {
@@ -29,8 +30,7 @@ func TestLoad_NoFile(t *testing.T) {
 func TestLoad_WithValidYAML(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
-	content := `socket_path: "/tmp/test.sock"
-project_roots: ["/tmp"]
+	content := `project_roots: ["/tmp"]
 `
 	if err := os.WriteFile(cfgPath, []byte(content), 0600); err != nil {
 		t.Fatal(err)
@@ -51,13 +51,11 @@ project_roots: ["/tmp"]
 		return nil, os.ErrNotExist
 	}
 
-	cfg, path, err := Load()
+	_, path, err := Load()
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if cfg.SocketPath != "/tmp/test.sock" {
-		t.Errorf("unexpected socket_path: %s", cfg.SocketPath)
-	}
+	// socket_path is no longer a user-configurable field (hard-coded security invariant)
 	if path == "" {
 		t.Error("expected configPath to be returned")
 	}
@@ -139,13 +137,12 @@ func TestLoad_HomeDirFails(t *testing.T) {
 
 	userHomeDir = func() (string, error) { return "", errors.New("no home") }
 
-	cfg, path, err := Load()
+	_, path, err := Load()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.SocketPath == "" {
-		t.Error("expected defaults when home fails")
-	}
+	// socket path is now a hard-coded invariant; no longer part of Config
+
 	if path != "" {
 		t.Error("expected empty path when home fails")
 	}
@@ -205,8 +202,7 @@ func TestSave_WriteError(t *testing.T) {
 
 func TestSave_ErrorPath(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.SocketPath = string([]byte{0})
-	_ = cfg.Save()
+	_ = cfg.Save() // socket path is no longer a field on Config
 }
 
 // Extra edges for Load coverage (other read err, socket defaulting, residue defaults fill).
@@ -228,7 +224,7 @@ func TestLoad_ReadOtherError(t *testing.T) {
 	}
 }
 
-func TestLoad_SocketDefaultAndResidueFill(t *testing.T) {
+func TestLoad_ResidueDefaults(t *testing.T) {
 	dir := t.TempDir()
 	origRead := osReadFile
 	origHome := userHomeDir
@@ -237,17 +233,16 @@ func TestLoad_SocketDefaultAndResidueFill(t *testing.T) {
 		userHomeDir = origHome
 	}()
 	userHomeDir = func() (string, error) { return dir, nil }
-	// yaml with empty socket (triggers default) + residue enabled:false + empty targets (triggers fill)
+	// yaml with residue enabled:false + empty targets (triggers fill)
 	osReadFile = func(name string) ([]byte, error) {
-		return []byte("socket_path: \"\"\nresidue_hunter:\n  enabled: false\n  target_dirs: []\n"), nil
+		return []byte("residue_hunter:\n  enabled: false\n  target_dirs: []\n"), nil
 	}
 	cfg, _, err := Load()
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if cfg.SocketPath == "" {
-		t.Error("expected socket defaulted")
-	}
+	// socket path is a hard-coded invariant and no longer appears in user config
+
 	if len(cfg.ResidueHunter.TargetDirs) == 0 {
 		t.Error("expected residue target dirs filled from defaults")
 	}
@@ -269,5 +264,27 @@ func TestSave_MkdirError(t *testing.T) {
 	cfg := DefaultConfig()
 	if err := cfg.Save(); err == nil {
 		t.Error("expected mkdir error on Save")
+	}
+}
+
+func TestSocketPath_Default(t *testing.T) {
+	path := SocketPath()
+	if path == "" {
+		t.Error("SocketPath() returned empty string")
+	}
+	if !strings.Contains(path, "blastradius.sock") {
+		t.Errorf("SocketPath() = %q, expected to contain blastradius.sock", path)
+	}
+}
+
+func TestSocketPath_Override(t *testing.T) {
+	orig := SocketPathFn
+	defer func() { SocketPathFn = orig }()
+
+	custom := "/tmp/custom-test-socket.sock"
+	SocketPathFn = func() string { return custom }
+
+	if got := SocketPath(); got != custom {
+		t.Errorf("SocketPath() after override = %q, want %q", got, custom)
 	}
 }

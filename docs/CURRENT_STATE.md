@@ -83,11 +83,18 @@ No `recorder/` package remains.
 | 1   | Registry never contains plaintext       | ✅     |
 | 2   | No secret material ever written to disk | ✅     |
 | 3   | IPC over Unix domain socket with 0600   | ✅     |
+|     | **Hard invariant since 2026**: path is not user-configurable; always `~/.local/state/blastradius/blastradius.sock` + 0700 dir + 0600 socket + capability token | |
 | 4   | True singleton daemon                   | ✅     |
 | 5   | Minimal metadata (opaque ProjectIDs)    | ✅     |
 | 6   | Persisted config is non-sensitive       | ✅     |
 | 7   | Safe degradation on failure             | ✅     |
 | 8   | Respects ignore patterns                | ✅     |
+| 9   | **Pillar 5 commands use direct exec only (no shell)** | ✅ (2026) |
+
+**Note on removed configuration options (2026 hardenings):**
+- `socket_path` is no longer accepted in `config.yaml` (the path is now a hard-coded invariant).
+- The `shell:` key under `pillar5_commands` is no longer accepted. All commands run via direct `exec`.
+Old keys are silently ignored by the YAML parser. Users relying on previous behavior should migrate to wrapper scripts for complex commands and remove the old keys.
 
 ---
 

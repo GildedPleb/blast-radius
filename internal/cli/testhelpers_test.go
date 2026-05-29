@@ -24,11 +24,15 @@ func resetTestOverrides(t testing.TB) {
 	t.Helper()
 
 	cfg := defaultTestConfig()
-	cfg.SocketPath = filepath.Join(t.TempDir(), "br.sock")
 
+	// Force a unique per-test socket path (hard-coded SocketPath invariant is
+	// overridden here for hermetic testing only, via the exported test seam).
+	tempSocket := filepath.Join(t.TempDir(), "br.sock")
 	configLoad = func() (*config.Config, string, error) {
 		return &cfg, "", nil
 	}
+	config.SocketPathFn = func() string { return tempSocket }
+
 	netDialTimeout = net.DialTimeout
 	execCommand = exec.Command
 	osReadFile = os.ReadFile
@@ -37,6 +41,7 @@ func resetTestOverrides(t testing.TB) {
 	getDaemonLogPathFn = getDaemonLogPath
 	sendDaemonCommandFn = realSendDaemonCommand
 	osExit = func(code int) {} // silent no-op during tests
+	readAuthTokenForSocket = realReadAuthTokenForSocket // reset to real (tests that need fake override it)
 }
 
 // mockSendDaemonCommand returns a sendDaemonCommandFn that always returns the given line.
@@ -47,8 +52,8 @@ func mockSendDaemonCommand(respLine string) func(string) (string, error) {
 }
 
 // defaultTestConfig returns a minimal config for tests.
-// Note: SocketPath is intentionally left empty here. resetTestOverrides(t)
-// always overrides it with a unique path under t.TempDir() for sandboxing.
+// Socket path is now a hard-coded invariant; tests override it via
+// config.SocketPathFn in resetTestOverrides.
 func defaultTestConfig() config.Config {
 	return config.Config{}
 }
