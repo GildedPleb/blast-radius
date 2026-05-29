@@ -32,33 +32,6 @@ type Config struct {
 
 	// ClipboardClearSeconds is the time after which detected secrets in clipboard are auto-cleared.
 	ClipboardClearSeconds int `yaml:"clipboard_clear_seconds,omitempty"`
-
-	// Redaction holds Phase 4 Pillar 3 settings (shared with history scrubbing).
-	Redaction RedactionConfig `yaml:"redaction,omitempty"`
-}
-
-// RedactionConfig controls rebuild and redaction behavior (explicit protection mode).
-//
-// The Buffer field is the unified retention control:
-//   - It governs automatic redaction timing (how many prompts pass before older
-//     windows may be rebuilt redacted).
-//   - It also bounds how many recent windows retain full raw output containing
-//     secrets in the recorder's memory. This enables `redact N` to show originals
-//     for the last min(N, buffer) prompts while older history is sealed (raw bytes
-//     discarded).
-//   - buffer=0 means aggressive sealing on next prompt (minimal plaintext lifetime).
-//   - Default 1 keeps raw for only the most recent window (recommended balance).
-// The current number of raw-retaining windows is reported in `status --json` for auditability.
-// Plaintext secrets are never stored on disk and lifetime is strictly bounded by this value.
-type RedactionConfig struct {
-	Buffer              int    `yaml:"buffer"`
-	HistoryLength       int    `yaml:"history_length"`
-	PreserveColors      bool   `yaml:"preserve_colors"`
-	ShowRebuildEvidence bool   `yaml:"show_rebuild_evidence"`
-	RedactionMode       string `yaml:"redaction_mode"`
-	CustomReplacement   string `yaml:"custom_replacement"`
-	ClearResetCommands  []string `yaml:"clear_reset_commands"`
-	WarningPersist      int    `yaml:"warning_persist"` // prompts to show ⚠️ before scrubbing
 }
 
 // Pillar5Command represents a single command to execute for runtime hygiene checks.
@@ -94,16 +67,6 @@ func DefaultConfig() *Config {
 			{Name: "default-env", Cmd: "printenv", AutoOnPrompt: true},
 		},
 		ClipboardClearSeconds: 30,
-		Redaction: RedactionConfig{
-			Buffer:              1,
-			HistoryLength:       0,
-			PreserveColors:      true,
-			ShowRebuildEvidence: true,
-			RedactionMode:       "replace",
-			CustomReplacement:   "[REDACTED]",
-			ClearResetCommands:  []string{},
-			WarningPersist:      1,
-		},
 	}
 }
 

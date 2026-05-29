@@ -41,36 +41,5 @@ pillar5_commands:
     cmd: "kubectl get secrets --ignore-not-found -o yaml"
     auto_on_prompt: false
 
-# Clipboard auto-clear timeout in seconds (Pillar 2)
+# Clipboard auto-clear timeout in seconds (Pillar 5)
 clipboard_clear_seconds: 30
-
-# Redaction / Protection Mode (Pillar 3)
-# The `buffer` setting is the unified control for BOTH:
-#   - How many prompts must pass before automatic redaction/rebuild is allowed.
-#   - How many of the most recent windows keep their FULL RAW output (including secrets)
-#     in memory inside the recorder. This is required to support `blastradius redact N`
-#     fidelity for the last N prompts and for the automatic grace period.
-#
-# Plaintext secret lifetime is strictly bounded by this value:
-#   - buffer: 0  -> aggressive: seal (discard raw secret bytes) on the very next prompt.
-#   - buffer: 1  (default) -> raw kept only for the single most recent window.
-#   - buffer: 3  -> allows high-fidelity `redact 3`; you explicitly accept bounded
-#                 memory exposure for the 3 most recent windows.
-#
-# Higher values increase the window during which a memory dump or compromised
-# recorder process could observe secret material. Default 1 is the recommended
-# balance. The current raw window count is visible via `blastradius status --json`.
-#
-# history_length hard-caps total retained windows (redacted or raw forms).
-redaction:
-  buffer: 1
-  history_length: 0
-  preserve_colors: true
-  show_rebuild_evidence: true
-  redaction_mode: "replace"
-  custom_replacement: "[REDACTED]"
-  # Additional commands (beyond the built-in clear/reset/tput clear/tput reset)
-  # that should also cause protected history to be reset.
-  # The four core commands are always honored and cannot be disabled.
-  clear_reset_commands: []
-  warning_persist: 1

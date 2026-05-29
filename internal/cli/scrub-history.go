@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// RunScrubHistory triggers history file scrubbing (Pillar 4).
+// RunScrubHistory triggers history file scrubbing (Pillar 3).
 func RunScrubHistory() {
 	fmt.Println("Requesting history scrub (this may take a moment)...")
 

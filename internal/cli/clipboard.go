@@ -7,7 +7,7 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/logging"
 )
 
-// RunClipboard handles Pillar 2 clipboard operations (macOS only for v1)
+// RunClipboard handles Pillar 5 clipboard operations (macOS only for v1)
 func RunClipboard(args []string) {
 	_ = logging.Init(logging.DefaultDaemonLogPath())
 

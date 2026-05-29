@@ -18,8 +18,6 @@ func resetTestOverrides() {
 	osReadFile = os.ReadFile
 	osUserHomeDir = os.UserHomeDir
 	sendDaemonCommandFn = realSendDaemonCommand
-	sendRecorderCommandFn = realSendRecorderCommand
-	sendRecorderReplayRequestFn = realSendRecorderReplayRequest
 	osExit = func(code int) {} // silent no-op during tests
 }
 
@@ -28,14 +26,6 @@ func mockSendDaemonCommand(respLine string) func(string) (string, error) {
 	return func(cmd string) (string, error) {
 		return respLine, nil
 	}
-}
-
-// mockSendRecorderReplayRequest returns a no-op success for tests (simulates successful redact replay).
-func mockSendRecorderReplayRequest(payload string, out *os.File) error {
-	if out != nil {
-		_, _ = out.Write([]byte("[mock redacted output for N]\n"))
-	}
-	return nil
 }
 
 // defaultTestConfig returns a minimal config for tests.

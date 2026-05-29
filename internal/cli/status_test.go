@@ -29,9 +29,8 @@ func TestRunStatus_UnifiedJSONShape(t *testing.T) {
 	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","registry":{"tracked_hashes":7,"duplicate_hashes":0},"time":"2026-01-01T00:00:00Z"}`)
 
 	// We can't easily capture stdout here without more test harness, but we
-	// can exercise the full happy path (daemon + no recorder socket) and the
-	// daemonOrNotRunning helper, then assert the helper itself produces the
-	// expected sentinel shape.
+	// can exercise the full happy path and the daemonOrNotRunning helper,
+	// then assert the helper itself produces the expected sentinel shape.
 	out := daemonOrNotRunning(nil, nil)
 	if m, ok := out.(map[string]any); !ok || m["status"] != "not_running" {
 		t.Errorf("daemonOrNotRunning sentinel shape wrong: %#v", out)
@@ -41,8 +40,5 @@ func TestRunStatus_UnifiedJSONShape(t *testing.T) {
 	// or produces unmarshalable garbage the test will fail loudly.
 	RunStatus(true)
 
-	// When we have a real recorder socket in future integration tests we would
-	// also assert "recorder" key presence; the unit test at least guarantees
-	// the top-level keys and marshal path are exercised without the old hacks.
 	_ = json.Marshal // compile-time reminder we use encoding/json in the impl
 }

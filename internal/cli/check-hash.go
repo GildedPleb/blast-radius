@@ -2,7 +2,7 @@ package cli
 
 import "fmt"
 
-// RunCheckHash is used by Zsh redaction layer (Phase 4) to query if a SHA-256 hex is known.
+// RunCheckHash is used by env and clipboard hygiene checks to query if a SHA-256 hex is known.
 func RunCheckHash(hexHash string) {
 	line, err := sendDaemonCommand(fmt.Sprintf("CHECK_HASH %s", hexHash))
 	if err != nil {

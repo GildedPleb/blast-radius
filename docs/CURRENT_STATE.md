@@ -1,180 +1,122 @@
-# Blast Radius — Current State & Architecture (as of 2026-05-22)
+# Blast Radius — Current State (Post Redaction/Recorder Pillar Sunset)
 
-> **Note:** This snapshot predates the CLI refactor (see `docs/CLI_REFACTOR_DESIGN.md`, 2026-05-25).
-> The single-coordinator model (`blastradius` as the only entrypoint, `protection start/stop`,
-> unified `status --json`, TTY-derived recorder sockets, thin Zsh) is the current architecture.
-> Many details below (dispatcher, auto-start behavior, direct Zsh sockets) are now historical.
+**Date:** 2026 (post-sunset)
 
-**This document provides a complete snapshot of the project state.**  
-It is intended to serve as the primary context document when restarting conversations or onboarding.
+**This document provides a snapshot of the current project state.** It is intended to serve as onboarding and context for the state after the full removal of the terminal redaction / explicit protection / recorder pillar.
+
+The authoritative framing for the system is now in [docs/pillars/idiomatic_pillars.md](pillars/idiomatic_pillars.md).
 
 ---
 
 ## Executive Summary
 
-Blast Radius has completed **Phases 0, 1, 2, and 3**.
+Blast Radius is a local, hash-only tool for secret exposure reduction. It has completed core infrastructure and four of the five idiomatic pillars. The complex "Pillar 3 / Phase 4" terminal redaction and per-TTY PTY recorder system (protection mode, `blastradius redact`, sealed windows, `REPLAY_REDACTED` protocol, etc.) has been **fully removed** as it proved disproportionately difficult to maintain and reason about.
 
-- **Phase 0**: Foundations, singleton daemon, Unix domain socket IPC, CLI structure, invariants.
-- **Phase 1**: Discovery engine, `.env*` scanning, SHA-256 hashing, ignore patterns, aggressive pruning, scan state tracking, proper file logging.
-- **Phase 2**: Zsh integration layer + composable prompt HUD.
-- **Phase 3**: Pillar 1 (Duplicate Alerting) + Pillar 4 (History Hygiene) + major refactoring + security cleanup.
+**Current pillars (per idiomatic_pillars.md):**
+- **Pillar 1**: Legitimate Secret Discovery (`.env*` scanning + registry) — ✅ Implemented
+- **Pillar 2**: Illegitimate Secret Residue — **Completely unimplemented**. Zero code exists. Only a design document (`docs/pillars/residue_hunter_scoped.md`) remains.
+- **Pillar 3**: History Hygiene (`scrub-history`) — ✅ Implemented
+- **Pillar 4**: Runtime Environment Hygiene (`env` / user-defined commands) — ✅ Implemented
+- **Pillar 5**: Clipboard Hygiene (`clipboard`) — ✅ Implemented (auto-clear timer not yet built)
 
-**Current focus**: All v1 phases complete (Phases 0–5).
-
-- Explicit Protected Mode with Go PTY recorder (long-lived inner zsh + atomic in-memory windows)
-- Automatic window flush on every prompt boundary via precmd
-- Immediate hashing of all output lines on flush (secrets treated as IO; no plaintext retained)
-- `REPLAY_REDACTED` + automatic protected history reset on core clear commands (`clear`/`reset`/`tput clear`/`tput reset` + variants with args) inside the recorder; `blastradius redact [N]` for manual redacted rebuild
-- Zsh layer for mode entry/exit, status, and orchestration
-- CLI `recorder` commands + `check-hash` support
-- All core invariants upheld (hash-only, minimal metadata, safe degradation)
-
-The project follows a strict **hash-only, minimal-metadata, local-only** philosophy with strong emphasis on safe degradation and attack surface elimination.
+The system remains strictly **hash-only, minimal-metadata, local-only** with safe degradation.
 
 ---
 
-## Completed Phases
+## Completed Work
 
-| Phase | Name                              | Status     | Key Deliverables |
-|-------|-----------------------------------|------------|------------------|
-| 0     | Foundations & Core Architecture   | ✅ Complete | Singleton daemon, Unix socket, CLI skeleton, invariants, config system |
-| 1     | Discovery, Registry & File Watching | ✅ Complete | Recursive `.env*` discovery, SHA-256, ignore engine, pruning, scan state, logging to file |
-| 2     | Zsh Integration & Ambient HUD     | ✅ Complete | Composable prompt functions, `--json` status, plugin |
-| 3     | Pillar 1 + Pillar 4               | ✅ Complete | Duplicate detection, `duplicates` command, history scrubbing, major refactor |
-| 4     | Pillar 3 (CLI Output Redaction)   | ✅ Complete | Go PTY recorder + sealed windows + unified buffer (retention + timing), `redact [N]` mixed replay, live status of raw window count, zsh + CLI orchestration |
-| 5     | Pillar 5 + Pillar 2               | ✅ Complete | Extensible runtime hygiene commands (user-defined), auto prompt-boundary execution (opt-in per command), macOS clipboard detection + time-based clear, HUD integration |
+| Area                  | Status     | Key Deliverables |
+|-----------------------|------------|------------------|
+| Foundations (Phase 0) | ✅ Complete | Singleton daemon, Unix socket (0600), CLI coordinator, config system, invariants |
+| Discovery + Registry (Pillar 1) | ✅ Complete | Recursive `.env*` scanning, SHA-256 hashing, ignore engine, pruning, opaque ProjectIDs, duplicates detection |
+| Zsh HUD               | ✅ Complete | Thin prompt segment + status wrappers (no capture hooks) |
+| History Hygiene (Pillar 3) | ✅ Complete | `scrub-history` command + daemon handler |
+| Runtime Hygiene (Pillar 4) | ✅ Complete | `env` command, extensible `pillar5_commands` in config |
+| Clipboard Hygiene (Pillar 5) | ✅ Complete | `clipboard` status/check/clear (macOS) |
+| Redaction/Recorder Pillar | ❌ **Removed** | Entire `recorder/` package, protection mode, `redact [N]`, per-TTY sockets, sealed windows, and all supporting code/docs deleted |
+| Pillar 2 (Illegitimate Residue) | ❌ **Zero work done** | Only design doc exists (`residue_hunter_scoped.md`). No scanner, no config handling, no commands, no daemon support. |
 
 ---
 
-## Current Architecture (Post-Refactor)
+## Current Architecture
 
 ### Package Structure
 
 ```
 cmd/blastradius/
-    main.go                 # Thin dispatcher only
+    main.go                 # Ultra-thin entrypoint
 
 internal/
 ├── cli/
-│   └── cli.go              # All command implementations (RunStatus, RunStart, RunRecorder, etc.)
+│   └── cli.go              # Coordinator for all commands (start, status, stop, duplicates, scrub-history, env, clipboard, config, help)
 ├── daemon/
-│   └── daemon.go           # Unix socket server + request routing + graceful shutdown
+│   └── daemon.go           # Unix socket server + handlers (STATUS, DUPLICATES, SCRUB_HISTORY, CHECK_HASH, etc.)
 ├── registry/
-│   └── registry.go         # In-memory SecretHashRegistry (core data structure)
+│   └── registry.go         # In-memory SecretHashRegistry (hash-only)
 ├── discovery/
-│   ├── manager.go          # Discovery orchestration + project metadata
-│   ├── scanner.go          # Recursive walk + hashing + pruning
-│   └── ignore.go           # gitignore-style pattern matching
+│   ├── manager.go
+│   ├── scanner.go
+│   └── ignore.go
 ├── config/
-│   └── config.go           # YAML loading + defaults
-└── (no logger package yet — using std log routed to file)
-
-recorder/
-    recorder.go             # Go PTY engine: long-lived inner shell, atomic windows + sealing, buffer-driven raw retention, control socket (NEW_WINDOW/FLUSH/REPLAY_REDACTED/RECORDER_STATUS)
+│   └── config.go           # YAML + defaults (no RedactionConfig)
+└── logging/
+    └── logging.go          # Daemon-only logging (recorder helpers removed)
 ```
 
-### Key Design Decisions Made
+No `recorder/` package remains.
 
-1. **Opaque ProjectID (Critical)**
-   - `ProjectID` is **not** a filesystem path.
-   - It is the first 8 characters of the SHA-256 hash of the canonical directory path.
-   - The `Registry` only ever sees opaque IDs.
-   - `DiscoveryManager` maintains the mapping to human-friendly display names (`.../project/backend`).
-   - Full paths exist only transiently during discovery and are discarded.
-   - This significantly reduces the sensitivity of in-memory state.
-
-2. **Logging Strategy**
-   - Daemon and discovery code **always** log via Go's `log` package.
-   - Output goes to: `~/.local/state/blastradius/daemon.log`
-   - Client commands use `fmt` for terminal output (correct separation).
-   - No more terminal pollution from the daemon.
-
-3. **Scan State**
-   - Exposed via `status`: `not_started` | `in_progress` | `completed` | `failed`
-   - Users can start the daemon and check progress asynchronously.
-
-4. **CLI Structure**
-   - `blastradius` (no args) and `blastradius help` → show help + config location (never starts daemon)
-   - `blastradius start` → explicitly start daemon
-   - `blastradius status` → does **not** auto-start
-   - `blastradius stop` / `halt` → graceful shutdown
-   - `blastradius duplicates` → Pillar 1
-   - `blastradius scrub-history` → Pillar 4
-   - `blastradius logs` → view daemon log
-
-5. **Performance / Pruning**
-   - Hardcoded aggressive skip list for common heavy directories (`node_modules`, `.git`, `vendor`, etc.).
-   - Also respects `.gitignore` + `.blastradiusignore`.
-   - Configurable via `skip_dirs` and `ignore_files` in config (with safe defaults).
+### Key Properties
+- Single CLI coordinator (`blastradius` binary handles everything user-facing).
+- Daemon is started explicitly via `blastradius start`.
+- `status --json` is the stable machine interface.
+- Zsh layer is thin formatting only (prompt segment + convenience wrappers).
+- All secret detection uses the central registry via `CHECK_HASH`.
 
 ---
 
-## Core Invariants (Current Status)
+## Core Invariants (Current)
 
-All original invariants remain upheld:
-
-| # | Invariant | Status | Notes |
-|---|-----------|--------|-------|
-| 1 | Registry never contains plaintext | ✅ | Hashing happens at discovery edge |
-| 2 | No secret material ever written to disk | ✅ | Registry is purely in-memory |
-| 3 | IPC over Unix domain socket with `0600` | ✅ | Enforced on bind |
-| 4 | True singleton | ✅ | Connection-first detection |
-| 5 | **Minimal metadata** | ✅ **Strengthened** | Opaque `ProjectID` + display names only |
-| 6 | Persisted state is non-sensitive | ✅ | Config only |
-| 7 | Safe degradation | ✅ | Clear status reporting |
-| 8 | Respects ignore patterns | ✅ | Active in scanner |
-| 9 | Secrets as IO (immediate hash) | ✅ | All terminal output hashed on flush; no plaintext retained beyond transient recorder buffer |
+| # | Invariant                              | Status |
+|---|----------------------------------------|--------|
+| 1 | Registry never contains plaintext      | ✅ |
+| 2 | No secret material ever written to disk| ✅ |
+| 3 | IPC over Unix domain socket with 0600  | ✅ |
+| 4 | True singleton daemon                  | ✅ |
+| 5 | Minimal metadata (opaque ProjectIDs)   | ✅ |
+| 6 | Persisted config is non-sensitive      | ✅ |
+| 7 | Safe degradation on failure            | ✅ |
+| 8 | Respects ignore patterns               | ✅ |
 
 ---
 
-## Data Model (Registry)
-
-- `SecretHash` = `[32]byte` (SHA-256 of secret **value** only)
-- `ProjectID` = opaque string (first 8 hex chars of path hash)
-- `Entry` contains only: `map[ProjectID]struct{}` + `LastSeen`
-- No file paths, no keys, no plaintext — ever.
-
-Display names are resolved on-demand via `DiscoveryManager.GetProjectDisplayName()` for user-facing output.
-
----
-
-## Current Commands (Working)
+## Current Commands
 
 ```bash
-blastradius                  # Help + config location (safe)
-blastradius start            # Start daemon (scans in background)
-blastradius status           # Full status + scan_state + duplicates count
-blastradius status --json    # Machine readable
-blastradius stop             # Graceful shutdown
-blastradius duplicates       # Show cross-project secret duplication
-blastradius scrub-history    # Remove known secrets from Zsh history (atomic)
-  blastradius logs             # View daemon log file
-  blastradius env [name]       # Pillar 5 runtime hygiene (default: printenv)
-  blastradius clipboard        # Pillar 2 clipboard status / clear (macOS)
+blastradius                  # Help + config location
+blastradius start            # Start background daemon + initial discovery
+blastradius status [--json]  # Daemon + registry state (tracked hashes, duplicates, scan state)
+blastradius stop / halt      # Graceful shutdown
+blastradius duplicates       # Pillar 1: cross-project secret duplication
+blastradius scrub-history    # Pillar 3: scrub known secrets from shell history
+blastradius env [name]       # Pillar 4: run runtime hygiene command (e.g. printenv)
+blastradius clipboard        # Pillar 5: clipboard status / clear (macOS)
+blastradius logs             # View daemon log
+blastradius config           # Basic config surface
 ```
+
+Zsh integration (source `zsh/blastradius.zsh`):
+- `blastradius_prompt_info` — compact prompt segment
+- `blastradius_status`
 
 ---
 
 ## Known Limitations / Future Work
 
-- Full reactive file watching (`fsnotify`) is **not yet implemented** (initial discovery only).
-- All five pillars are now implemented in v1.
-- Zsh `preexec` / `precmd` hooks exist as skeletons only.
-- No editor/AI integration (out of v1 scope).
-- History scrubbing currently only supports Zsh.
-
----
-
-## Recommended Next Steps (Phase 4 Focus)
-
-Phase 4 (Pillar 3) will require careful design around:
-
-- Detecting sensitive commands in `preexec`
-- Safe manipulation of Zsh history (`fc`)
-- Terminal output redaction strategy (history rewrite + prompt reset vs more advanced techniques)
-- Balancing correctness with terminal compatibility
-
-A detailed design discussion is recommended before implementation.
+- **Pillar 2 (Illegitimate Secret Residue)**: Completely incomplete. Zero implementation exists — no code, no config loading, no discovery logic, no commands, and no daemon handlers. Only a historical design document remains in `docs/pillars/residue_hunter_scoped.md`.
+- No reactive file watching (`fsnotify`) — discovery runs on daemon start only.
+- History scrubbing supports Zsh only.
+- No editor / AI prompt integration.
+- Clipboard auto-clear timer (Pillar 5) is declared in config but not yet implemented.
 
 ---
 
@@ -182,27 +124,23 @@ A detailed design discussion is recommended before implementation.
 
 ```bash
 go build -o blastradius ./cmd/blastradius
-
 ./blastradius start
 ./blastradius status
-./blastradius logs
 ```
 
-Config location: `~/.config/blastradius/config.yaml`  
-Example config: `config.example.yaml`
+Config: `~/.config/blastradius/config.yaml` (see `config.example.yaml`)
 
 ---
 
-## Philosophy & Principles (Still Active)
+## Philosophy (Unchanged)
 
 - YAGNI + KISS + Earn Your Abstractions
-- Eliminate attack surface rather than reduce it
+- Eliminate attack surface
 - Hash-only by construction
-- Minimal metadata (especially paths)
+- Minimal metadata
 - Safe degradation
-- Composability (Zsh layer)
-- Logging always goes to the logger for daemon paths
+- Thin composable layers (Zsh)
 
 ---
 
-*This document should be updated after every major phase or significant architectural decision.*
+*Update this document whenever the pillar surface or core architecture changes.*

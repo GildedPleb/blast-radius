@@ -17,26 +17,22 @@ const (
 
 // Overridable for testing (DI via var assignment)
 var (
-	configLoad            = config.Load
-	netDialTimeout        = net.DialTimeout
-	execCommand           = exec.Command
-	osReadFile            = os.ReadFile
-	osUserHomeDir         = os.UserHomeDir
-	sendDaemonCommandFn       = realSendDaemonCommand
-	sendRecorderCommandFn     = realSendRecorderCommand
-	sendRecorderReplayRequestFn = realSendRecorderReplayRequest
-	osExit                    = os.Exit
+	configLoad        = config.Load
+	netDialTimeout    = net.DialTimeout
+	execCommand       = exec.Command
+	osReadFile        = os.ReadFile
+	osUserHomeDir     = os.UserHomeDir
+	sendDaemonCommandFn = realSendDaemonCommand
+	osExit            = os.Exit
 )
 
 // Run is the single coordinator entrypoint for all CLI commands. It owns
 // command dispatch, special-case flag handling (e.g. status --json, check-hash),
 // and routing to the individual Run* implementations.
 //
-// This fulfills the Phase 3 "remove the old dispatcher" intent in spirit: the
-// thin cmd/blastradius/main.go now delegates everything here. The coordinator
-// package is the only place that needs to understand the full user-facing and
-// internal command surface (including the "daemon" and "recorder" subcommands
-// used for detached lifecycle management).
+// The coordinator is the only place that needs to understand the full
+// user-facing and internal command surface (including the internal "daemon"
+// subcommand used for detached lifecycle management).
 func Run(osArgs []string) {
 	if len(osArgs) == 0 {
 		PrintHelp()
@@ -52,8 +48,6 @@ func Run(osArgs []string) {
 	case "status":
 		jsonOutput := len(tail) > 0 && tail[0] == "--json"
 		RunStatus(jsonOutput)
-	case "protection":
-		RunProtection(tail)
 	case "stop", "halt":
 		RunStop()
 	case "logs":
@@ -62,21 +56,16 @@ func Run(osArgs []string) {
 		RunDuplicates()
 	case "scrub-history", "scrub_history":
 		RunScrubHistory()
-	case "redact":
-		RunRedact(tail)
 	case "check-hash":
 		if len(tail) < 1 {
 			fmt.Println(`{"known":false,"error":"missing hash argument"}`)
 			return
 		}
 		RunCheckHash(tail[0])
-	// "daemon" and "recorder" are internal-only (launched by start/protection
-	// via os/exec of the same binary). They are intentionally not documented
-	// in help output for end users.
+	// "daemon" is internal-only (launched by start via os/exec).
+	// It is intentionally not documented in help output for end users.
 	case "daemon":
 		RunDaemon()
-	case "recorder":
-		RunRecorder(tail)
 	case "env":
 		name := ""
 		if len(tail) > 0 {

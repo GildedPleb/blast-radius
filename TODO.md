@@ -1,5 +1,3 @@
 - The skip files and ignore files are kind of stupid. rather the skip directories and ignore files are kind of stupid. And also, that should just be the single source of truth. There should not be strong defaults, et cetera.
 - Automatically create and populate a config.yaml.
-- Update command line history pillar 3 to include sensitive contents, not just sensitive. commands.
-- Soft high-water-mark warning for unbounded recorder history (e.g. 10 k windows / 500 MB)
-- High-risk command context (printenv, env, cat .env*, etc.) – treat entire output as sensitive
+- High-risk command context (printenv, env, cat .env*, etc.) – treat entire output as sensitive for hygiene checks (Pillar 4)

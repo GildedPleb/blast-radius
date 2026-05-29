@@ -8,6 +8,5 @@ func TestRunConfig(t *testing.T) {
 	defer restore()
 
 	RunConfig(nil)
-	RunConfig([]string{"redaction"})
 	RunConfig([]string{"unknown"})
 }

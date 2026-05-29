@@ -6,9 +6,9 @@ Blast Radius helps developers avoid leaking secrets through common workflow mist
 
 - Go core daemon (singleton via Unix domain socket)
 - Thin Zsh integration layer
-- Five extensible pillars for analysis, alerting, redaction, and hygiene
+- Five extensible pillars for analysis, alerting, and hygiene
 
-**Current Status:** All phases complete. Single CLI coordinator, TTY discovery, thin Zsh broker. See docs/CLI_REFACTOR_DESIGN.md.
+**Current Status:** Core daemon + discovery + hygiene pillars complete. See docs/pillars/idiomatic_pillars.md for the current framing.
 
 See [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) for a detailed snapshot of architecture, decisions, invariants, and current capabilities.
 
@@ -29,7 +29,6 @@ See [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) for a detailed snapshot of ar
 4. The background process is a true singleton.
 5. Only non-sensitive configuration is persisted.
 6. Failures degrade safely with clear status reporting.
-7. **Plaintext secret lifetime in the recorder is explicitly bounded** by `redaction.buffer` (default 1). Windows are sealed (raw bytes discarded) as they age out; `status --json` surfaces the current raw window count for audit. `redact [N]` fidelity is capped by the same bound.
 
 ## Building & Running
 
@@ -77,9 +76,8 @@ PROMPT='$(blastradius_prompt_info) '$PROMPT
 
 | Function                    | Description                                      |
 |----------------------------|--------------------------------------------------|
-| `blastradius_prompt_info`  | Returns a compact colored segment for your prompt (e.g. `[BR:142|completed]`) |
+| `blastradius_prompt_info`  | Returns a compact colored segment for your prompt (e.g. `[BR:142]`) |
 | `blastradius_status`       | Shows full human-readable daemon status          |
-| `blastradius_is_running`   | Returns 0 if daemon is running                   |
 
 ### Prompt Segment Example Output
 
@@ -88,9 +86,9 @@ PROMPT='$(blastradius_prompt_info) '$PROMPT
 
 The segment is designed to be **fast** and safe to call on every prompt.
 
-### Future Hook Support
+### Hook Support
 
-Skeletons for `preexec` and `precmd` are provided for upcoming features (command redaction, history hygiene).
+The Zsh layer provides a thin prompt segment for daemon visibility. Additional hooks can be added by users for custom workflows.
 
 ## Next Phases (Planned)
 
@@ -104,12 +102,10 @@ To be determined. Currently under active development.
 
 **Note:** This project is in early development. Interfaces and behavior will evolve.
 
-## Migration (post CLI refactor)
-- Single entrypoint: `blastradius` (coordinator owns daemon + recorder lifecycle)
-- Protection mode is explicit: `blastradius protection start|stop`
+## Current Architecture Notes
+- Single entrypoint: `blastradius`
 - All state for humans and Zsh comes from `blastradius status --json`
-- Zsh layer is now a thin formatting + hook broker (no leaked BR_* env vars, no direct recorder sockets except the narrow high-frequency capture path)
-- Clean break: the old multi-interface model is gone
+- Thin Zsh layer for prompt visibility (Pillar 1 tracking)
 
-See `docs/CLI_REFACTOR_DESIGN.md` for the full architecture and rationale.
+See `docs/pillars/idiomatic_pillars.md` for the current five-pillar framing.
 

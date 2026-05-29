@@ -237,7 +237,7 @@ func ProjectDisplayName(id ProjectID) string {
 }
 
 // IsKnownHashHex checks if a hex-encoded SHA-256 hash is in the registry.
-// Used by Phase 4 redaction detection (Zsh queries daemon for accuracy).
+// Used by runtime hygiene (env) and clipboard checks to query the daemon registry.
 // Returns false for invalid input.
 func (r *Registry) IsKnownHashHex(hexHash string) bool {
 	if len(hexHash) != 64 {

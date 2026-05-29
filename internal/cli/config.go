@@ -1,30 +1,14 @@
 package cli
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "fmt"
 
 // RunConfig handles subcommands under "blastradius config".
+// The previous "config redaction" subcommand was removed with the redaction/recorder pillar.
 func RunConfig(args []string) {
-	cfg, _, err := configLoad()
-	if err != nil {
-		fmt.Printf(`{"error":"%s"}`+"\n", err)
-		return
-	}
 	if len(args) == 0 {
-		fmt.Println("config redaction")
+		fmt.Println("The 'config' command surface was reduced after removal of the redaction pillar.")
+		fmt.Println("See config.example.yaml and the idiomatic_pillars.md documentation for current settings.")
 		return
 	}
-	switch args[0] {
-	case "redaction":
-		jsonOut, _ := json.Marshal(cfg.Redaction)
-		fmt.Println(string(jsonOut))
-		fmt.Println()
-		fmt.Println("# buffer (redaction.buffer) is the unified control for plaintext secret lifetime")
-		fmt.Println("# and `redact N` fidelity. See example config and 'status --json' for current values.")
-		fmt.Println("# Higher buffer = more raw history retained in recorder memory (bounded, explicit, auditable).")
-	default:
-		fmt.Println("unknown config subcommand")
-	}
+	fmt.Println("unknown config subcommand (the previous 'redaction' subcommand no longer exists)")
 }

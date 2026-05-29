@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // getDaemonLogPath returns the canonical location for the daemon log file.
@@ -48,49 +46,5 @@ func startDaemonInBackground() error {
 	// Don't wait for it
 	go cmd.Wait()
 
-	return nil
-}
-
-// getRecorderSocketPath returns deterministic per-terminal recorder socket using TTY hash.
-//
-// The path is ~/.local/state/blastradius/recorder-<8hex>.sock where the hex is the
-// first 8 bytes of sha256( sanitize( controlling-tty-name ) ) with "/" → "_".
-//
-// Discovery order (robust across Terminal, iTerm, VS Code, tmux, ssh, etc.):
-//  1. $TTY (if set by the shell or zsh plugin)
-//  2. Output of `tty` command (what the kernel thinks is our ctty)
-//  3. Hard fallback "/dev/tty"
-func getRecorderSocketPath() string {
-	tty := getCurrentTTYName()
-	safe := strings.ReplaceAll(tty, "/", "_")
-	h := sha256.Sum256([]byte(safe))
-	home, _ := osUserHomeDir()
-	return filepath.Join(home, ".local", "state", "blastradius", fmt.Sprintf("recorder-%x.sock", h[:8]))
-}
-
-// getCurrentTTYName attempts to discover the path of the controlling terminal
-// for the current process using multiple strategies. It never returns "".
-func getCurrentTTYName() string {
-	if t := os.Getenv("TTY"); t != "" {
-		return t
-	}
-	// Ask the OS what our controlling tty is. This works even when the
-	// process was not started from a login shell that exported $TTY.
-	out, err := execCommand("tty").Output()
-	if err == nil {
-		name := strings.TrimSpace(string(out))
-		if name != "" && !strings.Contains(strings.ToLower(name), "not a tty") {
-			return name
-		}
-	}
-	return "/dev/tty"
-}
-
-// ProtectionModeGuard returns error if no recorder socket for current TTY.
-func ProtectionModeGuard() error {
-	path := getRecorderSocketPath()
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return fmt.Errorf("protection mode not active for this terminal (run: blastradius protection start)")
-	}
 	return nil
 }

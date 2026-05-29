@@ -10,14 +10,14 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/logging"
 )
 
-// RunEnvCheck executes a Pillar 5 command (or default) and reports any known secrets found.
+// RunEnvCheck executes a Pillar 4 command (or default) and reports any known secrets found.
 func RunEnvCheck(name string) {
 	_ = logging.Init(logging.DefaultDaemonLogPath())
 
 	if name == "" {
 		name = "default-env"
 	}
-	logging.Printf("RunEnvCheck: running pillar5 command %q", name)
+	logging.Printf("RunEnvCheck: running Pillar 4 command %q", name)
 
 	cfg, _, err := configLoad()
 	if err != nil {
