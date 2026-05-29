@@ -1,5 +1,7 @@
 # Draft: New Pillar - Scoped Persistent Residue Hunter (Filesystem-focused)
 
+> **v1 status (2026):** Stage 1 ("Crumbs") of the Pillar 2 implementation plan is complete. `blastradius crumbs`, fixed detectors, config `residue_hunter`, daemon + status integration all shipped. See `pillar2-implementation-plan.md` for the required 6-stage completion roadmap (hunt_residue patterns, materialization roots, git, scheduling, etc. are **not optional** for "Pillar 2 fully operational").
+
 ## Name Ideas
 - Pillar X: Persistent Secret Residue Hunter
 - Pillar X: Forgotten Export / Dump Auditor
@@ -247,3 +249,31 @@ It may make sense to think of this pillar as having **two somewhat distinct jobs
    - Editor swaps, temp debug files, git reflog accidents, etc.
 
 Trying to force both into the exact same narrow folder list creates a mismatch, as you correctly identified.
+
+---
+
+## Implementation Stages (Added 2026)
+
+This document is the historical design source. The concrete implementation plan lives in [pillar2-implementation-plan.md](pillar2-implementation-plan.md). For visibility, the agreed staged rollout of Pillar 2 is:
+
+**Stage 1 (current work — "Crumbs" MVP)**  
+Vault export formats (Bitwarden JSON/CSV, Dashlane, 1Password, generic high-entropy) + suspicious filename heuristics, strictly inside the user-controlled `target_dirs` (Downloads/Documents/Desktop + additions). On-demand only via `blastradius crumbs`. Lightweight summary in `status`. `residue_hunter.enabled` + `target_dirs` only in config. All detectors are always-on when the feature is enabled (no selective format toggles).
+
+**Stage 2**  
+Inside the *same* `target_dirs`, add `hunt_residue` support: editor swap patterns (`*.swp`, `*.swo`, `*~`, `.#*`, `*_backup*`, temp/debug/crash files) with lower entropy threshold. Still advisory.
+
+**Stage 3**  
+Expand surface to realistic materialization locations (project dirs, `/tmp`, `~/tmp`, `~/.cache`, `~/Library/Logs`, etc.). Likely requires additional config surface or reuse of `project_roots`.
+
+**Stage 4**  
+Lightweight git surface (reflog + stash + uncommitted) + optional bounded history checks, tied to project roots.
+
+**Stage 5**  
+Background scheduling or fsnotify reactivity for the hunter.
+
+**Stage 6**  
+Zsh HUD integration + any final polish. (Secure delete suggestions remain strictly advisory forever.)
+
+Pillar 2 is not "done" until Stage 6. The high-confidence export hunter (Stage 1) is valuable and shippable by itself, but the full "residue sinks" vision requires all stages.
+
+See the implementation plan for the detailed file-by-file breakdown of Stage 1.

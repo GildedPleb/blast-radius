@@ -1,6 +1,10 @@
 package handlers
 
-import "time"
+import (
+	"time"
+
+	"github.com/GildedPleb/blast-radius/internal/residue"
+)
 
 // fakeContext is a minimal implementation of DaemonContext for handler tests.
 type fakeContext struct {
@@ -11,6 +15,8 @@ type fakeContext struct {
 	hashes       [][32]byte
 	now          time.Time
 	shutdown     bool
+	crumbs       map[string]any
+	crumbsResult *residue.ScanResult
 }
 
 func (f *fakeContext) RegistrySnapshot() any                  { return f.snapshot }
@@ -20,3 +26,11 @@ func (f *fakeContext) IsKnownHashHex(h string) bool           { return f.knownHa
 func (f *fakeContext) AllHashes() [][32]byte                  { return f.hashes }
 func (f *fakeContext) Now() time.Time                         { return f.now }
 func (f *fakeContext) TriggerShutdown()                       { f.shutdown = true }
+
+func (f *fakeContext) CrumbsSummary() map[string]any { return f.crumbs }
+func (f *fakeContext) RunCrumbsScan() *residue.ScanResult {
+	if f.crumbsResult != nil {
+		return f.crumbsResult
+	}
+	return &residue.ScanResult{Timestamp: time.Now().UTC()}
+}

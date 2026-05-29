@@ -34,6 +34,7 @@ func PrintHelp() {
 	fmt.Println("  scrub-history  Scrub shell history of known secret values (Pillar 3)")
 	fmt.Println("  env [name]     Run Pillar 4 runtime hygiene check (default: printenv)")
 	fmt.Println("  clipboard      Pillar 5 clipboard status / clear (macOS)")
+	fmt.Println("  crumbs         Pillar 2: locate forgotten vault exports & high-entropy dumps in high-risk dirs")
 	fmt.Println("  config         Show configuration")
 	fmt.Println("  help           Show this help message")
 	fmt.Println()

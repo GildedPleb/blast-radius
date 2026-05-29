@@ -43,3 +43,18 @@ pillar5_commands:
 
 # Clipboard auto-clear timeout in seconds (Pillar 5)
 clipboard_clear_seconds: 30
+
+# Pillar 2 — Illegitimate Secret Residue Hunter ("Crumbs")
+# Scans only the high-risk directories you list (never full disk).
+# Detects forgotten vault exports (Bitwarden, Dashlane, 1Password) + generic high-entropy secret dumps.
+# Always runs the complete fixed detector set when enabled (no selective disable for dangerous artifacts).
+residue_hunter:
+  enabled: false
+  target_dirs:
+    - "~/Downloads"
+    - "~/Documents"
+    - "~/Desktop"
+    # Add more if you have specific backup volumes or folders an attacker would look in.
+    # - "~/backups"
+  flag_suspicious_filenames: true   # catches obvious names even without deep parsing
+  # (detectors and thresholds are intentionally not user-configurable in v1)

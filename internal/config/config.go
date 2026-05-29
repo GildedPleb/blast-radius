@@ -32,6 +32,9 @@ type Config struct {
 
 	// ClipboardClearSeconds is the time after which detected secrets in clipboard are auto-cleared.
 	ClipboardClearSeconds int `yaml:"clipboard_clear_seconds,omitempty"`
+
+	// ResidueHunter configures Pillar 2 (Crumbs) — scoped high-risk directory secret residue scanning.
+	ResidueHunter ResidueHunterConfig `yaml:"residue_hunter,omitempty"`
 }
 
 // Pillar5Command represents a single command to execute for runtime hygiene checks.
@@ -39,6 +42,14 @@ type Pillar5Command struct {
 	Name         string `yaml:"name"`
 	Cmd          string `yaml:"cmd"`
 	AutoOnPrompt bool   `yaml:"auto_on_prompt"`
+}
+
+// ResidueHunterConfig holds settings for Pillar 2 "Crumbs" (illegitimate secret residue hunter).
+// v1: only enabled + target_dirs are required; detectors are fixed and always-on when enabled.
+type ResidueHunterConfig struct {
+	Enabled                 bool     `yaml:"enabled"`
+	TargetDirs              []string `yaml:"target_dirs,omitempty"`
+	FlagSuspiciousFilenames bool     `yaml:"flag_suspicious_filenames,omitempty"`
 }
 
 // DefaultConfig returns a safe default configuration.
@@ -67,6 +78,11 @@ func DefaultConfig() *Config {
 			{Name: "default-env", Cmd: "printenv", AutoOnPrompt: true},
 		},
 		ClipboardClearSeconds: 30,
+		ResidueHunter: ResidueHunterConfig{
+			Enabled:                 false,
+			TargetDirs:              []string{"~/Downloads", "~/Documents", "~/Desktop"},
+			FlagSuspiciousFilenames: true,
+		},
 	}
 }
 
@@ -97,6 +113,13 @@ func Load() (cfg *Config, configPath string, err error) {
 
 	if cfg.SocketPath == "" {
 		cfg.SocketPath = DefaultConfig().SocketPath
+	}
+
+	// Ensure residue hunter has sensible defaults even if user only partially populated the block
+	if !cfg.ResidueHunter.Enabled && len(cfg.ResidueHunter.TargetDirs) == 0 {
+		def := DefaultConfig().ResidueHunter
+		cfg.ResidueHunter.TargetDirs = def.TargetDirs
+		cfg.ResidueHunter.FlagSuspiciousFilenames = def.FlagSuspiciousFilenames
 	}
 
 	return cfg, configPath, nil

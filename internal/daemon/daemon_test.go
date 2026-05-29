@@ -11,8 +11,8 @@ func TestNewDaemon(t *testing.T) {
 	cfg := config.DefaultConfig()
 	reg := registry.New()
 	d := New(cfg, reg)
-	if d == nil || d.registry == nil || d.discovery == nil {
-		t.Error("daemon not initialized")
+	if d == nil || d.registry == nil || d.discovery == nil || d.residue == nil {
+		t.Error("daemon not initialized (missing residue manager)")
 	}
 }
 

@@ -97,7 +97,14 @@ func (ScrubHistoryHandler) Handle(_ string, d DaemonContext) (any, error) {
 	}, nil
 }
 
+// findHistoryFileFn is overridable for tests (see scrub_history_test.go).
+var findHistoryFileFn = realFindHistoryFile
+
 func findHistoryFile() string {
+	return findHistoryFileFn()
+}
+
+func realFindHistoryFile() string {
 	candidates := []string{
 		os.Getenv("HISTFILE"),
 		filepath.Join(os.Getenv("HOME"), ".zsh_history"),

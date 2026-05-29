@@ -1,6 +1,10 @@
 package daemon
 
-import "time"
+import (
+	"time"
+
+	"github.com/GildedPleb/blast-radius/internal/residue"
+)
 
 // DaemonContext is the narrow interface exposed to command handlers.
 type DaemonContext interface {
@@ -11,4 +15,9 @@ type DaemonContext interface {
 	AllHashes() [][32]byte
 	Now() time.Time
 	TriggerShutdown()
+
+	// CrumbsSummary returns lightweight Pillar 2 status (count, recency, sample). Used by STATUS.
+	CrumbsSummary() map[string]any
+	// RunCrumbsScan forces a fresh scan and returns the full result (used by CRUMBS handler).
+	RunCrumbsScan() *residue.ScanResult
 }

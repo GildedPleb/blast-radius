@@ -57,6 +57,14 @@ func RunStatus(jsonOutput bool) {
 				fmt.Printf("Scan state:   %s\n", scanState)
 			}
 		}
+		// Pillar 2 (Crumbs) summary — lightweight, only when daemon is present
+		if crumbs, ok := daemonObj["residue"].(map[string]any); ok {
+			if cnt, ok := crumbs["count"].(float64); ok && cnt > 0 {
+				fmt.Printf("Pillar 2 (Crumbs): %d finding(s) — run 'blastradius crumbs' for details\n", int(cnt))
+			} else {
+				fmt.Println("Pillar 2 (Crumbs): clean (last scan recent)")
+			}
+		}
 	}
 
 	fmt.Println("===================")

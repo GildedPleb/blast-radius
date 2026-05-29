@@ -14,7 +14,7 @@ Blast Radius is a local, hash-only tool for secret exposure reduction. It has co
 
 **Current pillars (per idiomatic_pillars.md):**
 - **Pillar 1**: Legitimate Secret Discovery (`.env*` scanning + registry) — ✅ Implemented
-- **Pillar 2**: Illegitimate Secret Residue — **Completely unimplemented**. Zero code exists. Only a design document (`docs/pillars/residue_hunter_scoped.md`) remains.
+- **Pillar 2**: Illegitimate Secret Residue ("Crumbs") — ✅ **v1 implemented** (`blastradius crumbs`). Scans user-configured high-risk dirs (Downloads/Documents/Desktop + opt-in) for vault exports + high-entropy residue using fixed detectors + registry cross-check. On-demand only. Full stages 2-6 remain for complete pillar (see pillar2-implementation-plan.md).
 - **Pillar 3**: History Hygiene (`scrub-history`) — ✅ Implemented
 - **Pillar 4**: Runtime Environment Hygiene (`env` / user-defined commands) — ✅ Implemented
 - **Pillar 5**: Clipboard Hygiene (`clipboard`) — ✅ Implemented (auto-clear timer not yet built)
@@ -34,7 +34,7 @@ The system remains strictly **hash-only, minimal-metadata, local-only** with saf
 | Runtime Hygiene (Pillar 4) | ✅ Complete | `env` command, extensible `pillar5_commands` in config |
 | Clipboard Hygiene (Pillar 5) | ✅ Complete | `clipboard` status/check/clear (macOS) |
 | Redaction/Recorder Pillar | ❌ **Removed** | Entire `recorder/` package, protection mode, `redact [N]`, per-TTY sockets, sealed windows, and all supporting code/docs deleted |
-| Pillar 2 (Illegitimate Residue) | ❌ **Zero work done** | Only design doc exists (`residue_hunter_scoped.md`). No scanner, no config handling, no commands, no daemon support. |
+| Pillar 2 (Illegitimate Residue / Crumbs) | ✅ **v1 complete** | `crumbs` command + `residue` package (detector + manager) + daemon handler + status integration. Config section `residue_hunter`. See implementation plan for remaining stages 2-6. |
 
 ---
 
@@ -100,6 +100,7 @@ blastradius duplicates       # Pillar 1: cross-project secret duplication
 blastradius scrub-history    # Pillar 3: scrub known secrets from shell history
 blastradius env [name]       # Pillar 4: run runtime hygiene command (e.g. printenv)
 blastradius clipboard        # Pillar 5: clipboard status / clear (macOS)
+blastradius crumbs           # Pillar 2: forgotten vault exports & high-entropy residue in high-risk dirs
 blastradius logs             # View daemon log
 blastradius config           # Basic config surface
 ```
@@ -112,7 +113,7 @@ Zsh integration (source `zsh/blastradius.zsh`):
 
 ## Known Limitations / Future Work
 
-- **Pillar 2 (Illegitimate Secret Residue)**: Completely incomplete. Zero implementation exists — no code, no config loading, no discovery logic, no commands, and no daemon handlers. Only a historical design document remains in `docs/pillars/residue_hunter_scoped.md`.
+- **Pillar 2 (Crumbs)**: v1 shipped (on-demand `crumbs`, fixed detectors for exports + entropy, status summary, opt-in config). Remaining required stages (hunt_residue patterns inside target_dirs, materialization roots expansion, git accident detection, background scheduling, Zsh HUD) are documented in `docs/pillars/pillar2-implementation-plan.md` and `residue_hunter_scoped.md`.
 - No reactive file watching (`fsnotify`) — discovery runs on daemon start only.
 - History scrubbing supports Zsh only.
 - No editor / AI prompt integration.

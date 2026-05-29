@@ -3,6 +3,10 @@ package handlers
 import "testing"
 
 func TestScrubHistoryHandler_NoFile(t *testing.T) {
+	orig := findHistoryFileFn
+	findHistoryFileFn = func() string { return "" }
+	defer func() { findHistoryFileFn = orig }()
+
 	h := ScrubHistoryHandler{}
 	resp, err := h.Handle("", &fakeContext{})
 	if err != nil {

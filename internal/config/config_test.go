@@ -7,6 +7,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.SocketPath == "" || len(cfg.SkipDirs) == 0 || len(cfg.Pillar5Commands) == 0 {
 		t.Error("defaults missing required fields")
 	}
+	if !cfg.ResidueHunter.FlagSuspiciousFilenames || len(cfg.ResidueHunter.TargetDirs) == 0 {
+		t.Error("residue_hunter defaults not populated")
+	}
 }
 
 func TestLoad(t *testing.T) {

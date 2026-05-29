@@ -18,6 +18,7 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/discovery"
 	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/registry"
+	"github.com/GildedPleb/blast-radius/internal/residue"
 	"github.com/GildedPleb/blast-radius/internal/daemon/handlers"
 )
 
@@ -26,6 +27,7 @@ type Daemon struct {
 	cfg       *config.Config
 	registry  *registry.Registry
 	discovery *discovery.Manager
+	residue   *residue.Manager
 	listener  net.Listener
 	shutdown  chan struct{}
 }
@@ -33,10 +35,12 @@ type Daemon struct {
 // New creates a new Daemon instance.
 func New(cfg *config.Config, reg *registry.Registry) *Daemon {
 	dm := discovery.NewManager(cfg, reg)
+	rm := residue.NewManager(cfg, reg)
 	return &Daemon{
 		cfg:       cfg,
 		registry:  reg,
 		discovery: dm,
+		residue:   rm,
 		shutdown:  make(chan struct{}),
 	}
 }
@@ -68,6 +72,21 @@ func (d *Daemon) AllHashes() [][32]byte {
 }
 func (d *Daemon) Now() time.Time                        { return time.Now() }
 func (d *Daemon) TriggerShutdown()                      { close(d.shutdown) }
+
+// CrumbsSummary and RunCrumbsScan implement the new DaemonContext methods for Pillar 2.
+func (d *Daemon) CrumbsSummary() map[string]any {
+	if d.residue == nil {
+		return map[string]any{"status": "disabled", "count": 0}
+	}
+	return d.residue.CrumbsSummary()
+}
+
+func (d *Daemon) RunCrumbsScan() *residue.ScanResult {
+	if d.residue == nil {
+		return &residue.ScanResult{Timestamp: time.Now().UTC(), Errors: []string{"residue manager not initialized"}}
+	}
+	return d.residue.RunScan()
+}
 
 // Run starts the Unix domain socket server and blocks until shutdown.
 func (d *Daemon) Run() error {
@@ -173,6 +192,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			handler = handlers.ScrubHistoryHandler{}
 		case "CHECK_HASH":
 			handler = handlers.CheckHashHandler{}
+		case "CRUMBS":
+			handler = handlers.CrumbsHandler{}
 		case "HALT", "STOP":
 			handler = handlers.HaltHandler{}
 		default:

@@ -76,6 +76,9 @@ func Run(osArgs []string) {
 		RunClipboard(tail)
 	case "config":
 		RunConfig(tail)
+	case "crumbs":
+		jsonOutput := len(tail) > 0 && tail[0] == "--json"
+		RunCrumbs(jsonOutput)
 	default:
 		fmt.Printf("Unknown command: %s\n\n", cmd)
 		PrintHelp()
