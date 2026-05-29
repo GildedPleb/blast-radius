@@ -1,12 +1,12 @@
 package handlers
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
 // withTempHistory creates a temporary file with the given content and returns
@@ -61,15 +61,22 @@ func TestScrubHistoryHandler_RealFindHistoryFile(t *testing.T) {
 }
 
 func TestScrubHistoryHandler_RemovesMatchingLines(t *testing.T) {
-	secret := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567"
-	sum := sha256.Sum256([]byte(secret))
-	hashHex := hex.EncodeToString(sum[:])
+	// Real secrets (as they would actually appear in shell history)
+	secret1 := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567"
+	secret2 := "ghp_abcdefghijklmnopqrstuvwxyz1234567890ABCDEF"
 
+	// The context provides the *hashes* of the real secrets (exactly like the daemon does in production)
+	h1 := registry.HashValue([]byte(secret1))
+	h2 := registry.HashValue([]byte(secret2))
+
+	// Realistic history content containing the *actual secret values* in common dangerous patterns.
+	// The old implementation would have completely failed to detect these.
 	content := "# zsh history\n" +
-		"export AWS_SECRET=" + hashHex + "\n" + // should be removed
+		"export AWS_SECRET_ACCESS_KEY=" + secret1 + "\n" + // should be removed
 		"echo hello\n" +
-		"some-command --token=" + hashHex + " --other\n" + // should be removed
-		"ls -la\n"
+		"curl -H \"Authorization: Bearer " + secret2 + "\" https://api.github.com\n" + // should be removed
+		"ls -la\n" +
+		"some-other-command --token=" + secret1 + "\n" // should be removed
 
 	histPath := withTempHistory(t, content)
 
@@ -78,7 +85,7 @@ func TestScrubHistoryHandler_RemovesMatchingLines(t *testing.T) {
 	defer func() { findHistoryFileFn = orig }()
 
 	ctx := &fakeContext{
-		hashes: [][32]byte{sum},
+		hashes: [][32]byte{h1, h2},
 	}
 
 	h := ScrubHistoryHandler{}
@@ -90,21 +97,21 @@ func TestScrubHistoryHandler_RemovesMatchingLines(t *testing.T) {
 	if m["status"] != "ok" {
 		t.Fatalf("expected ok, got %v (message=%v)", m["status"], m["message"])
 	}
-	if m["lines_removed"] != 2 {
-		t.Errorf("expected 2 lines removed, got %v", m["lines_removed"])
+	if m["lines_removed"] != 3 {
+		t.Errorf("expected 3 lines removed, got %v", m["lines_removed"])
 	}
 	if m["file"] != histPath {
 		t.Errorf("file in response = %v, want %s", m["file"], histPath)
 	}
 
-	// Verify the file was actually rewritten without the sensitive lines
+	// Verify the file was actually rewritten without the real secret values
 	data, err := os.ReadFile(histPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cleaned := string(data)
-	if strings.Contains(cleaned, hashHex) {
-		t.Errorf("history file still contains the sensitive hash after scrub:\n%s", cleaned)
+	if strings.Contains(cleaned, secret1) || strings.Contains(cleaned, secret2) {
+		t.Errorf("history file still contains real secret values after scrub:\n%s", cleaned)
 	}
 	if m["original_lines"] == nil {
 		t.Error("expected original_lines to be present in success response")
@@ -119,7 +126,7 @@ func TestScrubHistoryHandler_NoSensitiveLinesFound(t *testing.T) {
 	findHistoryFileFn = func() string { return histPath }
 	defer func() { findHistoryFileFn = orig }()
 
-	// Put some unrelated hash in the context
+	// Put some unrelated hash in the context (simulates a registry that doesn't contain the secrets in this history)
 	var unrelated [32]byte
 	for i := range unrelated {
 		unrelated[i] = 0x42

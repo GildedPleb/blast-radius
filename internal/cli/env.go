@@ -2,23 +2,25 @@ package cli
 
 import (
 	"bufio"
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/detection"
 	"github.com/GildedPleb/blast-radius/internal/logging"
+	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
-// RunEnvCheck executes a Pillar 4 command (or default) and reports any known secrets found.
+// RunEnvCheck executes a runtime hygiene command (Pillar 4 / env) and reports any known secrets found.
+// Commands are configured under `pillar5_commands` in config (historical key name).
 func RunEnvCheck(name string) {
 	_ = logging.Init(logging.DefaultDaemonLogPath())
 
 	if name == "" {
 		name = "default-env"
 	}
-	logging.Printf("RunEnvCheck: running Pillar 4 command %q", name)
+	logging.Printf("RunEnvCheck: running runtime hygiene command (Pillar 4) %q", name)
 
 	cfg, _, err := configLoad()
 	if err != nil {
@@ -55,7 +57,9 @@ func RunEnvCheck(name string) {
 		return
 	}
 
-	// Send each line to daemon for hashing/checking
+	// Send candidate secret values (not whole lines) to daemon for hashing/checking.
+	// This uses the unified detection logic so that realistic output like
+	// "KEY=supersecretvalue" or "export FOO=..." is correctly handled.
 	socketPath := config.SocketPath()
 	conn, err := netDialTimeout("unix", socketPath, socketConnectTimeout)
 	if err != nil {
@@ -75,14 +79,14 @@ func RunEnvCheck(name string) {
 	// will reject them with the standard auth error. Existing callers treat
 	// any failure here as "daemon not running" which is acceptable.
 
-	lines := strings.Split(string(output), "\n")
+	candidates := detection.NewDetector().ExtractCandidates(output)
 	found := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
+	for _, cand := range candidates {
+		if strings.TrimSpace(cand) == "" {
 			continue
 		}
-		hash := sha256.Sum256([]byte(line))
-		hashHex := fmt.Sprintf("%x", hash[:])
+		h := registry.HashValue([]byte(cand))
+		hashHex := fmt.Sprintf("%x", h[:])
 		cmd := fmt.Sprintf("CHECK_HASH %s\n", hashHex)
 		conn.Write([]byte(cmd))
 		reader := bufio.NewReader(conn)

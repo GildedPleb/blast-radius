@@ -51,17 +51,20 @@ func TestRunEnvCheck(t *testing.T) {
 }
 
 // TestRunEnvCheck_HappyPath exercises the full secret-checking loop using net.Pipe.
-// This covers the previously untested happy path: line splitting, hashing,
-// CHECK_HASH protocol, response parsing, and "secrets_found" counting.
+// This covers candidate extraction via the unified detection package (instead of
+// naive whole-line hashing), the CHECK_HASH protocol over a single connection,
+// AUTH handshake, response parsing, and "secrets_found" counting with realistic
+// KEY=val style output from commands like printenv.
 func TestRunEnvCheck_HappyPath(t *testing.T) {
 	defer resetTestOverrides(t)
 	restore := silenceOutput()
 	defer restore()
 
-	// Setup a command that produces multiple lines (some will be "known")
+	// Setup a command that produces realistic printenv-style output.
+	// The new detection logic should correctly extract the *values* after =.
 	execCommand = func(name string, arg ...string) *exec.Cmd {
-		// Use printf for portable multi-line output without extra newlines issues
-		return exec.Command("sh", "-c", `printf "secret_value_one\nsecret_value_two\nnormal_line\n"`)
+		// Use printf for portable multi-line output
+		return exec.Command("sh", "-c", `printf "PATH=/usr/bin\nREAL_SECRET=secret_value_one\nANOTHER=secret_value_two\nNORMAL=normal_line\n"`)
 	}
 
 	cfg := defaultTestConfig()
@@ -74,8 +77,9 @@ func TestRunEnvCheck_HappyPath(t *testing.T) {
 		return clientConn, nil
 	}
 
-	// Server side: read CHECK_HASH commands and reply with varying "known" results
-	// We simulate: first secret known, second unknown, third (normal) unknown
+	// Server side: read CHECK_HASH commands and reply with varying "known" results.
+	// With the new candidate extraction we expect more CHECK_HASH calls (one per
+	// plausible secret value extracted from the realistic output).
 	go func() {
 		defer serverConn.Close()
 		reader := bufio.NewReader(serverConn)
@@ -100,9 +104,9 @@ func TestRunEnvCheck_HappyPath(t *testing.T) {
 	}()
 
 	// This should now exercise:
-	// - multiple lines
-	// - skipping empty
-	// - hashing + sending CHECK_HASH
+	// - realistic printenv-style KEY=val output
+	// - proper candidate extraction (values after =, not whole lines)
+	// - multiple CHECK_HASH calls over one authenticated connection
 	// - reading responses
 	// - counting known matches
 	// - printing the final success JSON with secrets_found
@@ -110,7 +114,8 @@ func TestRunEnvCheck_HappyPath(t *testing.T) {
 }
 
 // TestRunEnvCheck_DirectExec verifies the hard security invariant:
-// Pillar 5 commands are always executed via direct argv (never through "sh -c").
+// Runtime hygiene commands (Pillar 4 / `pillar5_commands` in config, historical name)
+// are always executed via direct argv (never through "sh -c").
 // This eliminates shell injection risk from user config.
 func TestRunEnvCheck_DirectExec(t *testing.T) {
 	defer resetTestOverrides(t)
@@ -139,6 +144,6 @@ func TestRunEnvCheck_DirectExec(t *testing.T) {
 		t.Errorf("expected direct exec of 'echo ...', got %q (shell injection risk)", calledWith)
 	}
 	if strings.Contains(calledWith, "sh -c") {
-		t.Error("shell was incorrectly used for a Pillar 5 command")
+		t.Error("shell was incorrectly used for a runtime hygiene command (Pillar 4)")
 	}
 }

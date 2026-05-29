@@ -129,6 +129,8 @@ Zsh integration (source `zsh/blastradius.zsh`):
 - No editor / AI prompt integration.
 - Clipboard auto-clear timer (Pillar 5) is declared in config but not yet implemented.
 
+**Architecture improvement (2026)**: All secret detection across Pillars 2–5 now routes through a single `internal/detection` package with robust candidate extraction (wrappers, context, whitespace fallback, entropy + patterns). This replaced previous naive whole-line/blob or hash-hex-grep approaches. See plan session notes for details.
+
 ---
 
 ## How to Build & Run

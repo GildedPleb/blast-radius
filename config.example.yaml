@@ -32,8 +32,8 @@ ignore_files:
 # Future: log level
 log_level: "info"
 
-# Pillar 5 - Runtime Environment Hygiene
-# Define any commands whose output should be scanned for secrets.
+# Runtime Environment Hygiene (Pillar 4)
+# Define commands (via the historical `pillar5_commands` key) whose output should be scanned for secrets.
 #
 # HARD SECURITY INVARIANT:
 # Commands are **always** executed with direct exec (no shell / sh -c ever).

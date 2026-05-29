@@ -90,12 +90,12 @@ func TestSafeLocation(t *testing.T) {
 
 func TestScanFile_Synthetic(t *testing.T) {
 	reg := registry.New()
-	// Plant a known secret
-	reg.Add(registry.HashValue([]byte("supersecretvalue123456")), "p1")
+	// Plant a known secret (high entropy so it survives the detector's gate)
+	reg.Add(registry.HashValue([]byte("Kx7pQ9mR2vL8nT4wY6zX3cV5bN1mJ0hGfD9sA7pQ4rW2eT6yU")), "p1")
 
 	dir := t.TempDir()
 	f := filepath.Join(dir, "bitwarden_export_test.json")
-	content := `{"encrypted":false,"items":[{"login":{"password":"supersecretvalue123456"}}]}`
+	content := `{"encrypted":false,"items":[{"login":{"password":"Kx7pQ9mR2vL8nT4wY6zX3cV5bN1mJ0hGfD9sA7pQ4rW2eT6yU"}}]}`
 	if err := os.WriteFile(f, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +384,7 @@ func TestScanFile_SuspiciousNameOnly(t *testing.T) {
 
 func TestScanFile_KnownMatchInGeneric(t *testing.T) {
 	reg := registry.New()
-	secret := "superlonghighentropysecretvaluethatpasses"
+	secret := "Kx7pQ9mR2vL8nT4wY6zX3cV5bN1mJ0hGfD9sA7pQ4rW2eT6yU8iO3pL5kJ7hG2fD4sA"
 	reg.Add(registry.HashValue([]byte(secret)), "p1")
 
 	dir := t.TempDir()

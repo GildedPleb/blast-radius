@@ -1,8 +1,10 @@
 - The skip files and ignore files are kind of stupid. rather the skip directories and ignore files are kind of stupid. And also, that should just be the single source of truth. There should not be strong defaults, et cetera.
 - Automatically create and populate a config.yaml.
-- High-risk command context (printenv, env, cat .env\*, etc.) – treat entire output as sensitive for hygiene checks (Pillar 4)
+- (Addressed) High-risk command context (printenv, etc.) now uses the unified detection package for proper candidate extraction instead of treating entire output as sensitive.
 - Documentation audit
 - File Structure audit
 - Security Audit
 - Architecture audit
 - Test Audit
+- logger audit
+- For a Pillar 1 .env detection, we should allow for approved keys, or ignore keys. This way if an environment variable is something like, hey this is the file folder we're going to use for this project That's not a secret. That doesn't need to be marked as a secret. It doesn't need to be hashed. It doesn't need to be compared.

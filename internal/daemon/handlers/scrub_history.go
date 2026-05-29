@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/GildedPleb/blast-radius/internal/detection"
 	"github.com/GildedPleb/blast-radius/internal/logging"
+	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
 type ScrubHistoryHandler struct{}
@@ -36,21 +38,30 @@ func (ScrubHistoryHandler) Handle(_ string, d DaemonContext) (any, error) {
 	lines := strings.Split(string(data), "\n")
 	originalCount := len(lines)
 
-	knownHashes := make(map[string]bool)
-	for _, hash := range d.AllHashes() {
-		knownHashes[fmt.Sprintf("%x", hash)] = true
+	// Build a fast lookup set of known secret hashes (the real ones from Pillar 1).
+	known := make(map[[32]byte]bool, len(d.AllHashes()))
+	for _, h := range d.AllHashes() {
+		known[h] = true
 	}
+
+	// Use the unified detection engine to find actual secret values in history lines.
+	// This replaces the old broken approach that only searched for hex-encoded *hashes of hashes*.
+	det := detection.NewDetector()
 
 	cleaned := make([]string, 0, len(lines))
 	removed := 0
 	for _, line := range lines {
 		shouldRemove := false
-		for h := range knownHashes {
-			if strings.Contains(line, h) {
+
+		cands := det.ExtractCandidates([]byte(line))
+		for _, c := range cands {
+			h := registry.HashValue([]byte(c))
+			if known[h] {
 				shouldRemove = true
 				break
 			}
 		}
+
 		if shouldRemove {
 			removed++
 			continue

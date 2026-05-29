@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/detection"
 	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
@@ -94,40 +95,6 @@ func ExtractHighEntropyStrings(data []byte, minLen int) int {
 		}
 	}
 	return len(cands)
-}
-
-// candidateSecrets extracts strings that look like secret values from structured data.
-// For known-match checks we only ever hash them — never store plaintext.
-func candidateSecretsFromText(data []byte) []string {
-	text := string(data)
-	cands := []string{}
-
-	// crude but effective: split on common delimiters and take long tokens
-	tokens := regexp.MustCompile(`[\s"'=,:\[\]{}]+`).Split(text, -1)
-	for _, t := range tokens {
-		t = strings.TrimSpace(t)
-		if len(t) >= minSecretLen && ComputeEntropy(t) >= highEntropyMin {
-			cands = append(cands, t)
-		}
-	}
-	// also the regex hits
-	for _, re := range []*regexp.Regexp{reBase64, reHex, reLong} {
-		for _, m := range re.FindAllString(text, -1) {
-			if len(m) >= minSecretLen {
-				cands = append(cands, m)
-			}
-		}
-	}
-	// dedup
-	seen := map[string]bool{}
-	out := []string{}
-	for _, c := range cands {
-		if !seen[c] {
-			seen[c] = true
-			out = append(out, c)
-		}
-	}
-	return out
 }
 
 // DetectBitwardenJSON returns (hits, isExport) where hits is count of high-entropy secret values found.
@@ -301,14 +268,8 @@ func ScanFile(path string, cfg config.ResidueHunterConfig, reg *registry.Registr
 		return nil, nil
 	}
 
-	// Now extract candidates and check against registry for known matches
-	cands := candidateSecretsFromText(data)
-	for _, c := range cands {
-		h := registry.HashValue([]byte(c))
-		if reg.Has(h) {
-			known++
-		}
-	}
+	// Use the shared detection package for candidate secret extraction + known count.
+	_, known = detection.NewDetector().ExtractAndCountKnown(data, reg)
 
 	// Decision gate: keep only if we have signal
 	keep := false
