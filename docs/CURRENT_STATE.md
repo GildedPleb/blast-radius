@@ -13,6 +13,7 @@ The authoritative framing for the system is now in [docs/pillars/idiomatic_pilla
 Blast Radius is a local, hash-only tool for secret exposure reduction. It has completed core infrastructure and four of the five idiomatic pillars. The complex "Pillar 3 / Phase 4" terminal redaction and per-TTY PTY recorder system (protection mode, `blastradius redact`, sealed windows, `REPLAY_REDACTED` protocol, etc.) has been **fully removed** as it proved disproportionately difficult to maintain and reason about.
 
 **Current pillars (per idiomatic_pillars.md):**
+
 - **Pillar 1**: Legitimate Secret Discovery (`.env*` scanning + registry) — ✅ Implemented
 - **Pillar 2**: Illegitimate Secret Residue ("Crumbs") — ✅ **v1 implemented** (`blastradius crumbs`). Scans user-configured high-risk dirs (Downloads/Documents/Desktop + opt-in) for vault exports + high-entropy residue using fixed detectors + registry cross-check. On-demand only. Full stages 2-6 remain for complete pillar (see pillar2-implementation-plan.md).
 - **Pillar 3**: History Hygiene (`scrub-history`) — ✅ Implemented
@@ -25,15 +26,15 @@ The system remains strictly **hash-only, minimal-metadata, local-only** with saf
 
 ## Completed Work
 
-| Area                  | Status     | Key Deliverables |
-|-----------------------|------------|------------------|
-| Foundations (Phase 0) | ✅ Complete | Singleton daemon, Unix socket (0600), CLI coordinator, config system, invariants |
-| Discovery + Registry (Pillar 1) | ✅ Complete | Recursive `.env*` scanning, SHA-256 hashing, ignore engine, pruning, opaque ProjectIDs, duplicates detection |
-| Zsh HUD               | ✅ Complete | Thin prompt segment + status wrappers (no capture hooks) |
-| History Hygiene (Pillar 3) | ✅ Complete | `scrub-history` command + daemon handler |
-| Runtime Hygiene (Pillar 4) | ✅ Complete | `env` command, extensible `pillar5_commands` in config |
-| Clipboard Hygiene (Pillar 5) | ✅ Complete | `clipboard` status/check/clear (macOS) |
-| Redaction/Recorder Pillar | ❌ **Removed** | Entire `recorder/` package, protection mode, `redact [N]`, per-TTY sockets, sealed windows, and all supporting code/docs deleted |
+| Area                                     | Status             | Key Deliverables                                                                                                                                                                    |
+| ---------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Foundations (Phase 0)                    | ✅ Complete        | Singleton daemon, Unix socket (0600), CLI coordinator, config system, invariants                                                                                                    |
+| Discovery + Registry (Pillar 1)          | ✅ Complete        | Recursive `.env*` scanning, SHA-256 hashing, ignore engine, pruning, opaque ProjectIDs, duplicates detection                                                                        |
+| Zsh HUD                                  | ✅ Complete        | Thin prompt segment + status wrappers (no capture hooks)                                                                                                                            |
+| History Hygiene (Pillar 3)               | ✅ Complete        | `scrub-history` command + daemon handler                                                                                                                                            |
+| Runtime Hygiene (Pillar 4)               | ✅ Complete        | `env` command, extensible `pillar5_commands` in config                                                                                                                              |
+| Clipboard Hygiene (Pillar 5)             | ✅ Complete        | `clipboard` status/check/clear (macOS)                                                                                                                                              |
+| Redaction/Recorder Pillar                | ❌ **Removed**     | Entire `recorder/` package, protection mode, `redact [N]`, per-TTY sockets, sealed windows, and all supporting code/docs deleted                                                    |
 | Pillar 2 (Illegitimate Residue / Crumbs) | ✅ **v1 complete** | `crumbs` command + `residue` package (detector + manager) + daemon handler + status integration. Config section `residue_hunter`. See implementation plan for remaining stages 2-6. |
 
 ---
@@ -66,6 +67,7 @@ internal/
 No `recorder/` package remains.
 
 ### Key Properties
+
 - Single CLI coordinator (`blastradius` binary handles everything user-facing).
 - Daemon is started explicitly via `blastradius start`.
 - `status --json` is the stable machine interface.
@@ -76,16 +78,16 @@ No `recorder/` package remains.
 
 ## Core Invariants (Current)
 
-| # | Invariant                              | Status |
-|---|----------------------------------------|--------|
-| 1 | Registry never contains plaintext      | ✅ |
-| 2 | No secret material ever written to disk| ✅ |
-| 3 | IPC over Unix domain socket with 0600  | ✅ |
-| 4 | True singleton daemon                  | ✅ |
-| 5 | Minimal metadata (opaque ProjectIDs)   | ✅ |
-| 6 | Persisted config is non-sensitive      | ✅ |
-| 7 | Safe degradation on failure            | ✅ |
-| 8 | Respects ignore patterns               | ✅ |
+| #   | Invariant                               | Status |
+| --- | --------------------------------------- | ------ |
+| 1   | Registry never contains plaintext       | ✅     |
+| 2   | No secret material ever written to disk | ✅     |
+| 3   | IPC over Unix domain socket with 0600   | ✅     |
+| 4   | True singleton daemon                   | ✅     |
+| 5   | Minimal metadata (opaque ProjectIDs)    | ✅     |
+| 6   | Persisted config is non-sensitive       | ✅     |
+| 7   | Safe degradation on failure             | ✅     |
+| 8   | Respects ignore patterns                | ✅     |
 
 ---
 
@@ -97,15 +99,16 @@ blastradius start            # Start background daemon + initial discovery
 blastradius status [--json]  # Daemon + registry state (tracked hashes, duplicates, scan state)
 blastradius stop / halt      # Graceful shutdown
 blastradius duplicates       # Pillar 1: cross-project secret duplication
+blastradius crumbs           # Pillar 2: forgotten vault exports & high-entropy residue in high-risk dirs
 blastradius scrub-history    # Pillar 3: scrub known secrets from shell history
 blastradius env [name]       # Pillar 4: run runtime hygiene command (e.g. printenv)
 blastradius clipboard        # Pillar 5: clipboard status / clear (macOS)
-blastradius crumbs           # Pillar 2: forgotten vault exports & high-entropy residue in high-risk dirs
 blastradius logs             # View daemon log
 blastradius config           # Basic config surface
 ```
 
 Zsh integration (source `zsh/blastradius.zsh`):
+
 - `blastradius_prompt_info` — compact prompt segment
 - `blastradius_status`
 
@@ -144,4 +147,4 @@ Config: `~/.config/blastradius/config.yaml` (see `config.example.yaml`)
 
 ---
 
-*Update this document whenever the pillar surface or core architecture changes.*
+_Update this document whenever the pillar surface or core architecture changes._
