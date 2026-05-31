@@ -3,6 +3,7 @@ package handlers
 import (
 	"time"
 
+	"github.com/GildedPleb/blast-radius/internal/discovery"
 	"github.com/GildedPleb/blast-radius/internal/residue"
 )
 
@@ -33,4 +34,12 @@ func (f *fakeContext) RunCrumbsScan() *residue.ScanResult {
 		return f.crumbsResult
 	}
 	return &residue.ScanResult{Timestamp: time.Now().UTC()}
+}
+
+func (f *fakeContext) TriggerPillar1Rescan() error { return nil }
+func (f *fakeContext) Pillar1ScanStatus() map[string]any {
+	return map[string]any{"status": "ok", "last_scan": f.now.UTC().Format(time.RFC3339)}
+}
+func (f *fakeContext) LastPillar1Rescan() *discovery.RescanResult {
+	return nil // tests can override if needed
 }

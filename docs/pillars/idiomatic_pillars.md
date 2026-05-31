@@ -14,10 +14,10 @@ This document reframes the five pillars around a simple, powerful distinction:
 
 This pillar scans the places secrets are _supposed_ to live in a controlled way:
 
-- `.env*` files inside project roots
-- Configured secret sources (Bitwarden, Ansible Vault, etc. via the logical layer)
+- `.env*` files inside project roots (explicit "env" source under the logical layer)
+- Configured secret sources via the logical layer (currently: hard-coded Bitwarden CLI integration + .env files)
 
-It builds the ground truth registry of known secrets by looking in the right locations with proper scoping and ignore rules. Everything else in the system compares against this baseline.
+It builds the ground truth registry of known secrets by looking in the right locations with proper scoping and ignore rules (including per-source `ignore_patterns`). Everything else in the system compares against this baseline.
 
 **Core question it answers**: "What secrets exist in the places we deliberately put them?"
 

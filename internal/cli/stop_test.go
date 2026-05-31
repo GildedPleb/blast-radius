@@ -10,4 +10,11 @@ func TestRunStop(t *testing.T) {
 	RunStop()
 	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok"}`)
 	RunStop()
+
+	// error from daemon
+	sendDaemonCommandFn = mockSendDaemonCommand(`not json`)
+	RunStop()
+
+	sendDaemonCommandFn = func(string) (string, error) { return "", errForTest }
+	RunStop()
 }

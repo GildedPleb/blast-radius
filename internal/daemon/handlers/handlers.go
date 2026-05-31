@@ -3,6 +3,7 @@ package handlers
 import (
 	"time"
 
+	"github.com/GildedPleb/blast-radius/internal/discovery"
 	"github.com/GildedPleb/blast-radius/internal/residue"
 )
 
@@ -19,6 +20,12 @@ type DaemonContext interface {
 	// CrumbsSummary + RunCrumbsScan for Pillar 2 (see daemon/context.go for docs)
 	CrumbsSummary() map[string]any
 	RunCrumbsScan() *residue.ScanResult
+
+	// TriggerPillar1Rescan + Pillar1ScanStatus for Phase 3 manual rescan (no fsnotify).
+	TriggerPillar1Rescan() error
+	Pillar1ScanStatus() map[string]any
+	// LastPillar1Rescan for rich per-source output in rescan command.
+	LastPillar1Rescan() *discovery.RescanResult
 }
 
 // CommandHandler is the interface implemented by every daemon command.

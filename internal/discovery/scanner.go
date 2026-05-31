@@ -41,7 +41,8 @@ func (s *Scanner) ScanDirectory(root string) error {
 	}
 
 	// Determine which ignore files to load (from config, with safe defaults)
-	ignoreFiles := s.cfg.IgnoreFiles
+	envOpts := s.cfg.GetEnvOptions()
+	ignoreFiles := envOpts.IgnoreFiles
 	if len(ignoreFiles) == 0 {
 		ignoreFiles = []string{".gitignore", ".blastradiusignore"}
 	}
@@ -54,7 +55,7 @@ func (s *Scanner) ScanDirectory(root string) error {
 
 	// Build skipDirs set from config (user can extend/override via config)
 	skipDirs := make(map[string]bool)
-	for _, d := range s.cfg.SkipDirs {
+	for _, d := range envOpts.SkipDirs {
 		skipDirs[d] = true
 	}
 
@@ -117,6 +118,7 @@ func (s *Scanner) processEnvFile(path string, projectID registry.ProjectID) erro
 			continue
 		}
 
+		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
 		// Remove surrounding quotes if present
 		value = strings.Trim(value, `"'`)
@@ -125,11 +127,191 @@ func (s *Scanner) processEnvFile(path string, projectID registry.ProjectID) erro
 			continue
 		}
 
+		// Phase 1 key filtering (Pillar 1 logical layer). Patterns come from the
+		// "env" source options (or legacy top-level until full migration).
+		// This is the same engine that will serve bitwarden and future sources.
+		if s.shouldIgnoreKey(key) {
+			continue
+		}
+
 		hash := registry.HashValue([]byte(value))
 		s.registry.Add(hash, projectID)
 	}
 
 	return scanner.Err()
+}
+
+// CollectEnvHashes performs .env* discovery for the given roots and returns
+// only the hashes (no registration). Used by the logical layer (EnvCollector).
+func (s *Scanner) CollectEnvHashes(roots []string) ([]registry.SecretHash, error) {
+	var allHashes []registry.SecretHash
+
+	for _, root := range roots {
+		expanded := expandPath(root) // reuse existing helper (same package)
+		hashes, err := s.collectHashesInDir(expanded)
+		if err != nil {
+			return nil, err
+		}
+		allHashes = append(allHashes, hashes...)
+	}
+
+	return allHashes, nil
+}
+
+func (s *Scanner) collectHashesInDir(root string) ([]registry.SecretHash, error) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+
+	// Reuse ignore + skip logic from ScanDirectory
+	envOpts := s.cfg.GetEnvOptions()
+	ignoreFiles := envOpts.IgnoreFiles
+	if len(ignoreFiles) == 0 {
+		ignoreFiles = []string{".gitignore", ".blastradiusignore"}
+	}
+
+	if _, ok := s.ignores[absRoot]; !ok {
+		s.ignores[absRoot] = NewIgnoreMatcher(absRoot, ignoreFiles)
+	}
+	ignore := s.ignores[absRoot]
+
+	skipDirs := make(map[string]bool)
+	for _, d := range envOpts.SkipDirs {
+		skipDirs[d] = true
+	}
+
+	var hashes []registry.SecretHash
+
+	err = filepath.Walk(absRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		if info.IsDir() {
+			base := filepath.Base(path)
+			if skipDirs[base] {
+				return filepath.SkipDir
+			}
+			if ignore.ShouldIgnore(path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if ignore.ShouldIgnore(path) {
+			return nil
+		}
+
+		if info.Mode().IsRegular() && strings.HasPrefix(filepath.Base(path), ".env") {
+			fileHashes, err := s.collectHashesFromFile(path)
+			if err != nil {
+				logging.Printf("Warning: failed to process %s: %v", path, err)
+				return nil
+			}
+			hashes = append(hashes, fileHashes...)
+		}
+		return nil
+	})
+
+	return hashes, err
+}
+
+func (s *Scanner) collectHashesFromFile(path string) ([]registry.SecretHash, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var hashes []registry.SecretHash
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		value = strings.Trim(value, `"'`)
+
+		if value == "" {
+			continue
+		}
+
+		if s.shouldIgnoreKey(key) {
+			continue
+		}
+
+		hash := registry.HashValue([]byte(value))
+		hashes = append(hashes, hash)
+	}
+	return hashes, scanner.Err()
+}
+
+// shouldIgnoreKey returns true if the given .env key should not be treated as a secret.
+// It consults the "env" Pillar 1 source's ignore_patterns (supports exact match and
+// simple * suffix/prefix globs for practicality in v1).
+func (s *Scanner) shouldIgnoreKey(key string) bool {
+	if s.cfg == nil {
+		return false
+	}
+	patterns := s.cfg.GetSourceIgnorePatterns("env")
+	if len(patterns) == 0 {
+		return false
+	}
+	for _, p := range patterns {
+		if p == "" {
+			continue
+		}
+		if matchIgnorePattern(key, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchIgnorePattern supports exact match and simple * wildcards.
+// Supported forms in v1 (KISS):
+//   - exact: "LOG_LEVEL"
+//   - prefix*: "AWS_*"
+//   - *suffix: "*_NONSECRET"
+//   - prefix*suffix: "AWS_*_KEY_ID" (single internal wildcard)
+func matchIgnorePattern(key, pattern string) bool {
+	if pattern == key {
+		return true
+	}
+	// prefix*
+	if strings.HasSuffix(pattern, "*") && !strings.Contains(pattern[:len(pattern)-1], "*") {
+		prefix := strings.TrimSuffix(pattern, "*")
+		if prefix != "" && strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	// *suffix
+	if strings.HasPrefix(pattern, "*") && !strings.Contains(pattern[1:], "*") {
+		suffix := strings.TrimPrefix(pattern, "*")
+		if suffix != "" && strings.HasSuffix(key, suffix) {
+			return true
+		}
+	}
+	// prefix*suffix (exactly one *)
+	if strings.Count(pattern, "*") == 1 {
+		parts := strings.Split(pattern, "*")
+		if len(parts) == 2 {
+			pre, suf := parts[0], parts[1]
+			if (pre == "" || strings.HasPrefix(key, pre)) && (suf == "" || strings.HasSuffix(key, suf)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // makeOpaqueProjectID creates a stable opaque identifier from a directory path.

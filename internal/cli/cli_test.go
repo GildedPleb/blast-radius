@@ -116,6 +116,32 @@ func TestRun_Dispatch(t *testing.T) {
 		}
 		Run([]string{"start"})
 	})
+
+	// Extra start error paths for background launch coverage
+	t.Run("start-errors", func(t *testing.T) {
+		// osExecutable fails
+		osExecutable = func() (string, error) { return "", errForTest }
+		Run([]string{"start"})
+
+		// executable ok, but getDaemonLogPathFn returns uncreatable path
+		osExecutable = func() (string, error) { return "/tmp/fake-br", nil }
+		getDaemonLogPathFn = func() string { return "/nonexistent/deep/dir/that/cannot/be/created/daemon.log" }
+		Run([]string{"start"})
+	})
+
+	t.Run("crumbs-extra", func(t *testing.T) {
+		sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","total":0}`)
+		Run([]string{"crumbs"})
+		Run([]string{"crumbs", "--json"})
+
+		sendDaemonCommandFn = mockSendDaemonCommand(`not json`)
+		Run([]string{"crumbs"})
+	})
+
+	t.Run("env-extra", func(t *testing.T) {
+		// unknown pillar command via dispatcher
+		Run([]string{"env", "nonexistent-pillar"})
+	})
 }
 
 // TestRealSendDaemonCommand exercises the unmocked path using DI hooks and net.Pipe
@@ -173,5 +199,36 @@ func TestRealSendDaemonCommand(t *testing.T) {
 	}
 	if !strings.Contains(resp, "pong") {
 		t.Errorf("unexpected response: %q", resp)
+	}
+
+	// readAuthTokenForSocket error after successful dial (token file missing/unreadable)
+	c, s = net.Pipe()
+	netDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		return c, nil
+	}
+	readAuthTokenForSocket = func(string) (string, error) { return "", errForTest }
+	go func() {
+		// just drain whatever is written then close
+		buf := make([]byte, 1024)
+		for {
+			if _, err := s.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+	if _, err := realSendDaemonCommand("PING"); err == nil {
+		t.Error("expected error from readAuthTokenForSocket failure")
+	}
+	s.Close()
+
+	// write failure after AUTH read succeeds
+	c, s = net.Pipe()
+	netDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		return c, nil
+	}
+	readAuthTokenForSocket = func(string) (string, error) { return "tok", nil }
+	s.Close() // close immediately so first write (AUTH) fails
+	if _, err := realSendDaemonCommand("PING"); err == nil {
+		t.Error("expected write error")
 	}
 }

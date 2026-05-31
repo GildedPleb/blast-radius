@@ -204,3 +204,152 @@ func TestScanner_ProcessEnvFile_VariedContent(t *testing.T) {
 		t.Errorf("expected at least 4 values registered from varied .env, got %d", reg.Count())
 	}
 }
+
+// TestScanner_KeyFiltering_Pillar1 exercises the new Phase 1 ignore_patterns support
+// under the Pillar 1 logical layer (per-source options on the "env" source).
+func TestScanner_KeyFiltering_Pillar1(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, ".env.filtered")
+
+	content := strings.Join([]string{
+		"REAL_SECRET=supersecretvalue123456",
+		"LOG_LEVEL=debug",
+		"PROJECT_NAME=my-app",
+		"PATH=/usr/bin:/bin",
+		"AWS_ACCESS_KEY_ID=AKIAEXAMPLE",
+		"MY_CUSTOM_NONSECRET=foo",
+	}, "\n")
+
+	if err := os.WriteFile(envFile, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.ProjectRoots = []string{dir}
+	cfg.SkipDirs = nil
+
+	// Simulate user config for the "env" logical source (the shape that will also
+	// serve bitwarden and future sources under the unified Pillar 1 layer).
+	cfg.Pillar1.Sources["env"] = config.SourceConfig{
+		Enabled: true,
+		Options: map[string]any{
+			"ignore_patterns": []string{"LOG_LEVEL", "PROJECT_NAME", "PATH", "AWS_*_KEY_ID", "*_NONSECRET"},
+		},
+	}
+
+	reg := registry.New()
+	m := NewManager(cfg, reg)
+
+	m.RunInitialDiscovery()
+
+	// Only REAL_SECRET should have been registered.
+	if reg.Count() != 1 {
+		t.Errorf("expected exactly 1 secret after filtering, got %d", reg.Count())
+	}
+}
+
+// TestManager_Rescan exercises the Phase 3 manual rescan path and lastScan tracking.
+func TestManager_Rescan(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, ".env.rescan")
+	_ = os.WriteFile(envFile, []byte("SECRET1=abc123\nSECRET2=def456\n"), 0600)
+
+	cfg := config.DefaultConfig()
+	cfg.ProjectRoots = []string{dir}
+	cfg.SkipDirs = nil
+
+	reg := registry.New()
+	m := NewManager(cfg, reg)
+
+	m.RunInitialDiscovery()
+	initial := reg.Count()
+	if initial == 0 {
+		t.Fatal("expected some hashes after initial discovery")
+	}
+
+	// Add another secret file
+	env2 := filepath.Join(dir, ".env.extra")
+	_ = os.WriteFile(env2, []byte("EXTRA_SECRET=xyz789\n"), 0600)
+
+	result := m.Rescan()
+	if result == nil {
+		t.Fatal("Rescan returned nil result")
+	}
+	if result.AfterHashes <= result.BeforeHashes {
+		t.Errorf("expected AfterHashes (%d) > BeforeHashes (%d) after adding new .env", result.AfterHashes, result.BeforeHashes)
+	}
+	if m.LastScan().IsZero() {
+		t.Error("expected LastScan to be set after Rescan")
+	}
+}
+
+// TestManager_UsesNewStyleEnvOptions verifies that discovery reads project_roots
+// etc. from pillar1.sources.env.options when present (the new canonical location).
+func TestManager_UsesNewStyleEnvOptions(t *testing.T) {
+	dir := t.TempDir()
+	// Create a .env so something gets discovered
+	envFile := filepath.Join(dir, ".env")
+	_ = os.WriteFile(envFile, []byte("NEWSTYLE_SECRET=supersecretvalue\n"), 0600)
+
+	cfg := config.DefaultConfig()
+	cfg.SkipDirs = nil
+
+	// Put the discovery settings in the new recommended location
+	cfg.Pillar1.Sources = map[string]config.SourceConfig{
+		"env": {
+			Enabled: true,
+			Options: map[string]any{
+				"project_roots": []string{dir},
+				"skip_dirs":     []string{},
+				"ignore_files":  []string{},
+				"ignore_patterns": []string{},
+			},
+		},
+	}
+
+	reg := registry.New()
+	m := NewManager(cfg, reg)
+
+	m.RunInitialDiscovery()
+
+	if reg.Count() == 0 {
+		t.Error("expected discovery to find the .env when project_roots came from new-style config")
+	}
+}
+
+// TestManager_Rescan_CollectorValidation exercises that logical layer collectors
+// have their Validate() step called during rescan (the IO prerequisite process).
+func TestManager_Rescan_CollectorValidation(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := config.DefaultConfig()
+	cfg.ProjectRoots = []string{dir}
+	cfg.SkipDirs = nil
+
+	// Force the env source into a bad state (no valid roots) so Validate should fail.
+	cfg.Pillar1.Sources["env"] = config.SourceConfig{
+		Enabled: true,
+		Options: map[string]any{},
+	}
+	cfg.ProjectRoots = []string{"/definitely/not/a/real/path/that/exists/98765"}
+
+	reg := registry.New()
+	m := NewManager(cfg, reg)
+
+	result := m.Rescan()
+	if result == nil {
+		t.Fatal("expected rescan result")
+	}
+
+	// We expect at least one error mentioning the env collector validation.
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "env:") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected env collector validation error in rescan result, got errors: %v", result.Errors)
+	}
+}

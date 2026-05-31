@@ -15,5 +15,12 @@ func (StatusHandler) Handle(_ string, d DaemonContext) (any, error) {
 	if sum := d.CrumbsSummary(); sum != nil {
 		resp["residue"] = sum
 	}
+	// Pillar 1 scan status (manual rescan support)
+	if p1 := d.Pillar1ScanStatus(); p1 != nil {
+		if res := d.LastPillar1Rescan(); res != nil {
+			p1["collector_results"] = res.CollectorResults
+		}
+		resp["pillar1"] = p1
+	}
 	return resp, nil
 }

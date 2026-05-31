@@ -118,6 +118,37 @@ func (d *Daemon) RunCrumbsScan() *residue.ScanResult {
 	return d.residue.RunScan()
 }
 
+// Pillar 1 manual rescan support (Phase 3 — explicit on-demand only, no file watching).
+func (d *Daemon) TriggerPillar1Rescan() error {
+	if d.discovery == nil {
+		return nil
+	}
+	d.discovery.Rescan()
+	return nil
+}
+
+func (d *Daemon) Pillar1ScanStatus() map[string]any {
+	if d.discovery == nil {
+		return map[string]any{"status": "unavailable"}
+	}
+	last := d.discovery.LastScan()
+	status := map[string]any{
+		"last_scan":  last.UTC().Format(time.RFC3339),
+		"scan_state": string(d.registry.GetScanState()),
+	}
+	if last.IsZero() {
+		status["last_scan"] = "never"
+	}
+	return status
+}
+
+func (d *Daemon) LastPillar1Rescan() *discovery.RescanResult {
+	if d.discovery == nil {
+		return nil
+	}
+	return d.discovery.LastRescanResult()
+}
+
 // Run starts the Unix domain socket server and blocks until shutdown.
 func (d *Daemon) Run() error {
 	// Setup file logging via logging package
@@ -265,6 +296,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			handler = handlers.CheckHashHandler{}
 		case "CRUMBS":
 			handler = handlers.CrumbsHandler{}
+		case "RESCAN":
+			handler = handlers.RescanHandler{}
 		case "HALT", "STOP":
 			handler = handlers.HaltHandler{}
 		default:

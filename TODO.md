@@ -7,4 +7,9 @@
 - Architecture audit
 - Test Audit
 - logger audit
-- For a Pillar 1 .env detection, we should allow for approved keys, or ignore keys. This way if an environment variable is something like, hey this is the file folder we're going to use for this project That's not a secret. That doesn't need to be marked as a secret. It doesn't need to be hashed. It doesn't need to be compared.
+- Backwards compatability audit (e.g. we can fully drop all backwards compatibility because we havent released any software yet, lol)
+- (Addressed in Phase 1) Pillar 1 key filtering via `pillar1.sources.env.options.ignore_patterns` (and the unified logical layer for future sources). Non-secret keys (LOG\_\*, PATH, build metadata, etc.) are no longer hashed or compared.
+- 1. Bitwarden collector is still early
+     The Collect() implementation is functional but basic. It doesn't yet handle folders, organizations, attachments, TOTP secrets well, or have sophisticated error handling around bw states. This is the weakest part of the "done" story.
+- Kill this: 4. Migration UX is still a bit messy
+  Users can now have the same settings in two places (top-level + pillar1.sources.env.options). The fallback logic helps, but it's not elegant long-term.

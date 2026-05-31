@@ -6,29 +6,6 @@
 # (private 0700 directory + 0600 socket + capability token auth).
 # It is not user-configurable.
 
-# Directories to scan for .env* files on startup.
-# If empty, falls back to your home directory.
-project_roots:
-  - "~/projects"
-  - "~/work"
-
-# Directories to always skip during scanning (performance + noise reduction).
-# These are merged with strong built-in defaults.
-skip_dirs:
-  - "node_modules"
-  - ".git"
-  - "vendor"
-  - "dist"
-  - "build"
-  - ".next"
-  - "target"
-
-# Ignore files to respect (in addition to built-in behavior).
-# .blastradiusignore is always useful for tool-specific exclusions.
-ignore_files:
-  - ".gitignore"
-  - ".blastradiusignore"
-
 # Future: log level
 log_level: "info"
 
@@ -68,3 +45,88 @@ residue_hunter:
     # - "~/backups"
   flag_suspicious_filenames: true   # catches obvious names even without deep parsing
   # (detectors and thresholds are intentionally not user-configurable in v1)
+
+# Pillar 1 — Legitimate Secret Discovery (Logical Layer)
+#
+# This is the recommended configuration for Pillar 1.
+# All discovery settings for .env* files now live under the logical layer.
+#
+# Supported sources:
+#   env        → .env* scanning
+#   bitwarden  → Hard-coded `bw` CLI integration
+pillar1:
+  sources:
+    env:
+      enabled: true
+      options:
+        # Directories to scan for .env* files.
+        project_roots:
+          - "~/projects"
+          - "~/work"
+
+        # Directories to always skip (performance + noise reduction).
+        skip_dirs:
+          - "node_modules"
+          - ".git"
+          - "vendor"
+          - "dist"
+          - "build"
+          - ".next"
+          - "target"
+          - "out"
+          - ".cache"
+          - "coverage"
+          - ".venv"
+          - "__pycache__"
+
+        # Ignore files to respect during scanning.
+        ignore_files:
+          - ".gitignore"
+          - ".blastradiusignore"
+
+        # Keys that should never be treated as secrets.
+        # Supported forms: exact, PREFIX*, *SUFFIX, PREFIX*SUFFIX
+        ignore_patterns:
+          - "PATH"
+          - "HOME"
+          - "PWD"
+          - "USER"
+          - "SHELL"
+          - "TERM"
+          - "LANG"
+          - "LC_*"
+          - "EDITOR"
+          - "VISUAL"
+          - "PAGER"
+          - "COLORTERM"
+          - "DISPLAY"
+          - "XDG_*"
+          - "DBUS_*"
+          - "DESKTOP_SESSION"
+          - "GNOME_*"
+          - "KDE_*"
+          - "SSH_*"
+          - "GPG_*"
+          - "LESS*"
+          - "MORE"
+          - "PS1"
+          - "PS2"
+          - "PROMPT*"
+          - "HIST*"
+          - "HISTSIZE"
+          - "LOG_*"
+          - "*_NONSECRET"
+          - "BUILD_*"
+          - "CI_*"
+          - "NODE_ENV"
+          # Add any other non-secret keys your projects use.
+
+    # bitwarden:
+    #   enabled: true
+    #   options:
+    #     ignore_patterns:
+    #       - "dev-*"
+    #       - "*_test"
+    #     # Requires the Bitwarden CLI (`bw`) to be installed and unlocked.
+    #     # You must have the Bitwarden CLI (`bw`) installed and be logged in
+    #     # (`bw login` or `bw unlock`) for this source to work.

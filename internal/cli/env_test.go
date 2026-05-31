@@ -147,3 +147,60 @@ func TestRunEnvCheck_DirectExec(t *testing.T) {
 		t.Error("shell was incorrectly used for a runtime hygiene command (Pillar 4)")
 	}
 }
+
+// TestRunEnvCheck_NoCandidates exercises the path where the command succeeds
+// but the detector extracts zero candidates (early return with secrets_found:0).
+func TestRunEnvCheck_NoCandidates(t *testing.T) {
+	defer resetTestOverrides(t)
+	restore := silenceOutput()
+	defer restore()
+
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", `printf "PATH=/usr/bin\nHOME=/root\nNORMAL_LINE=foo\n"`)
+	}
+
+	cfg := defaultTestConfig()
+	cfg.Pillar5Commands = []config.Pillar5Command{{Name: "no-secrets", Cmd: "printenv"}}
+	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
+
+	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) { return nil, errForTest }
+
+	RunEnvCheck("no-secrets")
+}
+
+// TestRunEnvCheck_AuthReadFailure still proceeds with CHECK_HASH even if
+// the sibling .auth file cannot be read (the daemon will reject if strict).
+func TestRunEnvCheck_AuthReadFailure(t *testing.T) {
+	defer resetTestOverrides(t)
+	restore := silenceOutput()
+	defer restore()
+
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", `printf "REAL_SECRET=xyz123\n"`)
+	}
+
+	cfg := defaultTestConfig()
+	cfg.Pillar5Commands = []config.Pillar5Command{{Name: "auth-fail", Cmd: "printenv"}}
+	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
+
+	// Force read of .auth to fail by pointing socket to a dir without .auth file
+	badSocketDir := t.TempDir() + "/noauth.sock"
+	config.SocketPathFn = func() string { return badSocketDir }
+
+	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) {
+		c, s := net.Pipe()
+		go func() {
+			defer s.Close()
+			// Consume whatever is written (AUTH attempt will fail read on client side but we just drain)
+			buf := make([]byte, 1024)
+			for {
+				if _, err := s.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+		return c, nil
+	}
+
+	RunEnvCheck("auth-fail")
+}

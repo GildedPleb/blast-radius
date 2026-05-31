@@ -16,6 +16,18 @@ func TestDefaultConfig(t *testing.T) {
 	if !cfg.ResidueHunter.FlagSuspiciousFilenames || len(cfg.ResidueHunter.TargetDirs) == 0 {
 		t.Error("residue_hunter defaults not populated")
 	}
+	// Pillar 1 logical sources (v1: env + bitwarden)
+	if cfg.Pillar1.Sources == nil {
+		t.Error("pillar1.sources map missing in defaults")
+	}
+	envSrc, ok := cfg.Pillar1.Sources["env"]
+	if !ok || !envSrc.Enabled {
+		t.Error("env source should be present and enabled by default")
+	}
+	bwSrc, ok := cfg.Pillar1.Sources["bitwarden"]
+	if !ok || bwSrc.Enabled {
+		t.Error("bitwarden source should be present and disabled by default")
+	}
 }
 
 func TestLoad_NoFile(t *testing.T) {
@@ -286,5 +298,155 @@ func TestSocketPath_Override(t *testing.T) {
 
 	if got := SocketPath(); got != custom {
 		t.Errorf("SocketPath() after override = %q, want %q", got, custom)
+	}
+}
+
+func TestPillar1Sources_Normalization_And_Accessor(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	// Partial config: user only enables bitwarden and supplies one ignore pattern for env
+	content := `
+pillar1:
+  sources:
+    bitwarden:
+      enabled: true
+    env:
+      options:
+        ignore_patterns: ["DEBUG*", "*_TEST"]
+`
+	if err := os.WriteFile(cfgPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	origRead := osReadFile
+	origHome := userHomeDir
+	defer func() {
+		osReadFile = origRead
+		userHomeDir = origHome
+	}()
+	userHomeDir = func() (string, error) { return dir, nil }
+	osReadFile = func(name string) ([]byte, error) {
+		if filepath.Base(name) == "config.yaml" {
+			return []byte(content), nil
+		}
+		return nil, os.ErrNotExist
+	}
+
+	cfg, _, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if !cfg.Pillar1.Sources["bitwarden"].Enabled {
+		t.Error("bitwarden should be enabled from partial yaml")
+	}
+	// When user supplies a partial env block, we respect the zero-value Enabled (false)
+	// unless they explicitly set enabled: true. This is the intended "user intent" semantics.
+	// (Full migration story will default env on when the new pillar1 block is completely absent.)
+	if cfg.Pillar1.Sources["env"].Enabled {
+		t.Error("env Enabled should be false when user supplied partial block without explicit enabled:true")
+	}
+
+	ignores := cfg.GetSourceIgnorePatterns("env")
+	if len(ignores) != 2 || ignores[0] != "DEBUG*" {
+		t.Errorf("expected normalized ignore_patterns for env, got %v", ignores)
+	}
+
+	// bitwarden should have empty list (not nil) after normalization
+	bwIgnores := cfg.GetSourceIgnorePatterns("bitwarden")
+	if bwIgnores == nil {
+		t.Error("bitwarden ignore_patterns should be non-nil slice")
+	}
+}
+
+func TestGetEnvOptions_NewStyle(t *testing.T) {
+	cfg := &Config{
+		// Legacy values that should be ignored when new style is present
+		ProjectRoots: []string{"/legacy/root"},
+		SkipDirs:     []string{"legacy_skip"},
+		IgnoreFiles:  []string{".legacyignore"},
+		Pillar1: Pillar1Config{
+			Sources: map[string]SourceConfig{
+				"env": {
+					Enabled: true,
+					Options: map[string]any{
+						"project_roots":   []string{"~/projects", "~/work"},
+						"skip_dirs":       []string{"node_modules", ".git", "vendor"},
+						"ignore_files":    []string{".gitignore", ".blastradiusignore"},
+						"ignore_patterns": []string{"LOG_*", "*_SECRET"},
+					},
+				},
+			},
+		},
+	}
+
+	opts := cfg.GetEnvOptions()
+
+	if len(opts.ProjectRoots) != 2 || opts.ProjectRoots[0] != "~/projects" {
+		t.Errorf("ProjectRoots not taken from new style: %v", opts.ProjectRoots)
+	}
+	if len(opts.SkipDirs) != 3 || opts.SkipDirs[0] != "node_modules" {
+		t.Errorf("SkipDirs not taken from new style: %v", opts.SkipDirs)
+	}
+	if len(opts.IgnoreFiles) != 2 || opts.IgnoreFiles[0] != ".gitignore" {
+		t.Errorf("IgnoreFiles not taken from new style: %v", opts.IgnoreFiles)
+	}
+	if len(opts.IgnorePatterns) != 2 || opts.IgnorePatterns[0] != "LOG_*" {
+		t.Errorf("IgnorePatterns not taken from new style: %v", opts.IgnorePatterns)
+	}
+}
+
+func TestGetEnvOptions_LegacyFallback(t *testing.T) {
+	cfg := &Config{
+		ProjectRoots: []string{"~/legacy-projects"},
+		SkipDirs:     []string{"legacy-node_modules"},
+		IgnoreFiles:  []string{".legacy-gitignore"},
+		Pillar1: Pillar1Config{
+			Sources: map[string]SourceConfig{
+				"env": {Enabled: true}, // no options at all
+			},
+		},
+	}
+
+	opts := cfg.GetEnvOptions()
+
+	if len(opts.ProjectRoots) != 1 || opts.ProjectRoots[0] != "~/legacy-projects" {
+		t.Errorf("Expected legacy ProjectRoots, got %v", opts.ProjectRoots)
+	}
+	if len(opts.SkipDirs) != 1 || opts.SkipDirs[0] != "legacy-node_modules" {
+		t.Errorf("Expected legacy SkipDirs, got %v", opts.SkipDirs)
+	}
+	if len(opts.IgnoreFiles) != 1 || opts.IgnoreFiles[0] != ".legacy-gitignore" {
+		t.Errorf("Expected legacy IgnoreFiles, got %v", opts.IgnoreFiles)
+	}
+}
+
+func TestGetEnvOptions_NewStyleWins(t *testing.T) {
+	cfg := &Config{
+		ProjectRoots: []string{"/legacy-should-be-ignored"},
+		Pillar1: Pillar1Config{
+			Sources: map[string]SourceConfig{
+				"env": {
+					Enabled: true,
+					Options: map[string]any{
+						"project_roots": []string{"~/new-projects"},
+					},
+				},
+			},
+		},
+	}
+
+	opts := cfg.GetEnvOptions()
+	if len(opts.ProjectRoots) != 1 || opts.ProjectRoots[0] != "~/new-projects" {
+		t.Errorf("New style should win over legacy: %v", opts.ProjectRoots)
+	}
+}
+
+func TestGetEnvOptions_Empty(t *testing.T) {
+	cfg := &Config{}
+	opts := cfg.GetEnvOptions()
+	// After normalization we guarantee non-nil slices (better API)
+	if opts.ProjectRoots == nil || opts.SkipDirs == nil || opts.IgnoreFiles == nil {
+		t.Errorf("Expected non-nil slices for empty config (we normalize), got %+v", opts)
 	}
 }

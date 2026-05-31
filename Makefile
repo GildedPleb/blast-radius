@@ -1,14 +1,23 @@
-.PHONY: test cover build test-cover ci
+.PHONY: test cover build test-cover ci clean
 
 test:
 	go test -timeout=5s ./...
+	@rm -f *.test 2>/dev/null || true
 
 cover:
 	go test -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
+	@rm -f *.test 2>/dev/null || true
 
 build:
 	go build ./...
+
+clean:
+	@echo "=== clean: removing test artifacts and caches ==="
+	@rm -f *.test coverage.out coverage.*.out 2>/dev/null || true
+	@find . -name '*.test' -type f -delete 2>/dev/null || true
+	@go clean -cache -testcache
+	@echo "Clean complete."
 
 # test-cover enforces the hard invariants for the *fast unit test suite*:
 #
@@ -26,7 +35,14 @@ build:
 # or `make e2e`) with their own relaxed timing and coverage rules.
 test-cover:
 	@echo "=== test-cover: enforcing hard invariants (wall ≤5s AND coverage ≥80%) ==="
-	@rm -f coverage.out
+	@# Aggressively clear stale test binaries and the full build cache before
+	@# measuring coverage. Stale instrumented test binaries (cli.test etc.)
+	@# left from previous `go test -c` runs can cause the per-package %
+	@# reported during `go test ./...` to be computed against old
+	@# instrumentation, producing numbers like the 32.1% you saw for cli.
+	@rm -f *.test coverage.out coverage.*.out 2>/dev/null || true
+	@find . -name '*.test' -type f -delete 2>/dev/null || true
+	@go clean -cache -testcache
 	@TESTOUT=$$(mktemp); \
 	TIMEFILE=$$(mktemp); \
 	if /usr/bin/time -p -o "$$TIMEFILE" go test -count=1 -timeout=5s -coverprofile=coverage.out ./... 2>&1 | tee "$$TESTOUT"; then \
@@ -43,7 +59,7 @@ test-cover:
 			rm -f "$$TIMEFILE" "$$TESTOUT"; exit 1; \
 		fi; \
 		echo "✅ PASS: $${REAL}s wall time, $${COV}% coverage"; \
-		rm -f "$$TIMEFILE" "$$TESTOUT"; \
+		rm -f "$$TIMEFILE" "$$TESTOUT" *.test 2>/dev/null || true; \
 	else \
 		echo "FAIL: 'go test' command failed"; \
 		cat "$$TESTOUT"; \

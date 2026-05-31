@@ -197,6 +197,31 @@ func (r *Registry) DuplicateCount() int {
 	return count
 }
 
+// Clear removes every secret hash from the registry.
+// This is used during a full manual rescan so that disabled or deleted
+// sources no longer leave stale entries.
+func (r *Registry) Clear() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries = make(map[SecretHash]Entry)
+}
+
+// ClearSource removes all hashes that were registered under the given
+// ProjectID (whether it's a filesystem project or a logical source like "bitwarden").
+func (r *Registry) ClearSource(id ProjectID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for hash, entry := range r.entries {
+		delete(entry.Projects, id)
+		if len(entry.Projects) == 0 {
+			delete(r.entries, hash)
+		} else {
+			r.entries[hash] = entry
+		}
+	}
+}
+
 // AllHashes returns all currently tracked secret hashes.
 // Used by history scrubbing (Pillar 3).
 func (r *Registry) AllHashes() []SecretHash {

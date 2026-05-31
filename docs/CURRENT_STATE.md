@@ -14,7 +14,13 @@ Blast Radius is a local, hash-only tool for secret exposure reduction. It has co
 
 **Current pillars (per idiomatic_pillars.md):**
 
-- **Pillar 1**: Legitimate Secret Discovery (`.env*` scanning + registry) — ✅ Implemented
+- **Pillar 1**: Legitimate Secret Discovery — ✅ Core complete
+  - Key filtering for non-secrets (Phase 1)
+  - Improved ignore engine (Phase 2)
+  - High-quality manual `rescan` (Phase 3, no fsnotify)
+  - Logical layer with explicit sources: `env` + hard-coded `bitwarden` (Phase 4)
+  - Both sources participate in rescan, duplicates, and status via the collector model
+  - Full documentation and example config updated
 - **Pillar 2**: Illegitimate Secret Residue ("Crumbs") — ✅ **v1 implemented** (`blastradius crumbs`). Scans user-configured high-risk dirs (Downloads/Documents/Desktop + opt-in) for vault exports + high-entropy residue using fixed detectors + registry cross-check. On-demand only. Full stages 2-6 remain for complete pillar (see pillar2-implementation-plan.md).
 - **Pillar 3**: History Hygiene (`scrub-history`) — ✅ Implemented
 - **Pillar 4**: Runtime Environment Hygiene (`env` / user-defined commands) — ✅ Implemented
@@ -123,8 +129,9 @@ Zsh integration (source `zsh/blastradius.zsh`):
 
 ## Known Limitations / Future Work
 
+- **Pillar 1 reactivity & full logical layer**: Key filtering for non-secret .env keys is implemented (Phase 1). Full reactivity (fsnotify + `rescan`), the hard-coded Bitwarden collector, and treating ENV/Bitwarden as explicit activatable sources under the logical layer are tracked in the Pillar 1 completion plan.
 - **Pillar 2 (Crumbs)**: v1 shipped (on-demand `crumbs`, fixed detectors for exports + entropy, status summary, opt-in config). Remaining required stages (hunt_residue patterns inside target_dirs, materialization roots expansion, git accident detection, background scheduling, Zsh HUD) are documented in `docs/pillars/pillar2-implementation-plan.md` and `residue_hunter_scoped.md`.
-- No reactive file watching (`fsnotify`) — discovery runs on daemon start only.
+- No reactive file watching (`fsnotify`) — discovery runs on daemon start only (Pillar 1 Phase 3 work).
 - History scrubbing supports Zsh only.
 - No editor / AI prompt integration.
 - Clipboard auto-clear timer (Pillar 5) is declared in config but not yet implemented.
