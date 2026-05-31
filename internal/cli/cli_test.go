@@ -48,11 +48,26 @@ func TestRun_Dispatch(t *testing.T) {
 		Run([]string{"status"})
 	})
 
-	t.Run("duplicates-crumbs", func(t *testing.T) {
-		sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok"}`)
+	t.Run("rescan", func(t *testing.T) {
+		// No daemon
+		Run([]string{"rescan"})
+		Run([]string{"rescan", "--json"})
+
+		// With rich Pillar 1 response
+		sendDaemonCommandFn = mockSendDaemonCommand(richDaemonResponse)
+		Run([]string{"rescan"})
+		Run([]string{"rescan", "--json"})
+	})
+
+	t.Run("duplicates-crumbs-rescan-status", func(t *testing.T) {
+		sendDaemonCommandFn = mockSendDaemonCommand(richDaemonResponse)
 		Run([]string{"duplicates"})
 		Run([]string{"crumbs"})
 		Run([]string{"crumbs", "--json"})
+		Run([]string{"rescan"})
+		Run([]string{"rescan", "--json"})
+		Run([]string{"status"})
+		Run([]string{"status", "--json"})
 	})
 
 	t.Run("scrub-stop", func(t *testing.T) {

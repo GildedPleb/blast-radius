@@ -16,6 +16,20 @@ func TestRunStatus(t *testing.T) {
 	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","registry":{"tracked_hashes":42}}`)
 	RunStatus(false)
 	RunStatus(true)
+
+	// Exercise the new Pillar 1 sections in human output (last_scan + collector_results)
+	sendDaemonCommandFn = mockSendDaemonCommand(`{
+		"status":"ok",
+		"registry":{"tracked_hashes":142,"duplicate_hashes":3,"uptime":"1h2m3s","scan_state":"completed"},
+		"time":"2026-03-01T12:00:00Z",
+		"pillar1":{
+			"last_scan":"2026-03-01T11:55:00Z",
+			"collector_results":{"env":142,"bitwarden":19}
+		},
+		"residue":{"count":2}
+	}`)
+	RunStatus(false)
+	RunStatus(true)
 }
 
 // TestRunStatus_UnifiedJSONShape verifies that the refactored --json output

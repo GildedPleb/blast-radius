@@ -57,3 +57,22 @@ func mockSendDaemonCommand(respLine string) func(string) (string, error) {
 func defaultTestConfig() config.Config {
 	return config.Config{}
 }
+
+// richDaemonResponse is a full response that exercises the new Pillar 1 collector_results,
+// pillar1 section in status, rescan output, etc.
+const richDaemonResponse = `{
+	"status":"ok",
+	"message":"Blast Radius daemon is running",
+	"registry":{
+		"tracked_hashes":142,
+		"duplicate_hashes":3,
+		"uptime":"1h2m3s",
+		"scan_state":"completed"
+	},
+	"time":"2026-03-01T12:00:00Z",
+	"pillar1":{
+		"last_scan":"2026-03-01T11:55:00Z",
+		"collector_results":{"env":142,"bitwarden":19}
+	},
+	"residue":{"count":2}
+}`
