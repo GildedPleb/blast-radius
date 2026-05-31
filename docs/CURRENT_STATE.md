@@ -143,6 +143,20 @@ Zsh integration (source `zsh/blastradius.zsh`):
 ## How to Build & Run
 
 ```bash
+make help          # recommended starting point — lists every developer command
+make test
+make build
+make cover         # trustworthy per-package coverage (the only numbers you should trust)
+make test-cover    # the full strict gate used by CI (parallelism forced automatically; <5 s invariant)
+```
+
+All build, test, and coverage artifacts live in the project root and are cleaned with `make clean`.
+
+See the "Coverage model" section near the top of [Makefile](../Makefile) (the short block after the parallelism hack) for why coverage collection is deliberately per-package. A long-standing Go toolchain bug makes combined `go test -cover ./...` numbers untrustworthy here; the Makefile is now self-documenting around that constraint.
+
+Raw Go commands still work:
+
+```bash
 go build -o blastradius ./cmd/blastradius
 ./blastradius start
 ./blastradius status

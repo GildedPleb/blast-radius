@@ -43,6 +43,23 @@ Or run directly:
 go run ./cmd/blastradius status
 ```
 
+## Developing Locally
+
+The project provides a friendly, self-documenting Makefile.
+
+```bash
+make help          # start here — shows every command with descriptions
+make test
+make build
+make cover         # trustworthy per-package coverage numbers (the ones you can believe)
+make test-cover    # the strict CI gate (parallelism is forced automatically; must finish <5 s)
+make clean
+```
+
+All artifacts (coverage files, test binaries, `.coverage-failed`, etc.) live in the project root and are removed by `make clean`.
+
+See the "Coverage model" section near the top of [Makefile](Makefile) for the (now short) explanation of the per-package coverage approach. A long-standing Go toolchain bug makes combined `go test -cover ./...` numbers untrustworthy; the Makefile is deliberately self-documenting and approachable for newcomers.
+
 ## Architecture (High Level)
 
 - `cmd/blastradius` — CLI entrypoint (client + daemon mode)
