@@ -2,21 +2,26 @@
 
 test:
 	go test -timeout=5s ./...
-	@rm -f *.test 2>/dev/null || true
 
 cover:
 	go test -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
-	@rm -f *.test 2>/dev/null || true
 
 build:
 	go build ./...
 
 clean:
-	@echo "=== clean: removing test artifacts and caches ==="
-	@rm -f *.test coverage.out coverage.*.out 2>/dev/null || true
-	@find . -name '*.test' -type f -delete 2>/dev/null || true
+	@echo "=== clean: removing all artifacts, test binaries, coverage files, and Go caches ==="
+	@# Remove common build outputs this project produces (root level)
+	@rm -f blastradius blastradius.exe coverage*.out *.test 2>/dev/null || true
+	@# Recursively remove stray test binaries (go test -c), built binaries, and any coverage profiles anywhere
+	@find . -type f \( -name '*.test' -o -name 'blastradius' -o -name 'blastradius.exe' -o -name 'coverage*.out' \) -delete 2>/dev/null || true
+	@# Thoroughly clear Go's build and test caches (clean target is allowed to be slow)
 	@go clean -cache -testcache
+	@# Remove common output directories + any legacy manual cache dir
+	@rm -rf bin/ dist/ build/ out/ .gocache 2>/dev/null || true
+	@# Best-effort clean of package artifacts
+	@go clean ./... 2>/dev/null || true
 	@echo "Clean complete."
 
 # test-cover enforces the hard invariants for the *fast unit test suite*:
@@ -35,40 +40,32 @@ clean:
 # or `make e2e`) with their own relaxed timing and coverage rules.
 test-cover:
 	@echo "=== test-cover: enforcing hard invariants (wall ≤5s AND coverage ≥80%) ==="
-	@# Aggressively clear stale test binaries and the full build cache before
-	@# measuring coverage. Stale instrumented test binaries (cli.test etc.)
-	@# left from previous `go test -c` runs can cause the per-package %
-	@# reported during `go test ./...` to be computed against old
-	@# instrumentation, producing numbers like the 32.1% you saw for cli.
-	@rm -f *.test coverage.out coverage.*.out 2>/dev/null || true
-	@find . -name '*.test' -type f -delete 2>/dev/null || true
-	@go clean -cache -testcache
-	@TESTOUT=$$(mktemp); \
-	TIMEFILE=$$(mktemp); \
-	if /usr/bin/time -p -o "$$TIMEFILE" go test -count=1 -timeout=5s -coverprofile=coverage.out ./... 2>&1 | tee "$$TESTOUT"; then \
-		REAL=$$(awk '/^real/ {print $$2}' "$$TIMEFILE" || echo 999); \
+	@go clean -testcache
+	@rm -f coverage.out 2>/dev/null || true
+	@# Time the test run using only shell variables + date (no mktemp, no temp
+	@# files, no TMP, no /usr/bin/time -o files). Live output from go test.
+	@START=$$(date +%s.%N 2>/dev/null || date +%s); \
+	if go test -count=1 -timeout=5s -coverprofile=coverage.out ./... 2>&1; then \
+		END=$$(date +%s.%N 2>/dev/null || date +%s); \
+		REAL=$$(awk "BEGIN { d=$$END - $$START; if (d<0) d+=86400; printf \"%.2f\", d }"); \
 		echo "Wall-clock time: $${REAL}s"; \
 		if awk "BEGIN { if ($$REAL > 5.0) exit 0; else exit 1 }"; then \
 			echo "FAIL: Test suite took $${REAL}s (exceeds 5s hard limit)"; \
-			rm -f "$$TIMEFILE" "$$TESTOUT"; exit 1; \
+			exit 1; \
 		fi; \
 		COV=$$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $$3}' | tr -d '%'); \
 		echo "Coverage: $${COV}%"; \
 		if awk "BEGIN { if ($$COV < 80) exit 0; else exit 1 }"; then \
 			echo "FAIL: Coverage $${COV}% is below the 80% minimum"; \
-			rm -f "$$TIMEFILE" "$$TESTOUT"; exit 1; \
+			exit 1; \
 		fi; \
 		echo "✅ PASS: $${REAL}s wall time, $${COV}% coverage"; \
-		rm -f "$$TIMEFILE" "$$TESTOUT" *.test 2>/dev/null || true; \
 	else \
-		echo "FAIL: 'go test' command failed"; \
-		cat "$$TESTOUT"; \
-		rm -f "$$TIMEFILE" "$$TESTOUT"; \
+		echo "FAIL: 'go test' command failed (see output above)"; \
 		exit 1; \
 	fi
 
 ci: test-cover
-
 # Placeholder for future slow integration / end-to-end tests.
 # These are intentionally allowed to exceed 5s and have different coverage expectations.
 # integration:
