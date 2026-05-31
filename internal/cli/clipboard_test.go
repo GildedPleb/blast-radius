@@ -33,7 +33,7 @@ func TestRunClipboard(t *testing.T) {
 }
 
 // TestRunClipboard_CheckWithSecrets exercises the new candidate-based clipboard
-// checking path (instead of hashing the entire blob).
+// checking path (instead of hashing the entire clipboard blob).
 func TestRunClipboard_CheckWithSecrets(t *testing.T) {
 	defer resetTestOverrides(t)
 	restore := silenceOutput()
