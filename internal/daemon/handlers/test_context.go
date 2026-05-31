@@ -20,13 +20,13 @@ type fakeContext struct {
 	crumbsResult *residue.ScanResult
 }
 
-func (f *fakeContext) RegistrySnapshot() any                  { return f.snapshot }
-func (f *fakeContext) FindDuplicates() map[[32]byte][]string  { return f.dups }
-func (f *fakeContext) GetProjectDisplayName(p string) string  { return f.displayNames[p] }
-func (f *fakeContext) IsKnownHashHex(h string) bool           { return f.knownHashes[h] }
-func (f *fakeContext) AllHashes() [][32]byte                  { return f.hashes }
-func (f *fakeContext) Now() time.Time                         { return f.now }
-func (f *fakeContext) TriggerShutdown()                       { f.shutdown = true }
+func (f *fakeContext) RegistrySnapshot() any                 { return f.snapshot }
+func (f *fakeContext) FindDuplicates() map[[32]byte][]string { return f.dups }
+func (f *fakeContext) GetProjectDisplayName(p string) string { return f.displayNames[p] }
+func (f *fakeContext) IsKnownHashHex(h string) bool          { return f.knownHashes[h] }
+func (f *fakeContext) AllHashes() [][32]byte                 { return f.hashes }
+func (f *fakeContext) Now() time.Time                        { return f.now }
+func (f *fakeContext) TriggerShutdown()                      { f.shutdown = true }
 
 func (f *fakeContext) CrumbsSummary() map[string]any { return f.crumbs }
 func (f *fakeContext) RunCrumbsScan() *residue.ScanResult {

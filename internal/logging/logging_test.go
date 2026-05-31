@@ -54,8 +54,6 @@ func TestInit_ErrorOnBadDir(t *testing.T) {
 	}
 }
 
-
-
 // The wrapper functions are intentionally thin. We just need to call them
 // once each to get them off 0%.
 func TestLoggingWrappers_DoNotPanic(t *testing.T) {

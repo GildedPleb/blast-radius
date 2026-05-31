@@ -47,7 +47,7 @@ func RunEnvCheck(name string) {
 	// This eliminates an entire class of injection and arbitrary execution risks from config.
 	parts := strings.Fields(cmd.Cmd)
 	if len(parts) == 0 {
-		fmt.Printf(`{"status":"error","message":"empty command"}`+"\n")
+		fmt.Printf(`{"status":"error","message":"empty command"}` + "\n")
 		return
 	}
 	output, runErr := execCommand(parts[0], parts[1:]...).CombinedOutput()

@@ -356,7 +356,6 @@ func (c *Config) GetEnvOptions() EnvOptions {
 	return opts
 }
 
-
 // Save writes the configuration (for future use).
 func (c *Config) Save() error {
 	home, err := userHomeDir()

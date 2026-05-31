@@ -239,7 +239,7 @@ func findWithWildcard(s, p string) int {
 		return strings.Index(s, p)
 	}
 	// Simple left-to-right search allowing * to eat characters
-	for i := 0; i <= len(s)-len(p)+1; i++ {  // rough bound
+	for i := 0; i <= len(s)-len(p)+1; i++ { // rough bound
 		if matchAt(s[i:], p) {
 			return i
 		}

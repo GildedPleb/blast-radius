@@ -17,8 +17,8 @@ func TestComputeEntropy(t *testing.T) {
 	}{
 		{"", 0},
 		{"aaaa", 0},
-		{"abcd", 2.0}, // exactly 2 for 4 distinct
-		{"password123", 3.0}, // approximate; just > low
+		{"abcd", 2.0},                 // exactly 2 for 4 distinct
+		{"password123", 3.0},          // approximate; just > low
 		{"AKIAIOSFODNN7EXAMPLE", 3.5}, // high enough for our threshold
 	}
 	for _, tc := range tests {
@@ -346,7 +346,7 @@ func TestSafeLocation_MoreBranches(t *testing.T) {
 		t.Errorf("nonhome: %s", got)
 	}
 	// shallow non home
-	if got := SafeLocation("/etc/passwd"); got != "etc/passwd" {  // join of 0? wait code
+	if got := SafeLocation("/etc/passwd"); got != "etc/passwd" { // join of 0? wait code
 		// code for nonhome >2 only, else base
 	}
 	// no home prefix, root

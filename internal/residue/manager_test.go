@@ -130,7 +130,7 @@ func TestResidueManager_TargetsEmptyAndWalkErr(t *testing.T) {
 	if sum["status"] != "ok" {
 		t.Errorf("expected ok after empty-targets scan, got %v", sum["status"])
 	}
-	// sample should be [] 
+	// sample should be []
 	if s, ok := sum["sample"].([]string); ok && len(s) != 0 {
 		t.Errorf("expected empty sample for 0 findings, got %v", s)
 	}

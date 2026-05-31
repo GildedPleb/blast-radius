@@ -72,7 +72,7 @@ func TestMain_EmptyArgs(t *testing.T) {
 	restore := silenceOutput()
 	defer restore()
 
-	run([]string{})           // extremely defensive
+	run([]string{})              // extremely defensive
 	run([]string{"blastradius"}) // same as no subcommand
 }
 

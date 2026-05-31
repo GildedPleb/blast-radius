@@ -40,7 +40,7 @@ func resetTestOverrides(t testing.TB) {
 	osExecutable = os.Executable
 	getDaemonLogPathFn = getDaemonLogPath
 	sendDaemonCommandFn = realSendDaemonCommand
-	osExit = func(code int) {} // silent no-op during tests
+	osExit = func(code int) {}                          // silent no-op during tests
 	readAuthTokenForSocket = realReadAuthTokenForSocket // reset to real (tests that need fake override it)
 }
 

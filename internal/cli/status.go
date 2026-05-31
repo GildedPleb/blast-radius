@@ -7,7 +7,7 @@ import (
 
 // Status JSON contract:
 //
-//   {"daemon": { ... full daemon STATUS or not_running sentinel ... }}
+//	{"daemon": { ... full daemon STATUS or not_running sentinel ... }}
 //
 // This is the only top-level key. Zsh and other consumers should rely on this shape.
 func RunStatus(jsonOutput bool) {

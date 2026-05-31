@@ -155,13 +155,13 @@ func (m *Manager) CrumbsSummary() map[string]any {
 	}
 	age := time.Since(m.lastScan).Round(time.Second)
 	return map[string]any{
-		"status":     "ok",
-		"count":      len(m.last.Findings),
-		"last_scan":  m.last.Timestamp.Format(time.RFC3339),
-		"age":        age.String(),
-		"examined":   m.last.FilesExamined,
-		"scanned":    m.last.ScannedDirs,
-		"sample":     firstFewLocations(m.last.Findings, 3),
+		"status":    "ok",
+		"count":     len(m.last.Findings),
+		"last_scan": m.last.Timestamp.Format(time.RFC3339),
+		"age":       age.String(),
+		"examined":  m.last.FilesExamined,
+		"scanned":   m.last.ScannedDirs,
+		"sample":    firstFewLocations(m.last.Findings, 3),
 	}
 }
 

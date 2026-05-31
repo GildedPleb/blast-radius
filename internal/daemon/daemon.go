@@ -17,24 +17,24 @@ import (
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/daemon/handlers"
 	"github.com/GildedPleb/blast-radius/internal/discovery"
 	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/registry"
 	"github.com/GildedPleb/blast-radius/internal/residue"
-	"github.com/GildedPleb/blast-radius/internal/daemon/handlers"
 )
 
 // Test hooks (following the same pattern used successfully in internal/cli).
 // These allow unit tests to inject controllable behavior without changing
 // production code or public API.
 var (
-	netListen     = net.Listen
-	osRemove      = os.Remove
-	osMkdirAll    = os.MkdirAll
-	osChmod       = os.Chmod
-	signalNotify  = signal.Notify
-	signalStop    = signal.Stop
-	userHomeDir   = os.UserHomeDir
+	netListen          = net.Listen
+	osRemove           = os.Remove
+	osMkdirAll         = os.MkdirAll
+	osChmod            = os.Chmod
+	signalNotify       = signal.Notify
+	signalStop         = signal.Stop
+	userHomeDir        = os.UserHomeDir
 	getDaemonLogPathFn = getDaemonLogPath
 
 	// writeAuthToken / readAuthToken / removeAuthToken allow tests to intercept
@@ -77,7 +77,7 @@ func New(cfg *config.Config, reg *registry.Registry) *Daemon {
 
 // --- Accessors for handlers (keep Daemon encapsulation) ---
 
-func (d *Daemon) RegistrySnapshot() any                  { return d.registry.Snapshot() }
+func (d *Daemon) RegistrySnapshot() any { return d.registry.Snapshot() }
 func (d *Daemon) FindDuplicates() map[[32]byte][]string {
 	dups := d.registry.FindDuplicates()
 	out := make(map[[32]byte][]string, len(dups))
@@ -90,8 +90,10 @@ func (d *Daemon) FindDuplicates() map[[32]byte][]string {
 	}
 	return out
 }
-func (d *Daemon) GetProjectDisplayName(p string) string { return d.discovery.GetProjectDisplayName(registry.ProjectID(p)) }
-func (d *Daemon) IsKnownHashHex(h string) bool          { return d.registry.IsKnownHashHex(h) }
+func (d *Daemon) GetProjectDisplayName(p string) string {
+	return d.discovery.GetProjectDisplayName(registry.ProjectID(p))
+}
+func (d *Daemon) IsKnownHashHex(h string) bool { return d.registry.IsKnownHashHex(h) }
 func (d *Daemon) AllHashes() [][32]byte {
 	hashes := d.registry.AllHashes()
 	out := make([][32]byte, len(hashes))
@@ -100,8 +102,8 @@ func (d *Daemon) AllHashes() [][32]byte {
 	}
 	return out
 }
-func (d *Daemon) Now() time.Time                        { return time.Now() }
-func (d *Daemon) TriggerShutdown()                      { close(d.shutdown) }
+func (d *Daemon) Now() time.Time   { return time.Now() }
+func (d *Daemon) TriggerShutdown() { close(d.shutdown) }
 
 // CrumbsSummary and RunCrumbsScan implement the new DaemonContext methods for Pillar 2.
 func (d *Daemon) CrumbsSummary() map[string]any {

@@ -299,9 +299,9 @@ func TestManager_UsesNewStyleEnvOptions(t *testing.T) {
 		"env": {
 			Enabled: true,
 			Options: map[string]any{
-				"project_roots": []string{dir},
-				"skip_dirs":     []string{},
-				"ignore_files":  []string{},
+				"project_roots":   []string{dir},
+				"skip_dirs":       []string{},
+				"ignore_files":    []string{},
 				"ignore_patterns": []string{},
 			},
 		},

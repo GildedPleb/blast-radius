@@ -66,4 +66,3 @@ func realSendDaemonCommand(cmd string) (string, error) {
 	}
 	return line, nil
 }
-

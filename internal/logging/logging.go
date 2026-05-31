@@ -8,10 +8,10 @@ import (
 
 // test seams for coverage of fatal wrappers without killing the test process.
 var (
-	logPrintf = log.Printf
+	logPrintf  = log.Printf
 	logPrintln = log.Println
-	logFatalf = log.Fatalf
-	logFatal  = log.Fatal
+	logFatalf  = log.Fatalf
+	logFatal   = log.Fatal
 )
 
 // Init sets up logging to the given file path with the standard daemon format.
@@ -41,6 +41,6 @@ func DefaultDaemonLogPath() string {
 // work after Init is called.
 
 func Printf(format string, v ...any) { logPrintf(format, v...) }
-func Println(v ...any)                 { logPrintln(v...) }
-func Fatalf(format string, v ...any)   { logFatalf(format, v...) }
-func Fatal(v ...any)                   { logFatal(v...) }
+func Println(v ...any)               { logPrintln(v...) }
+func Fatalf(format string, v ...any) { logFatalf(format, v...) }
+func Fatal(v ...any)                 { logFatal(v...) }

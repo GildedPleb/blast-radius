@@ -15,9 +15,9 @@ import (
 
 // Scanner discovers .env* files, parses them, and populates the registry.
 type Scanner struct {
-	registry    *registry.Registry
-	cfg         *config.Config
-	ignores     map[string]*IgnoreMatcher // per-root ignore matchers
+	registry *registry.Registry
+	cfg      *config.Config
+	ignores  map[string]*IgnoreMatcher // per-root ignore matchers
 
 	// onProjectDiscovered is called when we find a new project root during scan.
 	// This allows the Manager to capture display names without the Registry seeing paths.

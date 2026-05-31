@@ -28,8 +28,8 @@ type ProjectID string
 // The Projects map uses opaque ProjectID values only.
 // Display names are resolved via DiscoveryManager when needed.
 type Entry struct {
-	Projects   map[ProjectID]struct{}
-	LastSeen   time.Time
+	Projects map[ProjectID]struct{}
+	LastSeen time.Time
 	// No file paths, no plaintext, minimal by design.
 }
 
@@ -143,10 +143,10 @@ func (r *Registry) Snapshot() map[string]any {
 	defer r.mu.RUnlock()
 
 	return map[string]any{
-		"tracked_hashes":  len(r.entries),
+		"tracked_hashes":   len(r.entries),
 		"duplicate_hashes": r.DuplicateCount(),
-		"uptime":          r.Uptime().String(),
-		"scan_state":      string(r.scanState),
+		"uptime":           r.Uptime().String(),
+		"scan_state":       string(r.scanState),
 	}
 }
 
