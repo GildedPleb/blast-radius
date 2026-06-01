@@ -106,8 +106,15 @@ func TestManager_RunInitialDiscovery_RegistersProjects(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	cfg.ProjectRoots = []string{dir}
-	cfg.SkipDirs = nil // don't skip our temp dir
+	// Set roots under the single source of truth (pillar1.sources.env.options)
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		if env.Options == nil {
+			env.Options = map[string]any{}
+		}
+		env.Options["project_roots"] = []string{dir}
+		env.Options["skip_dirs"] = []string{}
+		cfg.Pillar1.Sources["env"] = env
+	}
 
 	reg := registry.New()
 	m := NewManager(cfg, reg)
@@ -139,8 +146,12 @@ func TestManager_RunInitialDiscovery_EmptyRoots(t *testing.T) {
 	t.Setenv("HOME", fakeHome)
 
 	cfg := config.DefaultConfig()
-	cfg.ProjectRoots = nil // triggers roots==0 -> ["~"] path
-	cfg.SkipDirs = nil
+	// roots==0 triggers the "~" fallback path inside GetEnvOptions / scanning
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Options["project_roots"] = []string{}
+		env.Options["skip_dirs"] = []string{}
+		cfg.Pillar1.Sources["env"] = env
+	}
 
 	reg := registry.New()
 	m := NewManager(cfg, reg)
@@ -191,8 +202,11 @@ func TestScanner_ProcessEnvFile_VariedContent(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	cfg.ProjectRoots = []string{dir}
-	cfg.SkipDirs = nil
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Options["project_roots"] = []string{dir}
+		env.Options["skip_dirs"] = []string{}
+		cfg.Pillar1.Sources["env"] = env
+	}
 
 	reg := registry.New()
 	m := NewManager(cfg, reg)
@@ -225,14 +239,14 @@ func TestScanner_KeyFiltering_Pillar1(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
-	cfg.ProjectRoots = []string{dir}
-	cfg.SkipDirs = nil
 
-	// Simulate user config for the "env" logical source (the shape that will also
-	// serve bitwarden and future sources under the unified Pillar 1 layer).
+	// Provide the full env source config in one shot under the Pillar 1 logical layer.
+	// This is the canonical shape after the legacy top-level discovery fields were removed.
 	cfg.Pillar1.Sources["env"] = config.SourceConfig{
 		Enabled: true,
 		Options: map[string]any{
+			"project_roots":   []string{dir},
+			"skip_dirs":       []string{},
 			"ignore_patterns": []string{"LOG_LEVEL", "PROJECT_NAME", "PATH", "AWS_*_KEY_ID", "*_NONSECRET"},
 		},
 	}
@@ -255,8 +269,11 @@ func TestManager_Rescan(t *testing.T) {
 	_ = os.WriteFile(envFile, []byte("SECRET1=abc123\nSECRET2=def456\n"), 0600)
 
 	cfg := config.DefaultConfig()
-	cfg.ProjectRoots = []string{dir}
-	cfg.SkipDirs = nil
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Options["project_roots"] = []string{dir}
+		env.Options["skip_dirs"] = []string{}
+		cfg.Pillar1.Sources["env"] = env
+	}
 
 	reg := registry.New()
 	m := NewManager(cfg, reg)
@@ -292,9 +309,9 @@ func TestManager_UsesNewStyleEnvOptions(t *testing.T) {
 	_ = os.WriteFile(envFile, []byte("NEWSTYLE_SECRET=supersecretvalue\n"), 0600)
 
 	cfg := config.DefaultConfig()
-	cfg.SkipDirs = nil
+	// skip_dirs already empty via the explicit new-style map below
 
-	// Put the discovery settings in the new recommended location
+	// Put the discovery settings in the new recommended location (single source of truth)
 	cfg.Pillar1.Sources = map[string]config.SourceConfig{
 		"env": {
 			Enabled: true,
@@ -323,15 +340,21 @@ func TestManager_Rescan_CollectorValidation(t *testing.T) {
 	dir := t.TempDir()
 
 	cfg := config.DefaultConfig()
-	cfg.ProjectRoots = []string{dir}
-	cfg.SkipDirs = nil
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Options["project_roots"] = []string{dir}
+		env.Options["skip_dirs"] = []string{}
+		cfg.Pillar1.Sources["env"] = env
+	}
 
 	// Force the env source into a bad state (no valid roots) so Validate should fail.
 	cfg.Pillar1.Sources["env"] = config.SourceConfig{
 		Enabled: true,
 		Options: map[string]any{},
 	}
-	cfg.ProjectRoots = []string{"/definitely/not/a/real/path/that/exists/98765"}
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Options["project_roots"] = []string{"/definitely/not/a/real/path/that/exists/98765"}
+		cfg.Pillar1.Sources["env"] = env
+	}
 
 	reg := registry.New()
 	m := NewManager(cfg, reg)

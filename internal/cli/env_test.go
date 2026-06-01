@@ -39,7 +39,7 @@ func TestRunEnvCheck(t *testing.T) {
 
 	// valid pillar cmd + exec success + dial fail (override dial to be instant, no 2s timeout)
 	cfgWithCmd := defaultTestConfig()
-	cfgWithCmd.Pillar5Commands = []config.Pillar5Command{{Name: "default-env", Cmd: "printenv"}}
+	cfgWithCmd.Pillar4.Commands = []config.RuntimeCommand{{Name: "default-env", Cmd: "printenv"}}
 	configLoad = func() (*config.Config, string, error) { return &cfgWithCmd, "/tmp/c", nil }
 	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) { return nil, errForTest }
 	execCommand = func(name string, arg ...string) *exec.Cmd { return exec.Command("true") }
@@ -68,7 +68,7 @@ func TestRunEnvCheck_HappyPath(t *testing.T) {
 	}
 
 	cfg := defaultTestConfig()
-	cfg.Pillar5Commands = []config.Pillar5Command{{Name: "default-env", Cmd: "printenv"}}
+	cfg.Pillar4.Commands = []config.RuntimeCommand{{Name: "default-env", Cmd: "printenv"}}
 	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
 
 	// Use a pipe so we can simulate the daemon's CHECK_HASH responses
@@ -114,7 +114,7 @@ func TestRunEnvCheck_HappyPath(t *testing.T) {
 }
 
 // TestRunEnvCheck_DirectExec verifies the hard security invariant:
-// Runtime hygiene commands (Pillar 4 / `pillar5_commands` in config, historical name)
+// Runtime hygiene commands (Pillar 4 / `pillar4.commands` in config, historically `pillar5_commands`)
 // are always executed via direct argv (never through "sh -c").
 // This eliminates shell injection risk from user config.
 func TestRunEnvCheck_DirectExec(t *testing.T) {
@@ -132,7 +132,7 @@ func TestRunEnvCheck_DirectExec(t *testing.T) {
 	}
 
 	cfg := defaultTestConfig()
-	cfg.Pillar5Commands = []config.Pillar5Command{
+	cfg.Pillar4.Commands = []config.RuntimeCommand{
 		{Name: "direct-echo", Cmd: "echo hello world"},
 	}
 	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
@@ -160,7 +160,7 @@ func TestRunEnvCheck_NoCandidates(t *testing.T) {
 	}
 
 	cfg := defaultTestConfig()
-	cfg.Pillar5Commands = []config.Pillar5Command{{Name: "no-secrets", Cmd: "printenv"}}
+	cfg.Pillar4.Commands = []config.RuntimeCommand{{Name: "no-secrets", Cmd: "printenv"}}
 	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
 
 	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) { return nil, errForTest }
@@ -180,7 +180,7 @@ func TestRunEnvCheck_AuthReadFailure(t *testing.T) {
 	}
 
 	cfg := defaultTestConfig()
-	cfg.Pillar5Commands = []config.Pillar5Command{{Name: "auth-fail", Cmd: "printenv"}}
+	cfg.Pillar4.Commands = []config.RuntimeCommand{{Name: "auth-fail", Cmd: "printenv"}}
 	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
 
 	// Force read of .auth to fail by pointing socket to a dir without .auth file

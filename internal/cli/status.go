@@ -58,7 +58,7 @@ func RunStatus(jsonOutput bool) {
 			}
 		}
 		// Pillar 2 (Crumbs) summary — lightweight, only when daemon is present
-		if crumbs, ok := daemonObj["residue"].(map[string]any); ok {
+		if crumbs, ok := daemonObj["pillar2"].(map[string]any); ok {
 			if cnt, ok := crumbs["count"].(float64); ok && cnt > 0 {
 				fmt.Printf("Pillar 2 (Crumbs): %d finding(s) — run 'blastradius crumbs' for details\n", int(cnt))
 			} else {

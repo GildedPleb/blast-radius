@@ -13,7 +13,7 @@ func (StatusHandler) Handle(_ string, d DaemonContext) (any, error) {
 	}
 	// Pillar 2 lightweight summary (always present when daemon up; count may be 0)
 	if sum := d.CrumbsSummary(); sum != nil {
-		resp["residue"] = sum
+		resp["pillar2"] = sum
 	}
 	// Pillar 1 scan status (manual rescan support)
 	if p1 := d.Pillar1ScanStatus(); p1 != nil {

@@ -10,11 +10,14 @@ import (
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
-	if len(cfg.SkipDirs) == 0 || len(cfg.Pillar5Commands) == 0 {
-		t.Error("defaults missing required fields")
+	if len(cfg.Pillar1.Sources) == 0 || len(cfg.Pillar4.Commands) == 0 {
+		t.Error("defaults missing required pillar fields")
 	}
-	if !cfg.ResidueHunter.FlagSuspiciousFilenames || len(cfg.ResidueHunter.TargetDirs) == 0 {
-		t.Error("residue_hunter defaults not populated")
+	if !cfg.Pillar2.FlagSuspiciousFilenames || len(cfg.Pillar2.TargetDirs) == 0 {
+		t.Error("pillar2 defaults not populated")
+	}
+	if cfg.Pillar5.ClearSeconds == 0 {
+		t.Error("pillar5 defaults not populated")
 	}
 	// Pillar 1 logical sources (v1: env + bitwarden)
 	if cfg.Pillar1.Sources == nil {
@@ -106,7 +109,7 @@ func TestLoad_PartialResidueConfig(t *testing.T) {
 
 	userHomeDir = func() (string, error) { return dir, nil }
 	osReadFile = func(name string) ([]byte, error) {
-		return []byte("residue_hunter:\n  enabled: true\n"), nil
+		return []byte("pillar2:\n  enabled: true\n"), nil
 	}
 
 	cfg, _, err := Load()
@@ -114,8 +117,8 @@ func TestLoad_PartialResidueConfig(t *testing.T) {
 		t.Fatalf("Load failed: %v", err)
 	}
 	// Should have filled in defaults for TargetDirs etc.
-	if len(cfg.ResidueHunter.TargetDirs) == 0 {
-		t.Error("expected residue defaults to be populated on partial config")
+	if len(cfg.Pillar2.TargetDirs) == 0 {
+		t.Error("expected pillar2 defaults to be populated on partial config")
 	}
 }
 
@@ -245,9 +248,9 @@ func TestLoad_ResidueDefaults(t *testing.T) {
 		userHomeDir = origHome
 	}()
 	userHomeDir = func() (string, error) { return dir, nil }
-	// yaml with residue enabled:false + empty targets (triggers fill)
+	// yaml with pillar2 enabled:false + empty targets (triggers fill)
 	osReadFile = func(name string) ([]byte, error) {
-		return []byte("residue_hunter:\n  enabled: false\n  target_dirs: []\n"), nil
+		return []byte("pillar2:\n  enabled: false\n  target_dirs: []\n"), nil
 	}
 	cfg, _, err := Load()
 	if err != nil {
@@ -255,10 +258,10 @@ func TestLoad_ResidueDefaults(t *testing.T) {
 	}
 	// socket path is a hard-coded invariant and no longer appears in user config
 
-	if len(cfg.ResidueHunter.TargetDirs) == 0 {
-		t.Error("expected residue target dirs filled from defaults")
+	if len(cfg.Pillar2.TargetDirs) == 0 {
+		t.Error("expected pillar2 target dirs filled from defaults")
 	}
-	if cfg.ResidueHunter.Enabled {
+	if cfg.Pillar2.Enabled {
 		t.Error("enabled should be false from yaml")
 	}
 }
@@ -359,12 +362,12 @@ pillar1:
 	}
 }
 
-func TestGetEnvOptions_NewStyle(t *testing.T) {
+// Legacy GetEnvOptions fallback tests were removed when the top-level
+// project_roots / skip_dirs / ignore_files fields and migration logic were deleted.
+// The single source of truth is now pillar1.sources.env.options (see GetEnvOptions).
+
+func TestGetEnvOptions_NewStyleOnly(t *testing.T) {
 	cfg := &Config{
-		// Legacy values that should be ignored when new style is present
-		ProjectRoots: []string{"/legacy/root"},
-		SkipDirs:     []string{"legacy_skip"},
-		IgnoreFiles:  []string{".legacyignore"},
 		Pillar1: Pillar1Config{
 			Sources: map[string]SourceConfig{
 				"env": {
@@ -383,70 +386,24 @@ func TestGetEnvOptions_NewStyle(t *testing.T) {
 	opts := cfg.GetEnvOptions()
 
 	if len(opts.ProjectRoots) != 2 || opts.ProjectRoots[0] != "~/projects" {
-		t.Errorf("ProjectRoots not taken from new style: %v", opts.ProjectRoots)
+		t.Errorf("ProjectRoots not taken from pillar1: %v", opts.ProjectRoots)
 	}
 	if len(opts.SkipDirs) != 3 || opts.SkipDirs[0] != "node_modules" {
-		t.Errorf("SkipDirs not taken from new style: %v", opts.SkipDirs)
+		t.Errorf("SkipDirs not taken from pillar1: %v", opts.SkipDirs)
 	}
 	if len(opts.IgnoreFiles) != 2 || opts.IgnoreFiles[0] != ".gitignore" {
-		t.Errorf("IgnoreFiles not taken from new style: %v", opts.IgnoreFiles)
+		t.Errorf("IgnoreFiles not taken from pillar1: %v", opts.IgnoreFiles)
 	}
 	if len(opts.IgnorePatterns) != 2 || opts.IgnorePatterns[0] != "LOG_*" {
-		t.Errorf("IgnorePatterns not taken from new style: %v", opts.IgnorePatterns)
-	}
-}
-
-func TestGetEnvOptions_LegacyFallback(t *testing.T) {
-	cfg := &Config{
-		ProjectRoots: []string{"~/legacy-projects"},
-		SkipDirs:     []string{"legacy-node_modules"},
-		IgnoreFiles:  []string{".legacy-gitignore"},
-		Pillar1: Pillar1Config{
-			Sources: map[string]SourceConfig{
-				"env": {Enabled: true}, // no options at all
-			},
-		},
-	}
-
-	opts := cfg.GetEnvOptions()
-
-	if len(opts.ProjectRoots) != 1 || opts.ProjectRoots[0] != "~/legacy-projects" {
-		t.Errorf("Expected legacy ProjectRoots, got %v", opts.ProjectRoots)
-	}
-	if len(opts.SkipDirs) != 1 || opts.SkipDirs[0] != "legacy-node_modules" {
-		t.Errorf("Expected legacy SkipDirs, got %v", opts.SkipDirs)
-	}
-	if len(opts.IgnoreFiles) != 1 || opts.IgnoreFiles[0] != ".legacy-gitignore" {
-		t.Errorf("Expected legacy IgnoreFiles, got %v", opts.IgnoreFiles)
-	}
-}
-
-func TestGetEnvOptions_NewStyleWins(t *testing.T) {
-	cfg := &Config{
-		ProjectRoots: []string{"/legacy-should-be-ignored"},
-		Pillar1: Pillar1Config{
-			Sources: map[string]SourceConfig{
-				"env": {
-					Enabled: true,
-					Options: map[string]any{
-						"project_roots": []string{"~/new-projects"},
-					},
-				},
-			},
-		},
-	}
-
-	opts := cfg.GetEnvOptions()
-	if len(opts.ProjectRoots) != 1 || opts.ProjectRoots[0] != "~/new-projects" {
-		t.Errorf("New style should win over legacy: %v", opts.ProjectRoots)
+		t.Errorf("IgnorePatterns not taken from pillar1: %v", opts.IgnorePatterns)
 	}
 }
 
 func TestGetEnvOptions_Empty(t *testing.T) {
 	cfg := &Config{}
 	opts := cfg.GetEnvOptions()
-	// After normalization we guarantee non-nil slices (better API)
-	if opts.ProjectRoots == nil || opts.SkipDirs == nil || opts.IgnoreFiles == nil {
-		t.Errorf("Expected non-nil slices for empty config (we normalize), got %+v", opts)
+	// Normalization guarantees non-nil slices
+	if opts.ProjectRoots == nil || opts.SkipDirs == nil || opts.IgnoreFiles == nil || opts.IgnorePatterns == nil {
+		t.Errorf("Expected non-nil slices for empty config, got %+v", opts)
 	}
 }

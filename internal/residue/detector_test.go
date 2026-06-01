@@ -30,7 +30,7 @@ func TestComputeEntropy(t *testing.T) {
 }
 
 func TestFilenameHeuristic(t *testing.T) {
-	cfg := config.ResidueHunterConfig{FlagSuspiciousFilenames: true}
+	cfg := config.Pillar2Config{FlagSuspiciousFilenames: true}
 	cases := []struct {
 		name string
 		want bool
@@ -100,7 +100,7 @@ func TestScanFile_Synthetic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := config.ResidueHunterConfig{Enabled: true, FlagSuspiciousFilenames: true}
+	cfg := config.Pillar2Config{Enabled: true, FlagSuspiciousFilenames: true}
 	finding, err := ScanFile(f, cfg, reg)
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestScanFile_IgnoresLargeBinary(t *testing.T) {
 	if err := os.WriteFile(f, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.ResidueHunterConfig{Enabled: true}
+	cfg := config.Pillar2Config{Enabled: true}
 	finding, _ := ScanFile(f, cfg, registry.New())
 	if finding != nil {
 		t.Error("should skip large file")
@@ -137,7 +137,7 @@ func TestScanFile_RespectsModTimeAndSize(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "creds.json")
 	os.WriteFile(f, []byte(`{"password":"x"}`), 0600)
-	cfg := config.ResidueHunterConfig{Enabled: true, FlagSuspiciousFilenames: true}
+	cfg := config.Pillar2Config{Enabled: true, FlagSuspiciousFilenames: true}
 	finding, _ := ScanFile(f, cfg, registry.New())
 	if finding == nil {
 		t.Fatal("expected at least name-based hit")
@@ -216,7 +216,7 @@ func TestScanFile_NoFinding(t *testing.T) {
 	f := filepath.Join(dir, "normal.txt")
 	os.WriteFile(f, []byte("just some boring low entropy text here"), 0600)
 
-	cfg := config.ResidueHunterConfig{Enabled: true}
+	cfg := config.Pillar2Config{Enabled: true}
 	finding, _ := ScanFile(f, cfg, registry.New())
 	if finding != nil {
 		t.Error("expected no finding for boring file")
@@ -229,7 +229,7 @@ func TestScanFile_GenericHighEntropy(t *testing.T) {
 	content := "randomhighentropystringthatislongenoughAKIAIOSFODNN7EXAMPLESECRETKEYXYZ123"
 	os.WriteFile(f, []byte(content), 0600)
 
-	cfg := config.ResidueHunterConfig{Enabled: true}
+	cfg := config.Pillar2Config{Enabled: true}
 	// We just want to execute the ScanFile path; finding or not is secondary for coverage.
 	_, _ = ScanFile(f, cfg, registry.New())
 }
@@ -253,7 +253,7 @@ func TestScanFile_BinarySkip(t *testing.T) {
 	f := filepath.Join(dir, "image.png")
 	// PNG magic bytes should trigger isLikelyBinary skip
 	os.WriteFile(f, []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}, 0600)
-	cfg := config.ResidueHunterConfig{Enabled: true}
+	cfg := config.Pillar2Config{Enabled: true}
 	finding, _ := ScanFile(f, cfg, registry.New())
 	if finding != nil {
 		t.Error("expected binary skip")
@@ -264,7 +264,7 @@ func TestScanFile_LowEntropyNoFinding(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "boring.txt")
 	os.WriteFile(f, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), 0600) // very low entropy
-	cfg := config.ResidueHunterConfig{Enabled: true}
+	cfg := config.Pillar2Config{Enabled: true}
 	finding, _ := ScanFile(f, cfg, registry.New())
 	if finding != nil {
 		t.Error("expected no finding for low entropy")
@@ -276,7 +276,7 @@ func TestScanFile_LargeButUnderLimit(t *testing.T) {
 	f := filepath.Join(dir, "medium.json")
 	content := `{"password":"` + string(make([]byte, 500)) + `"}`
 	os.WriteFile(f, []byte(content), 0600)
-	cfg := config.ResidueHunterConfig{Enabled: true}
+	cfg := config.Pillar2Config{Enabled: true}
 	_, _ = ScanFile(f, cfg, registry.New())
 }
 
@@ -285,7 +285,7 @@ func TestScanFile_ZeroSize(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "empty.txt")
 	os.WriteFile(f, []byte{}, 0600)
-	cfg := config.ResidueHunterConfig{Enabled: true}
+	cfg := config.Pillar2Config{Enabled: true}
 	finding, _ := ScanFile(f, cfg, registry.New())
 	if finding != nil {
 		t.Error("expected skip for zero size")
@@ -294,7 +294,7 @@ func TestScanFile_ZeroSize(t *testing.T) {
 
 func TestScanFile_Directory(t *testing.T) {
 	dir := t.TempDir()
-	cfg := config.ResidueHunterConfig{Enabled: true}
+	cfg := config.Pillar2Config{Enabled: true}
 	finding, _ := ScanFile(dir, cfg, registry.New())
 	if finding != nil {
 		t.Error("expected nil for directory")
@@ -354,7 +354,7 @@ func TestSafeLocation_MoreBranches(t *testing.T) {
 }
 
 func TestFilenameHeuristic_EditorBackups(t *testing.T) {
-	cfg := config.ResidueHunterConfig{FlagSuspiciousFilenames: true}
+	cfg := config.Pillar2Config{FlagSuspiciousFilenames: true}
 	if ok, _ := FilenameHeuristic("foo.txt~", cfg); !ok {
 		t.Error("~ backup")
 	}
@@ -371,7 +371,7 @@ func TestScanFile_SuspiciousNameOnly(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "passwords_export.txt") // triggers FilenameHeuristic
 	os.WriteFile(f, []byte("some=normaldata\n"), 0600)
-	cfg := config.ResidueHunterConfig{Enabled: true, FlagSuspiciousFilenames: true}
+	cfg := config.Pillar2Config{Enabled: true, FlagSuspiciousFilenames: true}
 	finding, _ := ScanFile(f, cfg, registry.New())
 	if finding == nil {
 		t.Error("expected finding from suspicious filename alone")
@@ -392,7 +392,7 @@ func TestScanFile_KnownMatchInGeneric(t *testing.T) {
 	f := filepath.Join(dir, "creds_backup.txt")
 	os.WriteFile(f, []byte("junk\n"+secret+"\nmorejunk\n"), 0600)
 
-	cfg := config.ResidueHunterConfig{Enabled: true, FlagSuspiciousFilenames: true}
+	cfg := config.Pillar2Config{Enabled: true, FlagSuspiciousFilenames: true}
 	finding, _ := ScanFile(f, cfg, reg)
 	if finding == nil {
 		t.Fatal("expected finding when registry has known match")
@@ -412,7 +412,7 @@ func TestScanFile_FormatMatchZeroEntropy(t *testing.T) {
 	content := `{"encrypted":false,"items":[{"login":{"password":"short"}}]}`
 	os.WriteFile(f, []byte(content), 0600)
 
-	cfg := config.ResidueHunterConfig{Enabled: true}
+	cfg := config.Pillar2Config{Enabled: true}
 	finding, _ := ScanFile(f, cfg, registry.New())
 	if finding == nil {
 		t.Error("expected finding for known format even with low entropy")
@@ -424,7 +424,7 @@ func TestScanFile_LowConfidencePath(t *testing.T) {
 	f := filepath.Join(dir, "generic_highent.txt")
 	// High entropy but not enough to pass generic threshold, no name heuristic, no known
 	os.WriteFile(f, []byte("mediumentropystringhere123"), 0600)
-	cfg := config.ResidueHunterConfig{Enabled: true}
+	cfg := config.Pillar2Config{Enabled: true}
 	finding, _ := ScanFile(f, cfg, registry.New())
 	// With current thresholds this may or may not produce a finding; we just want the code path exercised
 	_ = finding

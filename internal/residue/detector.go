@@ -16,7 +16,7 @@ import (
 
 // FilenameHeuristic returns true + a format hint if the basename strongly suggests
 // a dangerous secret dump. This is always-on (when enabled) per plan.
-func FilenameHeuristic(name string, cfg config.ResidueHunterConfig) (bool, string) {
+func FilenameHeuristic(name string, cfg config.Pillar2Config) (bool, string) {
 	lower := strings.ToLower(name)
 	suspicious := []string{
 		"bitwarden", "bw_export", "bwexport",
@@ -185,7 +185,7 @@ func DetectOnePassword1pif(data []byte) (int, bool) {
 // ScanFile performs size gate, read, heuristic + format detection + registry known-match check.
 // Returns a finding only if it crosses internal thresholds (suspicious name OR format match OR >= min entropy hits).
 // All secret candidate hashing uses the provided registry (hash-only, never stores plaintext).
-func ScanFile(path string, cfg config.ResidueHunterConfig, reg *registry.Registry) (*ResidueFinding, error) {
+func ScanFile(path string, cfg config.Pillar2Config, reg *registry.Registry) (*ResidueFinding, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err

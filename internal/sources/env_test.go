@@ -94,10 +94,12 @@ func TestEnvCollector_Validate(t *testing.T) {
 
 	t.Run("no project roots configured", func(t *testing.T) {
 		cfg := &config.Config{
-			ProjectRoots: []string{},
 			Pillar1: config.Pillar1Config{
 				Sources: map[string]config.SourceConfig{
-					"env": {Enabled: true},
+					"env": {
+						Enabled: true,
+						Options: map[string]any{"project_roots": []string{}},
+					},
 				},
 			},
 		}
@@ -109,10 +111,12 @@ func TestEnvCollector_Validate(t *testing.T) {
 
 	t.Run("nonexistent root", func(t *testing.T) {
 		cfg := &config.Config{
-			ProjectRoots: []string{"/this/path/does/not/exist/for/sure/12345"},
 			Pillar1: config.Pillar1Config{
 				Sources: map[string]config.SourceConfig{
-					"env": {Enabled: true},
+					"env": {
+						Enabled: true,
+						Options: map[string]any{"project_roots": []string{"/this/path/does/not/exist/for/sure/12345"}},
+					},
 				},
 			},
 		}

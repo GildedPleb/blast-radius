@@ -17,7 +17,7 @@ type fakeContext struct {
 	now          time.Time
 	shutdown     bool
 	crumbs       map[string]any
-	crumbsResult *residue.ScanResult
+	crumbsResult *residue.ScanResult // used for Pillar 2 (crumbs) handler tests
 }
 
 func (f *fakeContext) RegistrySnapshot() any                 { return f.snapshot }

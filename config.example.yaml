@@ -1,70 +1,71 @@
-# Blast Radius Configuration Example
-# Copy this to ~/.config/blastradius/config.yaml and customize.
-
-# The Unix domain socket path is a hard-coded security invariant:
-# ~/.local/state/blastradius/blastradius.sock
-# (private 0700 directory + 0600 socket + capability token auth).
-# It is not user-configurable.
-
-# Future: log level
-log_level: "info"
-
-# Runtime Environment Hygiene (Pillar 4)
-# Define commands (via the historical `pillar5_commands` key) whose output should be scanned for secrets.
+# Blast Radius Configuration
+# ==============================================================================
+# Copy this file to ~/.config/blastradius/config.yaml and customize.
 #
-# HARD SECURITY INVARIANT:
-# Commands are **always** executed with direct exec (no shell / sh -c ever).
-# This is not configurable. It eliminates an entire class of injection and
-# arbitrary code execution risks from user configuration.
+# This is the single source of truth for how Blast Radius discovers secrets
+# where they *should* be (Pillar 1), finds them where they *should not* be
+# (Pillar 2), and helps you clean up the common escape routes (Pillars 3-5).
 #
-# Recommended pattern for complex needs (pipes, redirection, etc.):
-#   - Write a small wrapper script you control (e.g. ~/bin/scan-env)
-#   - Reference the script here with its absolute or PATH-resolvable name
-pillar5_commands:
-  - name: "default-env"
-    cmd: "printenv"
-    auto_on_prompt: true
-  - name: "k8s-secrets"
-    cmd: "kubectl get secrets --ignore-not-found -o yaml"
-    auto_on_prompt: false
-
-# Clipboard auto-clear timeout in seconds (Pillar 5)
-clipboard_clear_seconds: 30
-
-# Pillar 2 — Illegitimate Secret Residue Hunter ("Crumbs")
-# Scans only the high-risk directories you list (never full disk).
-# Detects forgotten vault exports (Bitwarden, Dashlane, 1Password) + generic high-entropy secret dumps.
-# Always runs the complete fixed detector set when enabled (no selective disable for dangerous artifacts).
-residue_hunter:
-  enabled: false
-  target_dirs:
-    - "~/Downloads"
-    - "~/Documents"
-    - "~/Desktop"
-    # Add more if you have specific backup volumes or folders an attacker would look in.
-    # - "~/backups"
-  flag_suspicious_filenames: true   # catches obvious names even without deep parsing
-  # (detectors and thresholds are intentionally not user-configurable in v1)
-
-# Pillar 1 — Legitimate Secret Discovery (Logical Layer)
+# The Unix domain socket path is a **hard-coded security invariant**:
+#   ~/.local/state/blastradius/blastradius.sock
+# (0700 private directory + 0600 socket + capability token authentication).
+# It is deliberately NOT user-configurable.
 #
-# This is the recommended configuration for Pillar 1.
-# All discovery settings for .env* files now live under the logical layer.
+# For the full architectural framing, see:
+#   docs/pillars/idiomatic_pillars.md
 #
-# Supported sources:
-#   env        → .env* scanning
-#   bitwarden  → Hard-coded `bw` CLI integration
+# Philosophy: minimal, hash-only, local-only, safe degradation, no new
+# broad permissions, and "fuck you, don't put secrets in dangerous places."
+
+# ------------------------------------------------------------------------------
+# Core (top-level only)
+# ------------------------------------------------------------------------------
+# Only truly cross-cutting, non-pillar-specific settings live here.
+
+log_level: "info"   # debug | info | warn | error   (future — currently advisory)
+
+# ==============================================================================
+# PILLAR 1 — Legitimate Secret Discovery
+# "Finding and collecting secrets from where they *should* be."
+#
+# This is the foundation. Pillar 1 builds the ground-truth registry by
+# deliberately scanning the locations you told it to trust (.env* files
+# inside your project roots, and optionally Bitwarden via the official CLI).
+#
+# Everything else in the system (duplicates, history scrub, runtime checks,
+# clipboard, residue hunting) compares against this registry.
+#
+# Core question it answers: "What secrets exist in the places we deliberately put them?"
+#
+# Security model:
+# - Only walks directories you explicitly list.
+# - Respects .gitignore + .blastradiusignore + built-in safe skips.
+# - Never stores plaintext — only SHA-256 hashes.
+# - Key filtering (ignore_patterns) keeps noise out of the registry.
+# ==============================================================================
+
 pillar1:
   sources:
+    # ------------------------------------------------------------------
+    # env — .env* file scanning (the original and primary source)
+    # ------------------------------------------------------------------
     env:
       enabled: true
       options:
-        # Directories to scan for .env* files.
+        # Directories (and their subdirectories) that will be walked for
+        # .env, .env.local, .env.production, etc.
+        #
+        # Use ~ for home-relative paths. These are the *only* places
+        # Pillar 1 will ever look for legitimate secrets.
         project_roots:
           - "~/projects"
           - "~/work"
+          # - "~/src"
+          # - "/Volumes/work"   # external volumes are fine
 
-        # Directories to always skip (performance + noise reduction).
+        # Directory basenames that are *never* descended into.
+        # This is both a performance win and a noise-reduction win.
+        # These supplement a small built-in safe list.
         skip_dirs:
           - "node_modules"
           - ".git"
@@ -78,14 +79,20 @@ pillar1:
           - "coverage"
           - ".venv"
           - "__pycache__"
+          # Add anything else that is huge or full of generated secrets.
 
-        # Ignore files to respect during scanning.
+        # Files whose ignore rules (gitignore syntax) will be respected
+        # during the walk. Later files win for conflicting rules.
         ignore_files:
           - ".gitignore"
           - ".blastradiusignore"
 
-        # Keys that should never be treated as secrets.
-        # Supported forms: exact, PREFIX*, *SUFFIX, PREFIX*SUFFIX
+        # Keys that should *never* be treated as secrets, even if they
+        # look high-entropy. Supports four forms:
+        #   exact, PREFIX*, *SUFFIX, PREFIX*SUFFIX
+        #
+        # This is the primary defense against false positives in your
+        # legitimate secret registry. Keep this list aggressive.
         ignore_patterns:
           - "PATH"
           - "HOME"
@@ -119,14 +126,140 @@ pillar1:
           - "BUILD_*"
           - "CI_*"
           - "NODE_ENV"
-          # Add any other non-secret keys your projects use.
+          - "DEBUG"
+          - "TEST_*"
+          # Add every non-secret key your projects and tools emit.
 
+    # ------------------------------------------------------------------
+    # bitwarden — official Bitwarden CLI collector (hard-coded, owned by us)
+    # ------------------------------------------------------------------
+    # Requires: `bw` binary in PATH + logged-in / unlocked session.
+    # This source participates in the same registry, rescan, duplicates,
+    # and status surfaces as the env source.
+    #
     # bitwarden:
     #   enabled: true
     #   options:
     #     ignore_patterns:
     #       - "dev-*"
     #       - "*_test"
-    #     # Requires the Bitwarden CLI (`bw`) to be installed and unlocked.
-    #     # You must have the Bitwarden CLI (`bw`) installed and be logged in
-    #     # (`bw login` or `bw unlock`) for this source to work.
+    #       # Add per-source ignore patterns here (they are merged with
+    #       # the global picture via GetSourceIgnorePatterns).
+
+# ==============================================================================
+# PILLAR 2 — Illegitimate Secret Residue ("Crumbs")
+# "Finding and collecting secrets from where they *should not* be."
+#
+# This is the deliberate inversion of Pillar 1.
+#
+# It only ever scans a small number of high-likelihood "residue sinks"
+# that a human would actually use when they fuck up (Downloads, Documents,
+# Desktop, plus anything you add). It looks for:
+#   - Exported vault dumps (Bitwarden JSON/CSV, Dashlane, 1Password, etc.)
+#   - Generic high-entropy blobs that look like someone dumped secrets
+#
+# It is *advisory only* — it will never delete anything for you.
+#
+# Core question it answers: "Where have secrets leaked into places they
+# were never supposed to exist?"
+#
+# HARD RULES:
+# - Never asks for Full Disk Access.
+# - Detectors are fixed and *always* run when enabled (no user knob to
+#   turn off detection for dangerous artifacts).
+# - Only the hashes of interesting strings ever leave the scan.
+# ==============================================================================
+
+pillar2:
+  enabled: false                 # opt-in (recommended: true once you trust it)
+  target_dirs:
+    - "~/Downloads"
+    - "~/Documents"
+    - "~/Desktop"
+    # Add any other locations an attacker would look first if they had
+    # your user account (backup volumes, mounted shares, ~/tmp, etc.).
+    # - "~/backups"
+    # - "/Volumes/Archive"
+
+  flag_suspicious_filenames: true   # catches obvious names even without deep parsing
+
+  # (detectors, entropy thresholds, and size gates are intentionally not
+  #  user-configurable in v1. The job is "fuck you, don't do this.")
+
+# ==============================================================================
+# PILLAR 3 — History Hygiene
+# "Removing secrets from places where they accumulated over time."
+#
+# Scrubs known secrets (from the Pillar 1 registry) out of your shell
+# history (zsh today). Run via `blastradius scrub-history`.
+#
+# Currently has no user-configurable surface — it just works on the
+# registry that Pillar 1 already built.
+#
+# Future possibilities (not yet implemented): custom history file paths,
+# additional shells, more aggressive scrubbing policies.
+# ==============================================================================
+
+# pillar3:
+#   # (no settings in v1)
+
+# ==============================================================================
+# PILLAR 4 — Runtime Environment Hygiene
+# "Detecting secrets that are currently live in process environments."
+#
+# Periodically (or on prompt) runs the commands you list here and scans
+# their output for anything that matches the Pillar 1 registry.
+#
+# The classic use is `printenv`. Also useful for `kubectl get secrets`,
+# `env | grep -i secret`, docker inspect, etc.
+#
+# HARD SECURITY INVARIANT:
+# Every command listed here is **always** executed with direct exec
+# (never /bin/sh -c, never a shell). This eliminates an entire class of
+# shell-injection and arbitrary code execution risks from configuration.
+#
+# If you need pipes, redirection, complex logic, or environment setup:
+#   1. Write a tiny wrapper script you control (e.g. ~/bin/scan-env)
+#   2. Put the absolute (or PATH-resolvable) name of *that script* here.
+#
+# Recommended: keep the first command as "default-env" with auto_on_prompt.
+# ==============================================================================
+
+pillar4:
+  commands:
+    - name: "default-env"
+      cmd: "printenv"
+      auto_on_prompt: true
+
+    # - name: "k8s-secrets"
+    #   cmd: "kubectl get secrets --ignore-not-found -o yaml"
+    #   auto_on_prompt: false
+
+    # - name: "docker-env"
+    #   cmd: "/Users/you/bin/scan-docker"   # your wrapper that does the complex stuff
+    #   auto_on_prompt: false
+
+# ==============================================================================
+# PILLAR 5 — Clipboard Hygiene
+# "Catching and limiting secrets that have reached one of the most
+#  dangerous single-copy surfaces on a developer machine."
+#
+# On macOS the clipboard is an extremely high blast-radius location.
+# This pillar lets you know when a known secret lands in it and can
+# (in the future) auto-clear it.
+#
+# Today: the timer is declared; the actual auto-clear timer is not yet
+# wired up in the clipboard command (status/check/clear work today).
+# ==============================================================================
+
+pillar5:
+  clear_seconds: 30   # seconds after which a detected secret in the clipboard
+                      # should be cleared (future — not yet enforced)
+
+# ------------------------------------------------------------------------------
+# That's it. Everything else is either a hard-coded security invariant
+# or lives inside the five pillars above.
+#
+# After editing, a `blastradius status` (with the daemon running) is the
+# quickest way to see that your config was loaded the way you intended.
+# ------------------------------------------------------------------------------

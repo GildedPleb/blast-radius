@@ -26,7 +26,7 @@ func TestRunStatus(t *testing.T) {
 			"last_scan":"2026-03-01T11:55:00Z",
 			"collector_results":{"env":142,"bitwarden":19}
 		},
-		"residue":{"count":2}
+		"pillar2":{"count":2}
 	}`)
 	RunStatus(false)
 	RunStatus(true)

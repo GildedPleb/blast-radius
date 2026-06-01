@@ -17,7 +17,7 @@ type DaemonContext interface {
 	Now() time.Time
 	TriggerShutdown()
 
-	// CrumbsSummary + RunCrumbsScan for Pillar 2 (see daemon/context.go for docs)
+	// CrumbsSummary + RunCrumbsScan for Pillar 2 (status JSON key is "pillar2")
 	CrumbsSummary() map[string]any
 	RunCrumbsScan() *residue.ScanResult
 

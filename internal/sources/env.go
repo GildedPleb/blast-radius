@@ -39,7 +39,7 @@ func (e *EnvCollector) Enabled() bool {
 
 // Validate implements the prerequisite check flow for the ENV source as requested:
 // - Is the source enabled? (already gated by caller in many paths)
-// - Are project roots configured (either legacy ProjectRoots or via the logical layer)?
+// - Are project roots configured (via the Pillar 1 logical layer under pillar1.sources.env.options)?
 func (e *EnvCollector) Validate() error {
 	if e.cfg == nil {
 		return errors.New("no configuration loaded")
@@ -50,7 +50,7 @@ func (e *EnvCollector) Validate() error {
 		return errors.New("env source is not enabled")
 	}
 
-	roots := e.cfg.ProjectRoots
+	roots := e.cfg.GetEnvOptions().ProjectRoots
 	if len(roots) == 0 {
 		// Fall back to home directory behavior (current default)
 		roots = []string{"~"}

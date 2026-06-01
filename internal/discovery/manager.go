@@ -51,7 +51,7 @@ func NewManager(cfg *config.Config, reg *registry.Registry) *Manager {
 	if env := sources.NewEnvCollector(cfg); env.Enabled() {
 		// Provide a real scan function for the logical layer.
 		env.SetScanFunc(func() ([]registry.SecretHash, error) {
-			roots := m.cfg.ProjectRoots
+			roots := m.cfg.GetEnvOptions().ProjectRoots
 			if len(roots) == 0 {
 				roots = []string{"~"}
 			}

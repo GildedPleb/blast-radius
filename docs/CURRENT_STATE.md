@@ -38,10 +38,10 @@ The system remains strictly **hash-only, minimal-metadata, local-only** with saf
 | Discovery + Registry (Pillar 1)          | ✅ Complete        | Recursive `.env*` scanning, SHA-256 hashing, ignore engine, pruning, opaque ProjectIDs, duplicates detection                                                                        |
 | Zsh HUD                                  | ✅ Complete        | Thin prompt segment + status wrappers (no capture hooks)                                                                                                                            |
 | History Hygiene (Pillar 3)               | ✅ Complete        | `scrub-history` command + daemon handler                                                                                                                                            |
-| Runtime Hygiene (Pillar 4)               | ✅ Complete        | `env` command, extensible `pillar5_commands` in config                                                                                                                              |
+| Runtime Hygiene (Pillar 4)               | ✅ Complete        | `env` command, extensible `pillar4.commands` in config                                                                                                                              |
 | Clipboard Hygiene (Pillar 5)             | ✅ Complete        | `clipboard` status/check/clear (macOS)                                                                                                                                              |
 | Redaction/Recorder Pillar                | ❌ **Removed**     | Entire `recorder/` package, protection mode, `redact [N]`, per-TTY sockets, sealed windows, and all supporting code/docs deleted                                                    |
-| Pillar 2 (Illegitimate Residue / Crumbs) | ✅ **v1 complete** | `crumbs` command + `residue` package (detector + manager) + daemon handler + status integration. Config section `residue_hunter`. See implementation plan for remaining stages 2-6. |
+| Pillar 2 (Illegitimate Residue / Crumbs) | ✅ **v1 complete** | `crumbs` command + `residue` package (detector + manager) + daemon handler + status integration. Config section `pillar2`. See implementation plan for remaining stages 2-6. |
 
 ---
 
@@ -100,7 +100,7 @@ No `recorder/` package remains.
 **Note on removed configuration options (2026 hardenings):**
 
 - `socket_path` is no longer accepted in `config.yaml` (the path is now a hard-coded invariant).
-- The `shell:` key under `pillar5_commands` is no longer accepted. All commands run via direct `exec`.
+- The `shell:` key under the old `pillar5_commands` (now `pillar4.commands`) is no longer accepted. All commands run via direct `exec`.
   Old keys are silently ignored by the YAML parser. Users relying on previous behavior should migrate to wrapper scripts for complex commands and remove the old keys.
 
 ---
@@ -132,7 +132,7 @@ Zsh integration (source `zsh/blastradius.zsh`):
 
 - **Pillar 1**: Key filtering for non-secret .env keys (via `pillar1.sources.env.options.ignore_patterns` under the logical layer) and collector-based rescan for sources (env + bitwarden) are complete.
 - **Pillar 1 reactivity**: Full filesystem reactivity (`fsnotify` / automatic rescan on file changes) is **deliberately not implemented** and is permanently out of scope. The security surface area and complexity were judged to outweigh the benefits. On-demand manual `rescan` (plus initial discovery at daemon start) is the supported and intentional mechanism.
-- **Pillar 2 (Crumbs)**: v1 shipped (on-demand `crumbs`, fixed detectors for exports + entropy, status summary, opt-in config). Remaining required stages (hunt_residue patterns inside target_dirs, materialization roots expansion, git accident detection, background scheduling, Zsh HUD) are documented in `docs/pillars/pillar2-implementation-plan.md` and `residue_hunter_scoped.md`.
+- **Pillar 2 (Crumbs)**: v1 shipped (on-demand `crumbs`, fixed detectors for exports + entropy, status summary, opt-in config under `pillar2`). Remaining required stages (hunt_residue patterns inside target_dirs, materialization roots expansion, git accident detection, background scheduling, Zsh HUD) are documented in `docs/pillars/pillar2-implementation-plan.md` and the historical design doc `residue_hunter_scoped.md`.
 - History scrubbing supports Zsh only.
 - No editor / AI prompt integration.
 - Clipboard auto-clear timer (Pillar 5) is declared in config but not yet implemented.

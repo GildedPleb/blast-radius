@@ -53,6 +53,6 @@ func (CrumbsHandler) Handle(_ string, d DaemonContext) (any, error) {
 	}, nil
 }
 
-// Note: when residue_hunter.enabled=false, RunCrumbsScan still succeeds and returns
+// Note: when pillar2.enabled=false, RunCrumbsScan still succeeds and returns
 // a clean result with "disabled" marker inside the manager (no error, no scan performed).
 // The handler surfaces it via the normal response shape.

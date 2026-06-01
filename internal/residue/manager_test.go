@@ -20,7 +20,7 @@ func TestNewManager(t *testing.T) {
 
 func TestRunScan_Disabled(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.ResidueHunter.Enabled = false
+	cfg.Pillar2.Enabled = false
 	m := NewManager(cfg, registry.New())
 	res := m.RunScan()
 	if res == nil || len(res.Errors) == 0 {
@@ -57,8 +57,8 @@ func TestResidueManager_HeavyPaths(t *testing.T) {
 	// Test 2: Empty dir + first few + last result + crumbs
 	dir := t.TempDir()
 	cfg2 := config.DefaultConfig()
-	cfg2.ResidueHunter.Enabled = true
-	cfg2.ResidueHunter.TargetDirs = []string{dir}
+	cfg2.Pillar2.Enabled = true
+	cfg2.Pillar2.TargetDirs = []string{dir}
 
 	m2 := NewManager(cfg2, registry.New())
 	res2 := m2.RunScan()
@@ -84,9 +84,9 @@ func TestResidueManager_HeavyPaths(t *testing.T) {
 	_ = os.WriteFile(csv, []byte("login,username,password\nu,foo,verylongsecrettokenvalue123456\n"), 0600)
 
 	cfg3 := config.DefaultConfig()
-	cfg3.ResidueHunter.Enabled = true
-	cfg3.ResidueHunter.TargetDirs = []string{dir3}
-	cfg3.ResidueHunter.FlagSuspiciousFilenames = true
+	cfg3.Pillar2.Enabled = true
+	cfg3.Pillar2.TargetDirs = []string{dir3}
+	cfg3.Pillar2.FlagSuspiciousFilenames = true
 
 	m3 := NewManager(cfg3, registry.New())
 	res3 := m3.RunScan()
@@ -112,8 +112,8 @@ func TestResidueManager_TargetsEmptyAndWalkErr(t *testing.T) {
 	defer func() { userHomeDir = orig }()
 
 	cfg := config.DefaultConfig()
-	cfg.ResidueHunter.Enabled = true
-	cfg.ResidueHunter.TargetDirs = nil // triggers the len==0 defaults using hook
+	cfg.Pillar2.Enabled = true
+	cfg.Pillar2.TargetDirs = nil // triggers the len==0 defaults using hook
 
 	m := NewManager(cfg, registry.New())
 	res := m.RunScan()

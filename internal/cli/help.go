@@ -19,10 +19,11 @@ func PrintHelp() {
 	fmt.Println()
 	fmt.Println("Settings:")
 	fmt.Printf("  Socket:        %s\n", config.SocketPath())
-	if len(cfg.ProjectRoots) > 0 {
-		fmt.Printf("  Project Roots: %v\n", cfg.ProjectRoots)
+	envOpts := cfg.GetEnvOptions()
+	if len(envOpts.ProjectRoots) > 0 {
+		fmt.Printf("  Pillar 1 roots: %v\n", envOpts.ProjectRoots)
 	} else {
-		fmt.Println("  Project Roots: (not configured - will scan home directory)")
+		fmt.Println("  Pillar 1 roots: (not configured - will scan home directory)")
 	}
 	fmt.Println()
 	fmt.Println("Commands:")

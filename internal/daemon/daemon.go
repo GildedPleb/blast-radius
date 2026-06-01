@@ -105,7 +105,8 @@ func (d *Daemon) AllHashes() [][32]byte {
 func (d *Daemon) Now() time.Time   { return time.Now() }
 func (d *Daemon) TriggerShutdown() { close(d.shutdown) }
 
-// CrumbsSummary and RunCrumbsScan implement the new DaemonContext methods for Pillar 2.
+// CrumbsSummary and RunCrumbsScan implement the DaemonContext methods for Pillar 2.
+// The summary is exposed in STATUS JSON under the "pillar2" key.
 func (d *Daemon) CrumbsSummary() map[string]any {
 	if d.residue == nil {
 		return map[string]any{"status": "disabled", "count": 0}

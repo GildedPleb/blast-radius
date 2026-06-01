@@ -8,7 +8,6 @@
 - Test Audit
 - logger audit
 - Backwards compatability audit (e.g. we can fully drop all backwards compatibility because we havent released any software yet, lol)
-- 1. Bitwarden collector is still early
-     The Collect() implementation is functional but basic. It doesn't yet handle folders, organizations, attachments, TOTP secrets well, or have sophisticated error handling around bw states. This is the weakest part of the "done" story.
-- Kill this: 4. Migration UX is still a bit messy
-  Users can now have the same settings in two places (top-level + pillar1.sources.env.options). The fallback logic helps, but it's not elegant long-term.
+- Bitwarden collector is still early. The Collect() implementation is functional but basic. It doesn't yet handle folders, organizations, attachments, TOTP secrets well, or have sophisticated error handling around bw states. This is the weakest part of the "done" story.
+- (Killed 2026) Migration UX + config reorganization complete. Legacy top-level discovery keys and dual-location fallback logic removed. Config now uses clean pillar1..pillar5 sections with rich documentation in config.example.yaml. See the plan session for details.
+- For pillar 2 we should be able to add a folder that is the same folder as the pillar one but that it should not look for the .ENV in that folder, but should look for the content of the rest of the folder. the rest of every other thing in that folder. Even better for pillar one, we should have a setting that allows us to say hey we want to look for all the secrets in .env files (have). Or in pillar one, we want to say we want to make sure that no secrets are in .env.local files... and NOT .env (not only by exclusion). Then, in pillar two, we want to be able to say something like, search for ENV files. If you find an ENV file that has secrets in it, it shouldn't be there. Likewise in pillar two, we would be able to say, if you find secrets in code files that are not ENVs, hey, that shouldn't be there.

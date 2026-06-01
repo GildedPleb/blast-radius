@@ -23,7 +23,7 @@ func TestPrintHelp_NilCfgAndEmptyRoots(t *testing.T) {
 
 	// empty roots path
 	configLoad = func() (*config.Config, string, error) {
-		return &config.Config{ProjectRoots: []string{}}, "/p", nil
+		return &config.Config{}, "/p", nil
 	}
 	PrintHelp()
 }

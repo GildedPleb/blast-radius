@@ -43,7 +43,7 @@ func TestCrumbsHandler_DisabledPath(t *testing.T) {
 	fake := &fakeContext{
 		crumbsResult: &residue.ScanResult{
 			Findings: []residue.ResidueFinding{},
-			Errors:   []string{"residue_hunter.enabled is false"},
+			Errors:   []string{"pillar2.enabled is false"},
 		},
 	}
 	resp, err := h.Handle("", fake)

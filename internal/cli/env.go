@@ -13,7 +13,7 @@ import (
 )
 
 // RunEnvCheck executes a runtime hygiene command (Pillar 4 / env) and reports any known secrets found.
-// Commands are configured under `pillar5_commands` in config (historical key name).
+// Commands are configured under `pillar4.commands` in config.
 func RunEnvCheck(name string) {
 	_ = logging.Init(logging.DefaultDaemonLogPath())
 
@@ -30,16 +30,16 @@ func RunEnvCheck(name string) {
 	}
 
 	// Find the command definition.
-	var cmd config.Pillar5Command
-	for _, c := range cfg.Pillar5Commands {
+	var cmd config.RuntimeCommand
+	for _, c := range cfg.Pillar4.Commands {
 		if c.Name == name {
 			cmd = c
 			break
 		}
 	}
 	if cmd.Name == "" {
-		logging.Printf("RunEnvCheck: unknown pillar5 command: %s", name)
-		fmt.Printf(`{"status":"error","message":"unknown pillar5 command: %s"}`+"\n", name)
+		logging.Printf("RunEnvCheck: unknown pillar4 command: %s", name)
+		fmt.Printf(`{"status":"error","message":"unknown pillar4 command: %s"}`+"\n", name)
 		return
 	}
 

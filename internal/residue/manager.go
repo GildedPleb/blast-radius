@@ -17,6 +17,10 @@ var userHomeDir = os.UserHomeDir
 
 // Manager owns the residue (crumbs) scanning logic and last result cache.
 // Scans are on-demand only (no background goroutine per v1 plan decision).
+//
+// Configuration: cfg.Pillar2 (enabled + target_dirs). Skip/ignore lists are
+// read from cfg.GetEnvOptions() (the Pillar 1 hygiene lists — single source
+// of truth after removal of legacy top-level fields).
 type Manager struct {
 	cfg      *config.Config
 	reg      *registry.Registry
@@ -43,15 +47,15 @@ func (m *Manager) RunScan() *ScanResult {
 		Errors:    []string{},
 	}
 
-	if m.cfg == nil || !m.cfg.ResidueHunter.Enabled {
+	if m.cfg == nil || !m.cfg.Pillar2.Enabled {
 		res.Duration = time.Since(start)
-		res.Errors = append(res.Errors, "residue_hunter.enabled is false")
+		res.Errors = append(res.Errors, "pillar2.enabled is false")
 		m.last = res
 		m.lastScan = start
 		return res
 	}
 
-	targets := m.cfg.ResidueHunter.TargetDirs
+	targets := m.cfg.Pillar2.TargetDirs
 	if len(targets) == 0 {
 		// sensible defaults even if user left the list empty
 		home, _ := userHomeDir()
@@ -62,13 +66,17 @@ func (m *Manager) RunScan() *ScanResult {
 		}
 	}
 
-	ignoreFiles := m.cfg.IgnoreFiles
+	// Reuse the single source of truth for scan hygiene (skip/ignore lists).
+	// These now live under pillar1.sources.env.options after the legacy top-level
+	// fields were removed.
+	envOpts := m.cfg.GetEnvOptions()
+	ignoreFiles := envOpts.IgnoreFiles
 	if len(ignoreFiles) == 0 {
 		ignoreFiles = []string{".gitignore", ".blastradiusignore"}
 	}
 
 	skipDirs := make(map[string]bool)
-	for _, d := range m.cfg.SkipDirs {
+	for _, d := range envOpts.SkipDirs {
 		skipDirs[d] = true
 	}
 	// always add a few more for residue surface safety/performance
@@ -113,7 +121,7 @@ func (m *Manager) RunScan() *ScanResult {
 			}
 			examined++
 
-			finding, scanErr := ScanFile(path, m.cfg.ResidueHunter, m.reg)
+			finding, scanErr := ScanFile(path, m.cfg.Pillar2, m.reg)
 			if scanErr != nil {
 				// per-file errors are soft
 				res.Errors = append(res.Errors, path+": "+scanErr.Error())

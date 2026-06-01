@@ -46,7 +46,7 @@ This is purely advisory/passive: find the file, hash interesting parts, check ag
 
 ```yaml
 # Scoped Persistent Residue Hunter (new pillar)
-residue_hunter:
+pillar2:
   enabled: true
   # High-likelihood locations only. No full disk.
   target_dirs:
@@ -116,7 +116,7 @@ We can bring a meaningful amount of the "residue sinks" flavor back while stayin
 2. Add config for "residue awareness":
 
 ```yaml
-residue_hunter:
+pillar2:
   enabled: true
   target_dirs:
     - "~/Downloads"

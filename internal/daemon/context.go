@@ -18,6 +18,7 @@ type DaemonContext interface {
 	TriggerShutdown()
 
 	// CrumbsSummary returns lightweight Pillar 2 status (count, recency, sample). Used by STATUS.
+	// Appears in the JSON response under the "pillar2" key (symmetric with "pillar1").
 	CrumbsSummary() map[string]any
 	// RunCrumbsScan forces a fresh scan and returns the full result (used by CRUMBS handler).
 	RunCrumbsScan() *residue.ScanResult

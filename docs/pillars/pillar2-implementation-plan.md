@@ -50,7 +50,7 @@ This staged view respects the user's explicit desire that all the residue-finder
 - **Daemon protocol command:** `CRUMBS`
 - **Handler:** `CrumbsHandler`
 - **Package:** `internal/residue` (internal name can still reference "residue" for code clarity; user surface uses "crumbs").
-- **Config section:** `residue_hunter` (kept for consistency with design doc; the "crumbs" name is user-facing only).
+- **Config section:** `pillar2` (the historical `residue_hunter` name was retired during the 2026 config reorganization for consistent pillarN naming; the "crumbs" name remains the user-facing CLI command).
 
 Status / JSON will use neutral keys like `residue_findings` or `crumbs` (recommend `residue` for internal keys to match design doc language).
 
@@ -98,7 +98,7 @@ Rationale: These are dangerous artifacts that should *never* exist in cleartext 
 Revised minimal config surface:
 
 ```yaml
-residue_hunter:
+pillar2:
   enabled: false                 # default false (opt-in)
   target_dirs:
     - "~/Downloads"
@@ -203,12 +203,12 @@ This keeps the spirit of the design doc while respecting the "never allow disabl
 
 14. **Edit `internal/config/config.go`**
     - Define `type ResidueHunterConfig struct { ... }` with all fields from §5.
-    - Add `ResidueHunter ResidueHunterConfig `yaml:"residue_hunter,omitempty"`` to `Config`.
+    - Add `Pillar2 Pillar2Config `yaml:"pillar2,omitempty"`` to `Config` (the old `residue_hunter` key was retired in the config reorg).
     - Update `DefaultConfig()` with disabled + sensible lists.
     - In `Load()`, after unmarshal, ensure sub-struct has defaults if partially populated (or do it in residue.Manager).
 
 15. **Edit `config.example.yaml`**
-    - Add a documented `residue_hunter:` block (can be commented out or present with `enabled: false` + explanation linking to pillars doc).
+    - Add a documented `pillar2:` block (can be commented out or present with `enabled: false` + explanation linking to pillars doc).
 
 16. **Update tests (parallel with code)**
     - `internal/residue/*_test.go` (new): unit tests for entropy, filename heuristics, synthetic Bitwarden JSON/CSV detectors, SafeLocation.

@@ -16,75 +16,89 @@ var (
 )
 
 // Config holds user configuration. It must NEVER contain secrets or discovered hashes.
+//
+// The persisted shape is deliberately organized around the five pillars for
+// maximum user clarity (see docs/pillars/idiomatic_pillars.md). Only true
+// cross-cutting core settings (e.g. log_level) live at the top level.
 type Config struct {
-	// ProjectRoots is a list of directories to monitor.
-	ProjectRoots []string `yaml:"project_roots,omitempty"`
-
-	// SkipDirs are directory basenames we should never descend into during discovery.
-	// These supplement the built-in safe defaults for performance and noise reduction.
-	SkipDirs []string `yaml:"skip_dirs,omitempty"`
-
-	// IgnoreFiles lists the filenames to treat as ignore files (e.g. ".gitignore", ".blastradiusignore").
-	// Order matters — later files can override earlier behavior if we add precedence later.
-	IgnoreFiles []string `yaml:"ignore_files,omitempty"`
-
-	// LogLevel for future use.
+	// LogLevel for future use (debug | info | warn | error).
 	LogLevel string `yaml:"log_level,omitempty"`
 
-	// Pillar5Commands defines user-specified commands whose output should be scanned for secrets.
-	// Only the first command defaults to auto_on_prompt: true (printenv).
-	//
-	// All commands are executed with direct argv (no shell) as a hard invariant.
-	// For complex logic (pipes etc.), use a wrapper script you control.
-	Pillar5Commands []Pillar5Command `yaml:"pillar5_commands,omitempty"`
-
-	// ClipboardClearSeconds is the time after which detected secrets in clipboard are auto-cleared.
-	ClipboardClearSeconds int `yaml:"clipboard_clear_seconds,omitempty"`
-
-	// ResidueHunter configures Pillar 2 (Crumbs) — scoped high-risk directory secret residue scanning.
-	ResidueHunter ResidueHunterConfig `yaml:"residue_hunter,omitempty"`
-
-	// Pillar1 configures the logical layer for legitimate secret discovery (Pillar 1).
-	// v1: explicit "env" and "bitwarden" sources under a unified interface.
-	// Per-source options (especially ignore_patterns) feed the key-filtering engine.
+	// Pillar1 configures Legitimate Secret Discovery — the "where secrets should be" layer.
+	// All discovery roots, skip/ignore rules, and per-source options live under here.
 	Pillar1 Pillar1Config `yaml:"pillar1,omitempty"`
+
+	// Pillar2 configures Illegitimate Secret Residue hunting (the "Crumbs" hunter).
+	// This is the deliberate inversion of Pillar 1: finds vault exports and high-entropy
+	// dumps in high-risk user directories (Downloads, Documents, Desktop, etc.).
+	Pillar2 Pillar2Config `yaml:"pillar2,omitempty"`
+
+	// Pillar3 (History Hygiene) currently has no user-configurable surface.
+	// Scrubbing uses the registry populated by Pillar 1. Placeholder kept for ordering.
+	Pillar3 struct{} `yaml:"pillar3,omitempty"`
+
+	// Pillar4 configures Runtime Environment Hygiene (commands whose output is scanned
+	// for secrets, most commonly printenv). All commands execute via direct exec only.
+	Pillar4 Pillar4Config `yaml:"pillar4,omitempty"`
+
+	// Pillar5 configures Clipboard Hygiene (macOS auto-clear timer today).
+	Pillar5 Pillar5Config `yaml:"pillar5,omitempty"`
 }
 
-// Pillar5Command represents a single command to execute for runtime hygiene checks.
+// RuntimeCommand represents a single command whose output should be scanned for secrets
+// (Pillar 4 — Runtime Environment Hygiene).
 //
 // Commands are always executed via direct exec (no shell) as a hard security
 // invariant. This prevents shell metacharacter injection and arbitrary command
 // execution from user configuration. If you need pipes or complex logic, point
 // at a wrapper script you control instead of putting shell syntax here.
-type Pillar5Command struct {
+type RuntimeCommand struct {
 	Name         string `yaml:"name"`
 	Cmd          string `yaml:"cmd"`
 	AutoOnPrompt bool   `yaml:"auto_on_prompt"`
 }
 
-// ResidueHunterConfig holds settings for Pillar 2 "Crumbs" (illegitimate secret residue hunter).
+// Pillar2Config holds settings for Pillar 2 "Crumbs" (illegitimate secret residue hunter).
 // v1: only enabled + target_dirs are required; detectors are fixed and always-on when enabled.
-type ResidueHunterConfig struct {
+type Pillar2Config struct {
 	Enabled                 bool     `yaml:"enabled"`
 	TargetDirs              []string `yaml:"target_dirs,omitempty"`
 	FlagSuspiciousFilenames bool     `yaml:"flag_suspicious_filenames,omitempty"`
 }
 
+// Pillar4Config groups the runtime hygiene commands (Pillar 4).
+type Pillar4Config struct {
+	Commands []RuntimeCommand `yaml:"commands,omitempty"`
+}
+
+// Pillar5Config groups clipboard hygiene settings (Pillar 5).
+type Pillar5Config struct {
+	ClearSeconds int `yaml:"clear_seconds,omitempty"`
+}
+
 // Pillar1Config configures the logical layer for legitimate secret discovery (Pillar 1).
 // v1 supports two explicit sources under a unified interface: "env" (.env* files)
 // and "bitwarden" (hard-coded bw CLI collector owned by the project).
+//
+// All discovery settings (project_roots, skip_dirs, ignore_files, ignore_patterns)
+// now live under sources.<name>.options — this is the only supported location.
 type Pillar1Config struct {
 	Sources map[string]SourceConfig `yaml:"sources,omitempty"`
 }
 
 // SourceConfig is the common envelope for an activatable Pillar 1 source.
+// Options are stored as map[string]any for forward extensibility (new sources
+// or source-specific knobs do not require struct changes). The well-known
+// keys (project_roots, skip_dirs, ignore_files, ignore_patterns) are normalized
+// to []string by normalizePillar1Sources.
 type SourceConfig struct {
 	Enabled bool           `yaml:"enabled"`
 	Options map[string]any `yaml:"options,omitempty"` // populated into typed options by collectors
 }
 
-// EnvOptions holds configuration specific to the "env" logical source
-// (the modern location under pillar1.sources.env.options).
+// EnvOptions holds the effective (typed) configuration for the "env" logical source
+// under pillar1.sources.env.options. This is the single source of truth after the
+// removal of the legacy top-level project_roots / skip_dirs / ignore_files fields.
 type EnvOptions struct {
 	ProjectRoots   []string `json:"project_roots,omitempty"`
 	SkipDirs       []string `json:"skip_dirs,omitempty"`
@@ -99,46 +113,35 @@ type BitwardenOptions struct {
 }
 
 // DefaultConfig returns a safe default configuration.
+//
+// All defaults now live under the pillarN: sections (single source of truth).
+// The legacy top-level project_roots/skip_dirs/ignore_files fields have been removed.
 func DefaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 
 	return &Config{
-		ProjectRoots: []string{home},
-		SkipDirs: []string{
-			"node_modules",
-			".git",
-			"vendor",
-			"dist",
-			"build",
-			".next",
-			"target",
-			"out",
-			".cache",
-			"coverage",
-			".venv",
-			"__pycache__",
-		},
-		IgnoreFiles: []string{".gitignore", ".blastradiusignore"},
-		LogLevel:    "info",
-		Pillar5Commands: []Pillar5Command{
-			{Name: "default-env", Cmd: "printenv", AutoOnPrompt: true},
-		},
-		ClipboardClearSeconds: 30,
-		ResidueHunter: ResidueHunterConfig{
-			Enabled:                 false,
-			TargetDirs:              []string{"~/Downloads", "~/Documents", "~/Desktop"},
-			FlagSuspiciousFilenames: true,
-		},
-		// Pillar 1 logical sources (env + bitwarden in v1).
-		// We now recommend putting project_roots, skip_dirs, and ignore_files
-		// under pillar1.sources.env.options (see GetEnvOptions for fallback logic).
+		LogLevel: "info",
 		Pillar1: Pillar1Config{
 			Sources: map[string]SourceConfig{
 				"env": {
 					Enabled: true,
 					Options: map[string]any{
-						// Users are encouraged to put project_roots / skip_dirs / ignore_files
-						// here under pillar1.sources.env.options going forward.
+						"project_roots": []string{home},
+						"skip_dirs": []string{
+							"node_modules",
+							".git",
+							"vendor",
+							"dist",
+							"build",
+							".next",
+							"target",
+							"out",
+							".cache",
+							"coverage",
+							".venv",
+							"__pycache__",
+						},
+						"ignore_files": []string{".gitignore", ".blastradiusignore"},
 						"ignore_patterns": []string{
 							"PATH", "HOME", "PWD", "USER", "SHELL", "TERM",
 							"LANG", "LC_*", "EDITOR", "VISUAL", "PAGER",
@@ -154,6 +157,21 @@ func DefaultConfig() *Config {
 					Options: map[string]any{},
 				},
 			},
+		},
+		Pillar2: Pillar2Config{
+			Enabled:                 false,
+			TargetDirs:              []string{"~/Downloads", "~/Documents", "~/Desktop"},
+			FlagSuspiciousFilenames: true,
+		},
+		// Pillar3 has no settings yet — struct{} keeps the key order visible if marshaled.
+		Pillar3: struct{}{},
+		Pillar4: Pillar4Config{
+			Commands: []RuntimeCommand{
+				{Name: "default-env", Cmd: "printenv", AutoOnPrompt: true},
+			},
+		},
+		Pillar5: Pillar5Config{
+			ClearSeconds: 30,
 		},
 	}
 }
@@ -183,11 +201,12 @@ func Load() (cfg *Config, configPath string, err error) {
 		return nil, configPath, err
 	}
 
-	// Ensure residue hunter has sensible defaults even if user only partially populated the block
-	if !cfg.ResidueHunter.Enabled && len(cfg.ResidueHunter.TargetDirs) == 0 {
-		def := DefaultConfig().ResidueHunter
-		cfg.ResidueHunter.TargetDirs = def.TargetDirs
-		cfg.ResidueHunter.FlagSuspiciousFilenames = def.FlagSuspiciousFilenames
+	// Pillar 2 (residue hunter) — fill sensible defaults if the user only partially
+	// populated the block (enabled:false + empty target_dirs is common).
+	if !cfg.Pillar2.Enabled && len(cfg.Pillar2.TargetDirs) == 0 {
+		def := DefaultConfig().Pillar2
+		cfg.Pillar2.TargetDirs = def.TargetDirs
+		cfg.Pillar2.FlagSuspiciousFilenames = def.FlagSuspiciousFilenames
 	}
 
 	// Pillar 1 logical sources: ensure the map exists and both known v1 sources
@@ -200,6 +219,10 @@ func Load() (cfg *Config, configPath string, err error) {
 
 // normalizePillar1Sources ensures the Pillar1.Sources map and the two v1
 // providers ("env", "bitwarden") always exist after unmarshal.
+//
+// With the legacy top-level project_roots/skip_dirs/ignore_files fields removed,
+// this function no longer performs any migration. It only guarantees a stable
+// shape for collectors and GetEnvOptions.
 func normalizePillar1Sources(cfg *Config) {
 	if cfg.Pillar1.Sources == nil {
 		cfg.Pillar1.Sources = make(map[string]SourceConfig)
@@ -214,13 +237,6 @@ func normalizePillar1Sources(cfg *Config) {
 			src.Options = map[string]any{}
 		}
 
-		// If the user is using the new pillar1.sources.env.options style,
-		// we respect those values. Otherwise we migrate legacy top-level keys
-		// into the env source options for a smooth transition.
-		if name == "env" {
-			migrateLegacyDiscoveryKeys(cfg, &src)
-		}
-
 		// Normalize common list fields and ensure they are never nil slices.
 		for _, key := range []string{"project_roots", "skip_dirs", "ignore_files", "ignore_patterns"} {
 			if raw, exists := src.Options[key]; exists && raw != nil {
@@ -233,25 +249,6 @@ func normalizePillar1Sources(cfg *Config) {
 		}
 
 		cfg.Pillar1.Sources[name] = src
-	}
-}
-
-// migrateLegacyDiscoveryKeys moves project_roots / skip_dirs / ignore_files
-// from the old top level into pillar1.sources.env.options when the new keys
-// are not already present. This provides a transparent migration path.
-func migrateLegacyDiscoveryKeys(cfg *Config, envSrc *SourceConfig) {
-	if envSrc.Options == nil {
-		envSrc.Options = map[string]any{}
-	}
-
-	if _, has := envSrc.Options["project_roots"]; !has && len(cfg.ProjectRoots) > 0 {
-		envSrc.Options["project_roots"] = cfg.ProjectRoots
-	}
-	if _, has := envSrc.Options["skip_dirs"]; !has && len(cfg.SkipDirs) > 0 {
-		envSrc.Options["skip_dirs"] = cfg.SkipDirs
-	}
-	if _, has := envSrc.Options["ignore_files"]; !has && len(cfg.IgnoreFiles) > 0 {
-		envSrc.Options["ignore_files"] = cfg.IgnoreFiles
 	}
 }
 
@@ -292,62 +289,63 @@ func (c *Config) GetSourceIgnorePatterns(sourceName string) []string {
 	if !ok || src.Options == nil {
 		return []string{}
 	}
-	if list, ok := src.Options["ignore_patterns"].([]string); ok {
-		if list == nil {
-			return []string{}
-		}
-		return list
-	}
-	// Also try the typed path via GetEnvOptions for "env" for convenience
+	// For the env source, prefer GetEnvOptions (which now defensively normalizes
+	// []any lists from yaml and guarantees non-nil slices).
 	if sourceName == "env" {
 		return c.GetEnvOptions().IgnorePatterns
 	}
-	return []string{}
+	// For other sources (bitwarden, future ones), normalize directly.
+	return normalizeStringList(src.Options["ignore_patterns"])
 }
 
-// GetEnvOptions returns the effective configuration for the "env" source.
+// GetEnvOptions returns the effective configuration for the "env" source
+// (Pillar 1 legitimate secret discovery).
 //
-// Priority (highest first):
-// 1. Values under pillar1.sources.env.options (new recommended location)
-// 2. Legacy top-level project_roots / skip_dirs / ignore_files (for compatibility)
+// This is now the single source of truth. All values come from
+// pillar1.sources.env.options (the legacy top-level project_roots / skip_dirs /
+// ignore_files fields and migration logic have been removed).
 func (c *Config) GetEnvOptions() EnvOptions {
 	if c == nil {
-		return EnvOptions{}
+		return EnvOptions{
+			ProjectRoots:   []string{},
+			SkipDirs:       []string{},
+			IgnoreFiles:    []string{},
+			IgnorePatterns: []string{},
+		}
 	}
 
 	opts := EnvOptions{}
 
-	// New style: pillar1.sources.env.options takes precedence
 	if c.Pillar1.Sources != nil {
 		if envSrc, ok := c.Pillar1.Sources["env"]; ok && envSrc.Options != nil {
-			if v, ok := envSrc.Options["project_roots"].([]string); ok && len(v) > 0 {
+			// Defensively normalize from []any (what yaml.Unmarshal into map[string]any produces)
+			// as well as []string. This makes the public accessor robust even when a Config
+			// is constructed manually or unmarshaled without going through Load().
+			if v := normalizeStringList(envSrc.Options["project_roots"]); len(v) > 0 {
 				opts.ProjectRoots = v
 			}
-			if v, ok := envSrc.Options["skip_dirs"].([]string); ok && len(v) > 0 {
+			if v := normalizeStringList(envSrc.Options["skip_dirs"]); len(v) > 0 {
 				opts.SkipDirs = v
 			}
-			if v, ok := envSrc.Options["ignore_files"].([]string); ok && len(v) > 0 {
+			if v := normalizeStringList(envSrc.Options["ignore_files"]); len(v) > 0 {
 				opts.IgnoreFiles = v
 			}
-			if v, ok := envSrc.Options["ignore_patterns"].([]string); ok {
-				if v == nil {
-					opts.IgnorePatterns = []string{}
-				} else {
-					opts.IgnorePatterns = v
-				}
-			}
+			opts.IgnorePatterns = normalizeStringList(envSrc.Options["ignore_patterns"])
 		}
 	}
 
-	// Fall back to legacy top-level keys
-	if len(opts.ProjectRoots) == 0 {
-		opts.ProjectRoots = append([]string{}, c.ProjectRoots...)
+	// Always return non-nil slices for the well-known fields. This matches the
+	// contract that Load() + normalizePillar1Sources() provides, makes direct
+	// struct construction in tests ergonomic, and prevents surprising nils for
+	// callers that do &Config{} or partial configs.
+	if opts.ProjectRoots == nil {
+		opts.ProjectRoots = []string{}
 	}
-	if len(opts.SkipDirs) == 0 {
-		opts.SkipDirs = append([]string{}, c.SkipDirs...)
+	if opts.SkipDirs == nil {
+		opts.SkipDirs = []string{}
 	}
-	if len(opts.IgnoreFiles) == 0 {
-		opts.IgnoreFiles = append([]string{}, c.IgnoreFiles...)
+	if opts.IgnoreFiles == nil {
+		opts.IgnoreFiles = []string{}
 	}
 	if opts.IgnorePatterns == nil {
 		opts.IgnorePatterns = []string{}
