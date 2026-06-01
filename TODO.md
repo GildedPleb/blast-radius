@@ -8,7 +8,6 @@
 - Test Audit
 - logger audit
 - Backwards compatability audit (e.g. we can fully drop all backwards compatibility because we havent released any software yet, lol)
-- (Addressed in Phase 1) Pillar 1 key filtering via `pillar1.sources.env.options.ignore_patterns` (and the unified logical layer for future sources). Non-secret keys (LOG\_\*, PATH, build metadata, etc.) are no longer hashed or compared.
 - 1. Bitwarden collector is still early
      The Collect() implementation is functional but basic. It doesn't yet handle folders, organizations, attachments, TOTP secrets well, or have sophisticated error handling around bw states. This is the weakest part of the "done" story.
 - Kill this: 4. Migration UX is still a bit messy

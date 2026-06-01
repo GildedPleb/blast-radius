@@ -120,7 +120,8 @@ func (d *Daemon) RunCrumbsScan() *residue.ScanResult {
 	return d.residue.RunScan()
 }
 
-// Pillar 1 manual rescan support (Phase 3 — explicit on-demand only, no file watching).
+// Pillar 1 manual rescan support (Phase 3 — explicit on-demand only).
+// Full fsnotify reactivity is permanently out of scope (security tradeoff).
 func (d *Daemon) TriggerPillar1Rescan() error {
 	if d.discovery == nil {
 		return nil

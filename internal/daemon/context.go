@@ -23,7 +23,7 @@ type DaemonContext interface {
 	RunCrumbsScan() *residue.ScanResult
 
 	// TriggerPillar1Rescan runs a fresh discovery pass (manual rescan).
-	// Phase 3 deliverable — no file watching.
+	// Phase 3 deliverable. Full fsnotify reactivity is permanently out of scope.
 	TriggerPillar1Rescan() error
 	// Pillar1ScanStatus returns lightweight info about the last Pillar 1 scan.
 	Pillar1ScanStatus() map[string]any

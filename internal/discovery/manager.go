@@ -152,8 +152,9 @@ func (m *Manager) GetProjectDisplayName(id registry.ProjectID) string {
 }
 
 // Note: We deliberately chose high-quality on-demand rescan (Phase 3) instead of
-// persistent file watching for security, operational, and testability reasons.
-// See plan for the detailed trade-off discussion.
+// persistent file watching. Full fsnotify reactivity is permanently out of scope
+// for security reasons (attack surface + complexity outweigh the benefits).
+// Manual `rescan` (plus startup discovery) is the supported mechanism.
 
 // logicalProjectID creates a stable opaque ProjectID for a logical source
 // (e.g. "env", "bitwarden"). This allows collectors to contribute hashes

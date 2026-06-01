@@ -17,7 +17,7 @@ Blast Radius is a local, hash-only tool for secret exposure reduction. It has co
 - **Pillar 1**: Legitimate Secret Discovery — ✅ Core complete
   - Key filtering for non-secrets (Phase 1)
   - Improved ignore engine (Phase 2)
-  - High-quality manual `rescan` (Phase 3, no fsnotify)
+  - High-quality manual `rescan` (Phase 3 — deliberate design choice; fsnotify reactivity permanently out of scope for security reasons)
   - Logical layer with explicit sources: `env` + hard-coded `bitwarden` (Phase 4)
   - Both sources participate in rescan, duplicates, and status via the collector model
   - Full documentation and example config updated
@@ -84,23 +84,24 @@ No `recorder/` package remains.
 
 ## Core Invariants (Current)
 
-| #   | Invariant                               | Status |
-| --- | --------------------------------------- | ------ |
-| 1   | Registry never contains plaintext       | ✅     |
-| 2   | No secret material ever written to disk | ✅     |
-| 3   | IPC over Unix domain socket with 0600   | ✅     |
-|     | **Hard invariant since 2026**: path is not user-configurable; always `~/.local/state/blastradius/blastradius.sock` + 0700 dir + 0600 socket + capability token | |
-| 4   | True singleton daemon                   | ✅     |
-| 5   | Minimal metadata (opaque ProjectIDs)    | ✅     |
-| 6   | Persisted config is non-sensitive       | ✅     |
-| 7   | Safe degradation on failure             | ✅     |
-| 8   | Respects ignore patterns                | ✅     |
-| 9   | **Pillar 5 commands use direct exec only (no shell)** | ✅ (2026) |
+| #   | Invariant                                                                                                                                                      | Status    |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| 1   | Registry never contains plaintext                                                                                                                              | ✅        |
+| 2   | No secret material ever written to disk                                                                                                                        | ✅        |
+| 3   | IPC over Unix domain socket with 0600                                                                                                                          | ✅        |
+|     | **Hard invariant since 2026**: path is not user-configurable; always `~/.local/state/blastradius/blastradius.sock` + 0700 dir + 0600 socket + capability token |           |
+| 4   | True singleton daemon                                                                                                                                          | ✅        |
+| 5   | Minimal metadata (opaque ProjectIDs)                                                                                                                           | ✅        |
+| 6   | Persisted config is non-sensitive                                                                                                                              | ✅        |
+| 7   | Safe degradation on failure                                                                                                                                    | ✅        |
+| 8   | Respects ignore patterns                                                                                                                                       | ✅        |
+| 9   | **Pillar 5 commands use direct exec only (no shell)**                                                                                                          | ✅ (2026) |
 
 **Note on removed configuration options (2026 hardenings):**
+
 - `socket_path` is no longer accepted in `config.yaml` (the path is now a hard-coded invariant).
 - The `shell:` key under `pillar5_commands` is no longer accepted. All commands run via direct `exec`.
-Old keys are silently ignored by the YAML parser. Users relying on previous behavior should migrate to wrapper scripts for complex commands and remove the old keys.
+  Old keys are silently ignored by the YAML parser. Users relying on previous behavior should migrate to wrapper scripts for complex commands and remove the old keys.
 
 ---
 
@@ -129,9 +130,9 @@ Zsh integration (source `zsh/blastradius.zsh`):
 
 ## Known Limitations / Future Work
 
-- **Pillar 1 reactivity & full logical layer**: Key filtering for non-secret .env keys is implemented (Phase 1). Full reactivity (fsnotify + `rescan`), the hard-coded Bitwarden collector, and treating ENV/Bitwarden as explicit activatable sources under the logical layer are tracked in the Pillar 1 completion plan.
+- **Pillar 1**: Key filtering for non-secret .env keys (via `pillar1.sources.env.options.ignore_patterns` under the logical layer) and collector-based rescan for sources (env + bitwarden) are complete.
+- **Pillar 1 reactivity**: Full filesystem reactivity (`fsnotify` / automatic rescan on file changes) is **deliberately not implemented** and is permanently out of scope. The security surface area and complexity were judged to outweigh the benefits. On-demand manual `rescan` (plus initial discovery at daemon start) is the supported and intentional mechanism.
 - **Pillar 2 (Crumbs)**: v1 shipped (on-demand `crumbs`, fixed detectors for exports + entropy, status summary, opt-in config). Remaining required stages (hunt_residue patterns inside target_dirs, materialization roots expansion, git accident detection, background scheduling, Zsh HUD) are documented in `docs/pillars/pillar2-implementation-plan.md` and `residue_hunter_scoped.md`.
-- No reactive file watching (`fsnotify`) — discovery runs on daemon start only (Pillar 1 Phase 3 work).
 - History scrubbing supports Zsh only.
 - No editor / AI prompt integration.
 - Clipboard auto-clear timer (Pillar 5) is declared in config but not yet implemented.
