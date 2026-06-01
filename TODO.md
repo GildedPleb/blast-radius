@@ -9,9 +9,4 @@
 - logger audit
 - Backwards compatability audit (e.g. we can fully drop all backwards compatibility because we havent released any software yet, lol)
 - Bitwarden collector is still early. The Collect() implementation is functional but basic. It doesn't yet handle folders, organizations, attachments, TOTP secrets well, or have sophisticated error handling around bw states. This is the weakest part of the "done" story.
-- (DONE) Pillar 1 / Pillar 2 coordination + authority model implemented.
-  See the approved plan (session 019e83e0...) and the loud documentation in
-  config.example.yaml + the pillar docs. P1 env_file_patterns now exist,
-  pillar2 uses dirs[] + per-dir files[], internal/policy.Classifier enforces
-  "P1 has authority and priority over P2" (the three stories all work),
-  and legacy behavior is fully preserved. No new CLI/status surfaces were added.
+- [P2 Stage 4] (optional but powerful) Lightweight git accident detection tied to configured project roots: reflog + stash + uncommitted working tree/index. Plus optional bounded recent-commit checks (gitleaks/trufflehog style). Opt-in.

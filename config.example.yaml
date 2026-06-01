@@ -190,23 +190,19 @@ pillar1:
 # ==============================================================================
 
 pillar2:
-  enabled: false                 # opt-in (recommended: true once you trust it)
-  # The only supported shape is dirs[] (per-surface control).
-  # Each entry can declare its own files[] patterns so different locations
-  # can have completely different "what counts as a crumb here" rules.
+  enabled: false                 # opt-in
+
+  # Pillar 2 finds secrets where they should not be.
   #
-  # dirs:
-  #   - path: "~/Downloads"
-  #     # "I want to look for EVERYTHING in Downloads — it doesn't matter what it is."
-  #     files: ["**/*"]
+  # Declare the real locations that matter and give each one the narrow,
+  # location-appropriate files[] patterns for the kind of garbage that actually
+  # ends up there.
   #
-  #   - path: "~/dev/myproject"
-  #     # Narrower policy for a dev tree.
-  #     files: ["*/*", "**/debug*", "**/*secret*", "**/*.log"]
-  #
-  #   - path: "~/work"
-  #     files: ["**/*"]   # hunt broadly in this tree too
+  # This is the entire point of the model.
+
   dirs:
+    # === High-risk user dump folders ===
+    # People intentionally export things here. Broad scanning is reasonable.
     - path: "~/Downloads"
       files: ["**/*"]
     - path: "~/Documents"
@@ -214,30 +210,91 @@ pillar2:
     - path: "~/Desktop"
       files: ["**/*"]
 
-    # Example: Surgical "residue only" hunting in Downloads
-    # Instead of blindly scanning the entire Downloads folder (which can be huge and noisy),
-    # you can be very deliberate and only look for known dangerous patterns that frequently
-    # contain leaked secrets. This is the modern replacement for the old global
-    # flag_suspicious_filenames behavior.
-    #
-    # - path: "~/Downloads"
+    # === Real materialization locations ===
+    # These are where accidental residue actually tends to end up.
+    # Patterns are deliberately narrower and tailored to each surface.
+
+    - path: "/tmp"
+      files:
+        # Editor artifacts (people do `vim /tmp/foo` when desperate)
+        - "**/*.swp"
+        - "**/*.swo"
+        - "**/*~"
+        - "**/.#*"
+        # Manual backup / temp files people create while debugging
+        - "**/*.bak"
+        - "**/*.backup"
+        - "**/*_backup*"
+        - "**/*.tmp"
+        # Obvious dangerous names
+        - "debug*"
+        - "*secret*"
+        - "*creds*"
+        - "*password*"
+        - "*token*"
+        - "temp*secret*"
+        - "*.env*"
+
+    - path: "~/tmp"
+      files:
+        # Same editor + manual backup logic as /tmp, but in the user's home tmp
+        - "**/*.swp"
+        - "**/*.swo"
+        - "**/*~"
+        - "**/.#*"
+        - "**/*.bak"
+        - "**/*.backup"
+        - "**/*_backup*"
+        - "**/*.tmp"
+        - "debug*"
+        - "*secret*"
+        - "*creds*"
+        - "*password*"
+        - "*.env*"
+
+    - path: "~/Library/Logs"
+      files:
+        # Logs and crash reports are less likely to have editor swaps,
+        # more likely to have leaked strings in filenames or content.
+        - "*secret*"
+        - "*password*"
+        - "*token*"
+        - "*key*"
+        - "*creds*"
+        - "*crash*"
+        - "*debug*"
+
+    - path: "~/.cache"
+      files:
+        # Cache directories sometimes accumulate debug/temp artifacts.
+        - "*secret*"
+        - "*password*"
+        - "debug*"
+        - "*token*"
+        - "*creds*"
+
+    # === Project / development trees (opt-in) ===
+    # Many people leave debug files, swaps, and manual backups inside active work.
+    # This is high-value but requires more surgical patterns.
+    # - path: "~/dev"
     #   files:
-    #     # Editor / temp / backup residue (the classic "I left a swap file" cases)
+    #     # Editor residue left next to files being edited
     #     - "**/*.swp"
     #     - "**/*.swo"
     #     - "**/*~"
+    #     - "**/.#*"
+    #     # Manual debug / backup files
+    #     - "**/debug*"
+    #     - "**/*secret*"
+    #     - "**/*.env*"
     #     - "**/*.bak"
     #     - "**/*.backup"
+    #     - "**/*_backup*"
     #     - "**/*.tmp"
-    #     - "**/.*_backup*"
-    #     - "**/.#*"
-    #     # High-risk credential dump names (still very worth catching)
-    #     - "**/*bitwarden*"
-    #     - "**/*password*"
-    #     - "**/*secret*"
-    #     - "**/*creds*"
-    #     - "**/*export*"
-    #     - "**/*vault*"
+
+    # You can (and should) add any other locations that are real in your workflow.
+    # The strength of the model is that each directory gets the patterns that
+    # actually match the mistakes people make in *that* place.
 
   # =====================================================================
   # CRITICAL RULE: PILLAR 1 HAS AUTHORITY OVER PILLAR 2

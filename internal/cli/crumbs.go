@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -41,10 +42,30 @@ func RunCrumbs(jsonOutput bool) {
 		total = int(t)
 	}
 
+	// Detect explicit disabled marker from the manager (errors array contains the note when
+	// pillar2.enabled: false). This fulfills the original plan intent: "reports disabled cleanly".
+	disabled := false
+	if errs, ok := resp["errors"].([]any); ok {
+		for _, e := range errs {
+			if s, ok := e.(string); ok && strings.Contains(s, "enabled is false") {
+				disabled = true
+				break
+			}
+		}
+	}
+
 	fmt.Println("Blast Radius - Forgotten Secret Crumbs (Pillar 2)")
 	fmt.Println("==================================================")
 
 	if total == 0 {
+		if disabled {
+			fmt.Println("Pillar 2 (Crumbs) is disabled in config (pillar2.enabled: false).")
+			fmt.Println("No scan was performed.")
+			fmt.Println("Enable the feature in ~/.config/blastradius/config.yaml (and run 'blastradius crumbs' again)")
+			fmt.Println("to locate forgotten vault exports and high-entropy dumps in your high-risk directories.")
+			fmt.Println("==================================================")
+			return
+		}
 		fmt.Println("No suspicious secret residue found in configured high-risk directories.")
 		fmt.Println("Good — keep exports inside your vault and .env files inside project roots.")
 		fmt.Println("==================================================")

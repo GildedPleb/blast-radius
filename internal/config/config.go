@@ -59,8 +59,12 @@ type RuntimeCommand struct {
 }
 
 // Pillar2Dir describes one configured surface for Pillar 2 residue hunting.
-// Each entry allows independent control over which files under that path
-// should be considered potential crumb candidates (via the files glob list).
+// Each entry lets you target a specific directory and give it the exact
+// files[] patterns that make sense for the kind of residue or exports that
+// actually appear in that location.
+//
+// See config.example.yaml for realistic examples (including /tmp, ~/tmp,
+// ~/Library/Logs, project trees, etc.).
 //
 // P1 authority rule (enforced by internal/policy.Classifier, not here):
 // Any file that matches an active pillar1.sources.env env_file_patterns under
@@ -72,9 +76,9 @@ type Pillar2Dir struct {
 }
 
 // Pillar2Config holds settings for Pillar 2 "Crumbs" (illegitimate secret residue hunter).
-// The only supported shape is the dirs[] array. Each dir can declare its own
-// files[] patterns so different surfaces (Downloads vs a dev tree, etc.) can
-// have completely different "what counts as a crumb here" policies.
+// The dirs[] array is the mechanism for declaring the actual locations that matter
+// (user dump folders, /tmp, ~/tmp, logs directories, project trees, etc.) and giving
+// each one the narrow, location-appropriate files[] patterns.
 //
 // P1 authority rule (enforced by internal/policy.Classifier):
 // Anything claimed by an active Pillar 1 env source via env_file_patterns

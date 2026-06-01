@@ -66,3 +66,16 @@ func TestRunCrumbs_RichFindings(t *testing.T) {
 	RunCrumbs(false)
 	RunCrumbs(true)
 }
+
+// TestRunCrumbs_Disabled exercises the explicit disabled path (pillar2.enabled: false).
+// The manager/handler return status ok + errors marker + total 0; the CLI must not
+// print the generic "clean" message but must surface that the feature is off.
+func TestRunCrumbs_Disabled(t *testing.T) {
+	defer resetTestOverrides(t)
+	restore := silenceOutput()
+	defer restore()
+
+	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","total":0,"files_examined":0,"errors":["pillar2.enabled is false"]}`)
+	RunCrumbs(false)
+	RunCrumbs(true)
+}
