@@ -67,7 +67,8 @@ pillar2:
   # Minimum number of high-entropy values before considering a file "suspicious"
   min_high_entropy_hits: 3
   # Whether to also flag files with names that strongly suggest secret dumps
-  flag_suspicious_filenames: true
+  # (flag_suspicious_filenames was removed in alpha cleanup.
+  #  Use explicit files[] patterns per dir instead.)
 ```
 
 ## Detection Strategy (Practical, Not Full Kernel Scan)
@@ -256,8 +257,8 @@ Trying to force both into the exact same narrow folder list creates a mismatch, 
 
 This document is the historical design source. The concrete implementation plan lives in [pillar2-implementation-plan.md](pillar2-implementation-plan.md). For visibility, the agreed staged rollout of Pillar 2 is:
 
-**Stage 1 (current work — "Crumbs" MVP)**  
-Vault export formats (Bitwarden JSON/CSV, Dashlane, 1Password, generic high-entropy) + suspicious filename heuristics, strictly inside the user-controlled `target_dirs` (Downloads/Documents/Desktop + additions). On-demand only via `blastradius crumbs`. Lightweight summary in `status`. `residue_hunter.enabled` + `target_dirs` only in config. All detectors are always-on when the feature is enabled (no selective format toggles).
+**Stage 1 + 1.5 (completed)**  
+Vault export formats + heuristics. The authority model: `pillar1.sources.env.options.env_file_patterns`, the only supported shape `pillar2.dirs[]` + per-dir `files[]`, and the internal Classifier enforcing "P1 has authority over P2". The three stories are correctly supported. The old flat `target_dirs` shape has been removed (alpha). The precedence rule is documented loudly. This is the foundation for safe Stages 2–3 work.
 
 **Stage 2**  
 Inside the *same* `target_dirs`, add `hunt_residue` support: editor swap patterns (`*.swp`, `*.swo`, `*~`, `.#*`, `*_backup*`, temp/debug/crash files) with lower entropy threshold. Still advisory.

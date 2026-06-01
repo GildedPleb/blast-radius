@@ -58,12 +58,30 @@ type RuntimeCommand struct {
 	AutoOnPrompt bool   `yaml:"auto_on_prompt"`
 }
 
+// Pillar2Dir describes one configured surface for Pillar 2 residue hunting.
+// Each entry allows independent control over which files under that path
+// should be considered potential crumb candidates (via the files glob list).
+//
+// P1 authority rule (enforced by internal/policy.Classifier, not here):
+// Any file that matches an active pillar1.sources.env env_file_patterns under
+// a P1 project_root is *never* treated as a P2 crumb, even if it matches a
+// dirs[].files pattern. Pillar 1 has priority and authority over Pillar 2.
+type Pillar2Dir struct {
+	Path  string   `yaml:"path" json:"path"`
+	Files []string `yaml:"files,omitempty" json:"files,omitempty"`
+}
+
 // Pillar2Config holds settings for Pillar 2 "Crumbs" (illegitimate secret residue hunter).
-// v1: only enabled + target_dirs are required; detectors are fixed and always-on when enabled.
+// The only supported shape is the dirs[] array. Each dir can declare its own
+// files[] patterns so different surfaces (Downloads vs a dev tree, etc.) can
+// have completely different "what counts as a crumb here" policies.
+//
+// P1 authority rule (enforced by internal/policy.Classifier):
+// Anything claimed by an active Pillar 1 env source via env_file_patterns
+// is off-limits to Pillar 2.
 type Pillar2Config struct {
-	Enabled                 bool     `yaml:"enabled"`
-	TargetDirs              []string `yaml:"target_dirs,omitempty"`
-	FlagSuspiciousFilenames bool     `yaml:"flag_suspicious_filenames,omitempty"`
+	Enabled bool         `yaml:"enabled"`
+	Dirs    []Pillar2Dir `yaml:"dirs,omitempty"`
 }
 
 // Pillar4Config groups the runtime hygiene commands (Pillar 4).
@@ -99,11 +117,17 @@ type SourceConfig struct {
 // EnvOptions holds the effective (typed) configuration for the "env" logical source
 // under pillar1.sources.env.options. This is the single source of truth after the
 // removal of the legacy top-level project_roots / skip_dirs / ignore_files fields.
+//
+// EnvFilePatterns is the positive list of file globs (e.g. ".env*", ".env.local",
+// ".private", ".secret", ".pk", ".cert") that this source claims as its authoritative
+// on-disk secret containers. This is the declaration of "P1 authority".
+// When empty after normalization, legacy default [".env*"] behavior is used for compat.
 type EnvOptions struct {
-	ProjectRoots   []string `json:"project_roots,omitempty"`
-	SkipDirs       []string `json:"skip_dirs,omitempty"`
-	IgnoreFiles    []string `json:"ignore_files,omitempty"`
-	IgnorePatterns []string `json:"ignore_patterns,omitempty"`
+	ProjectRoots    []string `json:"project_roots,omitempty"`
+	SkipDirs        []string `json:"skip_dirs,omitempty"`
+	IgnoreFiles     []string `json:"ignore_files,omitempty"`
+	IgnorePatterns  []string `json:"ignore_patterns,omitempty"`
+	EnvFilePatterns []string `json:"env_file_patterns,omitempty"`
 }
 
 // BitwardenOptions holds configuration specific to the "bitwarden" logical source.
@@ -159,9 +183,13 @@ func DefaultConfig() *Config {
 			},
 		},
 		Pillar2: Pillar2Config{
-			Enabled:                 false,
-			TargetDirs:              []string{"~/Downloads", "~/Documents", "~/Desktop"},
-			FlagSuspiciousFilenames: true,
+			Enabled: false,
+			// Default surfaces (new dirs[] shape only)
+			Dirs: []Pillar2Dir{
+				{Path: "~/Downloads", Files: []string{"**/*"}},
+				{Path: "~/Documents", Files: []string{"**/*"}},
+				{Path: "~/Desktop", Files: []string{"**/*"}},
+			},
 		},
 		// Pillar3 has no settings yet — struct{} keeps the key order visible if marshaled.
 		Pillar3: struct{}{},
@@ -201,12 +229,10 @@ func Load() (cfg *Config, configPath string, err error) {
 		return nil, configPath, err
 	}
 
-	// Pillar 2 (residue hunter) — fill sensible defaults if the user only partially
-	// populated the block (enabled:false + empty target_dirs is common).
-	if !cfg.Pillar2.Enabled && len(cfg.Pillar2.TargetDirs) == 0 {
+	// Pillar 2 — fill sensible defaults if the user only partially populated the block.
+	if !cfg.Pillar2.Enabled && len(cfg.Pillar2.Dirs) == 0 {
 		def := DefaultConfig().Pillar2
-		cfg.Pillar2.TargetDirs = def.TargetDirs
-		cfg.Pillar2.FlagSuspiciousFilenames = def.FlagSuspiciousFilenames
+		cfg.Pillar2.Dirs = def.Dirs
 	}
 
 	// Pillar 1 logical sources: ensure the map exists and both known v1 sources
@@ -238,7 +264,7 @@ func normalizePillar1Sources(cfg *Config) {
 		}
 
 		// Normalize common list fields and ensure they are never nil slices.
-		for _, key := range []string{"project_roots", "skip_dirs", "ignore_files", "ignore_patterns"} {
+		for _, key := range []string{"project_roots", "skip_dirs", "ignore_files", "ignore_patterns", "env_file_patterns"} {
 			if raw, exists := src.Options[key]; exists && raw != nil {
 				normalized := normalizeStringList(raw)
 				src.Options[key] = normalized // always set, even if empty
@@ -307,10 +333,11 @@ func (c *Config) GetSourceIgnorePatterns(sourceName string) []string {
 func (c *Config) GetEnvOptions() EnvOptions {
 	if c == nil {
 		return EnvOptions{
-			ProjectRoots:   []string{},
-			SkipDirs:       []string{},
-			IgnoreFiles:    []string{},
-			IgnorePatterns: []string{},
+			ProjectRoots:    []string{},
+			SkipDirs:        []string{},
+			IgnoreFiles:     []string{},
+			IgnorePatterns:  []string{},
+			EnvFilePatterns: []string{},
 		}
 	}
 
@@ -331,6 +358,7 @@ func (c *Config) GetEnvOptions() EnvOptions {
 				opts.IgnoreFiles = v
 			}
 			opts.IgnorePatterns = normalizeStringList(envSrc.Options["ignore_patterns"])
+			opts.EnvFilePatterns = normalizeStringList(envSrc.Options["env_file_patterns"])
 		}
 	}
 
@@ -349,6 +377,9 @@ func (c *Config) GetEnvOptions() EnvOptions {
 	}
 	if opts.IgnorePatterns == nil {
 		opts.IgnorePatterns = []string{}
+	}
+	if opts.EnvFilePatterns == nil {
+		opts.EnvFilePatterns = []string{}
 	}
 
 	return opts

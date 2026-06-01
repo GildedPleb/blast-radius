@@ -14,14 +14,20 @@ Blast Radius is a local, hash-only tool for secret exposure reduction. It has co
 
 **Current pillars (per idiomatic_pillars.md):**
 
-- **Pillar 1**: Legitimate Secret Discovery — ✅ Core complete
+- **Pillar 1**: Legitimate Secret Discovery — ✅ Core complete + env_file_patterns authority model
   - Key filtering for non-secrets (Phase 1)
   - Improved ignore engine (Phase 2)
   - High-quality manual `rescan` (Phase 3 — deliberate design choice; fsnotify reactivity permanently out of scope for security reasons)
   - Logical layer with explicit sources: `env` + hard-coded `bitwarden` (Phase 4)
   - Both sources participate in rescan, duplicates, and status via the collector model
-  - Full documentation and example config updated
-- **Pillar 2**: Illegitimate Secret Residue ("Crumbs") — ✅ **v1 implemented** (`blastradius crumbs`). Scans user-configured high-risk dirs (Downloads/Documents/Desktop + opt-in) for vault exports + high-entropy residue using fixed detectors + registry cross-check. On-demand only. Full stages 2-6 remain for complete pillar (see pillar2-implementation-plan.md).
+  - `env_file_patterns` (positive include list) added under pillar1.sources.env.options — this is the declaration of P1 authority that Pillar 2 must respect.
+  - Full documentation and example config updated (P1 precedence rule documented loudly)
+- **Pillar 2**: Illegitimate Secret Residue ("Crumbs") — ✅ **v1 + Coordination Foundation (Stage 1.5)**
+  `blastradius crumbs`. Only supported config shape is `pillar2.dirs[]` + per-dir `files[]` (per-surface control).
+  Internal `policy.Classifier` enforces "Pillar 1 has authority and priority over Pillar 2".
+  The three user stories work correctly; P1-claimed containers are never reported as crumbs.
+  No new CLI or status surfaces. Full stages 2-6 remain.
+  See pillar2-implementation-plan.md and the loud docs in config.example.yaml.
 - **Pillar 3**: History Hygiene (`scrub-history`) — ✅ Implemented
 - **Pillar 4**: Runtime Environment Hygiene (`env` / user-defined commands) — ✅ Implemented
 - **Pillar 5**: Clipboard Hygiene (`clipboard`) — ✅ Implemented (auto-clear timer not yet built)
@@ -32,15 +38,15 @@ The system remains strictly **hash-only, minimal-metadata, local-only** with saf
 
 ## Completed Work
 
-| Area                                     | Status             | Key Deliverables                                                                                                                                                                    |
-| ---------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Foundations (Phase 0)                    | ✅ Complete        | Singleton daemon, Unix socket (0600), CLI coordinator, config system, invariants                                                                                                    |
-| Discovery + Registry (Pillar 1)          | ✅ Complete        | Recursive `.env*` scanning, SHA-256 hashing, ignore engine, pruning, opaque ProjectIDs, duplicates detection                                                                        |
-| Zsh HUD                                  | ✅ Complete        | Thin prompt segment + status wrappers (no capture hooks)                                                                                                                            |
-| History Hygiene (Pillar 3)               | ✅ Complete        | `scrub-history` command + daemon handler                                                                                                                                            |
-| Runtime Hygiene (Pillar 4)               | ✅ Complete        | `env` command, extensible `pillar4.commands` in config                                                                                                                              |
-| Clipboard Hygiene (Pillar 5)             | ✅ Complete        | `clipboard` status/check/clear (macOS)                                                                                                                                              |
-| Redaction/Recorder Pillar                | ❌ **Removed**     | Entire `recorder/` package, protection mode, `redact [N]`, per-TTY sockets, sealed windows, and all supporting code/docs deleted                                                    |
+| Area                                     | Status             | Key Deliverables                                                                                                                                                             |
+| ---------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Foundations (Phase 0)                    | ✅ Complete        | Singleton daemon, Unix socket (0600), CLI coordinator, config system, invariants                                                                                             |
+| Discovery + Registry (Pillar 1)          | ✅ Complete        | Recursive `.env*` scanning, SHA-256 hashing, ignore engine, pruning, opaque ProjectIDs, duplicates detection                                                                 |
+| Zsh HUD                                  | ✅ Complete        | Thin prompt segment + status wrappers (no capture hooks)                                                                                                                     |
+| History Hygiene (Pillar 3)               | ✅ Complete        | `scrub-history` command + daemon handler                                                                                                                                     |
+| Runtime Hygiene (Pillar 4)               | ✅ Complete        | `env` command, extensible `pillar4.commands` in config                                                                                                                       |
+| Clipboard Hygiene (Pillar 5)             | ✅ Complete        | `clipboard` status/check/clear (macOS)                                                                                                                                       |
+| Redaction/Recorder Pillar                | ❌ **Removed**     | Entire `recorder/` package, protection mode, `redact [N]`, per-TTY sockets, sealed windows, and all supporting code/docs deleted                                             |
 | Pillar 2 (Illegitimate Residue / Crumbs) | ✅ **v1 complete** | `crumbs` command + `residue` package (detector + manager) + daemon handler + status integration. Config section `pillar2`. See implementation plan for remaining stages 2-6. |
 
 ---
@@ -132,7 +138,7 @@ Zsh integration (source `zsh/blastradius.zsh`):
 
 - **Pillar 1**: Key filtering for non-secret .env keys (via `pillar1.sources.env.options.ignore_patterns` under the logical layer) and collector-based rescan for sources (env + bitwarden) are complete.
 - **Pillar 1 reactivity**: Full filesystem reactivity (`fsnotify` / automatic rescan on file changes) is **deliberately not implemented** and is permanently out of scope. The security surface area and complexity were judged to outweigh the benefits. On-demand manual `rescan` (plus initial discovery at daemon start) is the supported and intentional mechanism.
-- **Pillar 2 (Crumbs)**: v1 shipped (on-demand `crumbs`, fixed detectors for exports + entropy, status summary, opt-in config under `pillar2`). Remaining required stages (hunt_residue patterns inside target_dirs, materialization roots expansion, git accident detection, background scheduling, Zsh HUD) are documented in `docs/pillars/pillar2-implementation-plan.md` and the historical design doc `residue_hunter_scoped.md`.
+- **Pillar 2 (Crumbs)**: v1 + Coordination/Authority Foundation shipped (only `dirs[]` + per-dir `files[]` shape, P1 authority enforced by internal Classifier, three user stories supported). Old flat `target_dirs` shape has been removed (alpha software). Remaining stages 2-6 still documented as required. The P1-precedence rule is the explicit foundation for safe future expansion.
 - History scrubbing supports Zsh only.
 - No editor / AI prompt integration.
 - Clipboard auto-clear timer (Pillar 5) is declared in config but not yet implemented.
@@ -167,9 +173,10 @@ Config: `~/.config/blastradius/config.yaml` (see `config.example.yaml`)
 
 ---
 
-## Philosophy (Unchanged)
+## Philosophy
 
 - YAGNI + KISS + Earn Your Abstractions
+- Code is for humans
 - Eliminate attack surface
 - Hash-only by construction
 - Minimal metadata

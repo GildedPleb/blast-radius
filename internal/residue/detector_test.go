@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
@@ -30,7 +29,8 @@ func TestComputeEntropy(t *testing.T) {
 }
 
 func TestFilenameHeuristic(t *testing.T) {
-	cfg := config.Pillar2Config{FlagSuspiciousFilenames: true}
+	// After removal of flag_suspicious_filenames, only the always-on
+	// high-risk export/credential name patterns are detected here.
 	cases := []struct {
 		name string
 		want bool
@@ -40,13 +40,35 @@ func TestFilenameHeuristic(t *testing.T) {
 		{"secrets.txt", true},
 		{"cat.jpg", false},
 		{"report.pdf", false},
-		{"vimrc.swp", true},
-		{".zshrc~", true},
+		// Editor residue patterns (.swp, ~, .bak etc.) are no longer
+		// auto-detected via global flag. Users should express them
+		// explicitly via dirs[].files[] patterns if desired.
+		{"project.swp", false}, // no longer auto-detected
+		{"data~", false},
 	}
 	for _, c := range cases {
-		got, _ := FilenameHeuristic(c.name, cfg)
+		got, _ := FilenameHeuristic(c.name)
 		if got != c.want {
 			t.Errorf("FilenameHeuristic(%s) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// Test that the remaining always-on high-risk name patterns still work
+// (this is the behavior users are expected to get via explicit files[] patterns now).
+func TestFilenameHeuristic_AlwaysOnPatterns(t *testing.T) {
+	cases := []string{
+		"bitwarden_export.json",
+		"my_passwords.csv",
+		"aws_secrets.txt",
+		"vault_export_2025.1pif",
+		"creds_backup.json", // still matches because of "creds"
+		"old.env.backup",
+	}
+
+	for _, name := range cases {
+		if ok, _ := FilenameHeuristic(name); !ok {
+			t.Errorf("FilenameHeuristic(%q) should still return true for high-risk names", name)
 		}
 	}
 }
@@ -100,8 +122,7 @@ func TestScanFile_Synthetic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := config.Pillar2Config{Enabled: true, FlagSuspiciousFilenames: true}
-	finding, err := ScanFile(f, cfg, reg)
+	finding, err := ScanFile(f, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +147,7 @@ func TestScanFile_IgnoresLargeBinary(t *testing.T) {
 	if err := os.WriteFile(f, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Pillar2Config{Enabled: true}
-	finding, _ := ScanFile(f, cfg, registry.New())
+	finding, _ := ScanFile(f, registry.New())
 	if finding != nil {
 		t.Error("should skip large file")
 	}
@@ -137,8 +157,7 @@ func TestScanFile_RespectsModTimeAndSize(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "creds.json")
 	os.WriteFile(f, []byte(`{"password":"x"}`), 0600)
-	cfg := config.Pillar2Config{Enabled: true, FlagSuspiciousFilenames: true}
-	finding, _ := ScanFile(f, cfg, registry.New())
+	finding, _ := ScanFile(f, registry.New())
 	if finding == nil {
 		t.Fatal("expected at least name-based hit")
 	}
@@ -216,8 +235,7 @@ func TestScanFile_NoFinding(t *testing.T) {
 	f := filepath.Join(dir, "normal.txt")
 	os.WriteFile(f, []byte("just some boring low entropy text here"), 0600)
 
-	cfg := config.Pillar2Config{Enabled: true}
-	finding, _ := ScanFile(f, cfg, registry.New())
+	finding, _ := ScanFile(f, registry.New())
 	if finding != nil {
 		t.Error("expected no finding for boring file")
 	}
@@ -229,9 +247,8 @@ func TestScanFile_GenericHighEntropy(t *testing.T) {
 	content := "randomhighentropystringthatislongenoughAKIAIOSFODNN7EXAMPLESECRETKEYXYZ123"
 	os.WriteFile(f, []byte(content), 0600)
 
-	cfg := config.Pillar2Config{Enabled: true}
 	// We just want to execute the ScanFile path; finding or not is secondary for coverage.
-	_, _ = ScanFile(f, cfg, registry.New())
+	_, _ = ScanFile(f, registry.New())
 }
 
 // Extra cheap direct tests for remaining ~80% detector/ScanFile branches.
@@ -253,8 +270,7 @@ func TestScanFile_BinarySkip(t *testing.T) {
 	f := filepath.Join(dir, "image.png")
 	// PNG magic bytes should trigger isLikelyBinary skip
 	os.WriteFile(f, []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}, 0600)
-	cfg := config.Pillar2Config{Enabled: true}
-	finding, _ := ScanFile(f, cfg, registry.New())
+	finding, _ := ScanFile(f, registry.New())
 	if finding != nil {
 		t.Error("expected binary skip")
 	}
@@ -264,8 +280,7 @@ func TestScanFile_LowEntropyNoFinding(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "boring.txt")
 	os.WriteFile(f, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), 0600) // very low entropy
-	cfg := config.Pillar2Config{Enabled: true}
-	finding, _ := ScanFile(f, cfg, registry.New())
+	finding, _ := ScanFile(f, registry.New())
 	if finding != nil {
 		t.Error("expected no finding for low entropy")
 	}
@@ -276,8 +291,7 @@ func TestScanFile_LargeButUnderLimit(t *testing.T) {
 	f := filepath.Join(dir, "medium.json")
 	content := `{"password":"` + string(make([]byte, 500)) + `"}`
 	os.WriteFile(f, []byte(content), 0600)
-	cfg := config.Pillar2Config{Enabled: true}
-	_, _ = ScanFile(f, cfg, registry.New())
+	_, _ = ScanFile(f, registry.New())
 }
 
 // More direct cheap branches in ScanFile
@@ -285,8 +299,7 @@ func TestScanFile_ZeroSize(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "empty.txt")
 	os.WriteFile(f, []byte{}, 0600)
-	cfg := config.Pillar2Config{Enabled: true}
-	finding, _ := ScanFile(f, cfg, registry.New())
+	finding, _ := ScanFile(f, registry.New())
 	if finding != nil {
 		t.Error("expected skip for zero size")
 	}
@@ -294,8 +307,7 @@ func TestScanFile_ZeroSize(t *testing.T) {
 
 func TestScanFile_Directory(t *testing.T) {
 	dir := t.TempDir()
-	cfg := config.Pillar2Config{Enabled: true}
-	finding, _ := ScanFile(dir, cfg, registry.New())
+	finding, _ := ScanFile(dir, registry.New())
 	if finding != nil {
 		t.Error("expected nil for directory")
 	}
@@ -353,26 +365,16 @@ func TestSafeLocation_MoreBranches(t *testing.T) {
 	_ = SafeLocation("/")
 }
 
-func TestFilenameHeuristic_EditorBackups(t *testing.T) {
-	cfg := config.Pillar2Config{FlagSuspiciousFilenames: true}
-	if ok, _ := FilenameHeuristic("foo.txt~", cfg); !ok {
-		t.Error("~ backup")
-	}
-	if ok, _ := FilenameHeuristic(".#lockfile", cfg); !ok {
-		t.Error(".# emacs")
-	}
-	if ok, _ := FilenameHeuristic("data_backup.json", cfg); !ok {
-		t.Error("_backup")
-	}
-}
+// Editor/backup residue patterns (swp, ~, .bak, etc.) are no longer
+// auto-detected by a global flag. Users who want this behavior should
+// express it explicitly using dirs[].files[] patterns (see config.example.yaml).
 
 // Additional ScanFile coverage for previously weak branches (keep decisions, confidence, format+name combinations).
 func TestScanFile_SuspiciousNameOnly(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "passwords_export.txt") // triggers FilenameHeuristic
 	os.WriteFile(f, []byte("some=normaldata\n"), 0600)
-	cfg := config.Pillar2Config{Enabled: true, FlagSuspiciousFilenames: true}
-	finding, _ := ScanFile(f, cfg, registry.New())
+	finding, _ := ScanFile(f, registry.New())
 	if finding == nil {
 		t.Error("expected finding from suspicious filename alone")
 	}
@@ -392,8 +394,7 @@ func TestScanFile_KnownMatchInGeneric(t *testing.T) {
 	f := filepath.Join(dir, "creds_backup.txt")
 	os.WriteFile(f, []byte("junk\n"+secret+"\nmorejunk\n"), 0600)
 
-	cfg := config.Pillar2Config{Enabled: true, FlagSuspiciousFilenames: true}
-	finding, _ := ScanFile(f, cfg, reg)
+	finding, _ := ScanFile(f, reg)
 	if finding == nil {
 		t.Fatal("expected finding when registry has known match")
 	}
@@ -412,8 +413,7 @@ func TestScanFile_FormatMatchZeroEntropy(t *testing.T) {
 	content := `{"encrypted":false,"items":[{"login":{"password":"short"}}]}`
 	os.WriteFile(f, []byte(content), 0600)
 
-	cfg := config.Pillar2Config{Enabled: true}
-	finding, _ := ScanFile(f, cfg, registry.New())
+	finding, _ := ScanFile(f, registry.New())
 	if finding == nil {
 		t.Error("expected finding for known format even with low entropy")
 	}
@@ -424,8 +424,7 @@ func TestScanFile_LowConfidencePath(t *testing.T) {
 	f := filepath.Join(dir, "generic_highent.txt")
 	// High entropy but not enough to pass generic threshold, no name heuristic, no known
 	os.WriteFile(f, []byte("mediumentropystringhere123"), 0600)
-	cfg := config.Pillar2Config{Enabled: true}
-	finding, _ := ScanFile(f, cfg, registry.New())
+	finding, _ := ScanFile(f, registry.New())
 	// With current thresholds this may or may not produce a finding; we just want the code path exercised
 	_ = finding
 }

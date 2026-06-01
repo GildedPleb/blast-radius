@@ -30,7 +30,9 @@ Ship the scoped vault-export + generic high-entropy detector limited to user-con
 
 ### Pillar 2 Full Completion Stages (must be documented + tracked)
 
-1. **Stage 1 (this plan — v1 "Crumbs")** — Vault export formats + generic high-entropy inside the narrow `target_dirs` surface. On-demand `crumbs` command. Status summary. (Current work.)
+1. **Stage 1 (v1 "Crumbs")** — Vault export formats + generic high-entropy. On-demand `crumbs` command. (Completed.)
+
+**Stage 1.5 (Coordination / Authority Foundation)** — `pillar1.sources.env.options.env_file_patterns` (P1 authority declaration), the only supported Pillar 2 shape `pillar2.dirs[]` + per-dir `files[]` (per-surface control), and internal `policy.Classifier` that enforces "Pillar 1 has priority and authority over Pillar 2". The three user stories are first-class behavior. The old flat `target_dirs` shape has been removed (this is still alpha). No new CLI or status surfaces. This foundation makes safe expansion in Stages 2–3 possible. The precedence rule is documented loudly in config.example.yaml.
 2. **Stage 2** — Add `hunt_residue: true` support *inside the same target_dirs*: editor swap/backup patterns (`*.swp`, `*.swo`, `*~`, `.#*`, `*_backup*`, crash dumps, etc.) + lower-entropy threshold for smaller residue blobs. Still advisory only.
 3. **Stage 3** — Expand the scanning surface to the *realistic materialization locations* identified in the design doc (project directories + `/tmp` + `~/tmp` + `~/.cache` + `~/Library/Logs` + git working-tree/reflog/stash). This may require a second config section (e.g. `residue_hunter.materialization_roots` or reuse `project_roots` + well-known temp dirs) and/or a combined "residue + materialization" scan mode.
 4. **Stage 4 (optional but powerful)** — Lightweight git accident detection (reflog + stash + uncommitted) tied to project roots, plus bounded recent-commit gitleaks-style checks (opt-in).
@@ -105,7 +107,8 @@ pillar2:
     - "~/Documents"
     - "~/Desktop"
     # user additions allowed (e.g. "~/backups", mounted volumes when present)
-  flag_suspicious_filenames: true   # filename patterns that strongly suggest secret dumps (always-on when enabled)
+  # (flag_suspicious_filenames removed during alpha cleanup.
+  #  The equivalent behavior is now achieved via explicit files[] patterns on specific dirs.)
   # min_high_entropy_hits: 3        # (optional for v1; can be a hard-coded sensible default inside the detector)
   # max_file_size_mb: 10            # (recommended safety bound, hard-coded or simple config)
 ```

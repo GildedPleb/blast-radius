@@ -13,7 +13,7 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Pillar1.Sources) == 0 || len(cfg.Pillar4.Commands) == 0 {
 		t.Error("defaults missing required pillar fields")
 	}
-	if !cfg.Pillar2.FlagSuspiciousFilenames || len(cfg.Pillar2.TargetDirs) == 0 {
+	if len(cfg.Pillar2.Dirs) == 0 {
 		t.Error("pillar2 defaults not populated")
 	}
 	if cfg.Pillar5.ClearSeconds == 0 {
@@ -116,8 +116,8 @@ func TestLoad_PartialResidueConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	// Should have filled in defaults for TargetDirs etc.
-	if len(cfg.Pillar2.TargetDirs) == 0 {
+	// Should have filled in defaults for Dirs (the only supported shape).
+	if len(cfg.Pillar2.Dirs) == 0 {
 		t.Error("expected pillar2 defaults to be populated on partial config")
 	}
 }
@@ -250,7 +250,7 @@ func TestLoad_ResidueDefaults(t *testing.T) {
 	userHomeDir = func() (string, error) { return dir, nil }
 	// yaml with pillar2 enabled:false + empty targets (triggers fill)
 	osReadFile = func(name string) ([]byte, error) {
-		return []byte("pillar2:\n  enabled: false\n  target_dirs: []\n"), nil
+		return []byte("pillar2:\n  enabled: false\n"), nil
 	}
 	cfg, _, err := Load()
 	if err != nil {
@@ -258,8 +258,8 @@ func TestLoad_ResidueDefaults(t *testing.T) {
 	}
 	// socket path is a hard-coded invariant and no longer appears in user config
 
-	if len(cfg.Pillar2.TargetDirs) == 0 {
-		t.Error("expected pillar2 target dirs filled from defaults")
+	if len(cfg.Pillar2.Dirs) == 0 {
+		t.Error("expected pillar2 dirs filled from defaults")
 	}
 	if cfg.Pillar2.Enabled {
 		t.Error("enabled should be false from yaml")

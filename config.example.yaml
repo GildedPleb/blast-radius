@@ -93,6 +93,25 @@ pillar1:
         #
         # This is the primary defense against false positives in your
         # legitimate secret registry. Keep this list aggressive.
+
+        # env_file_patterns (POSITIVE INCLUDE LIST — P1 authority declaration)
+        # List the exact file globs you consider legitimate secret containers
+        # for this env source. Only files matching these patterns under the
+        # project_roots will have their secrets collected into the registry.
+        #
+        # Default (when omitted or empty) = [".env*"] for full backward compat.
+        #
+        # Examples:
+        #   env_file_patterns:
+        #     - ".env.local"
+        #     - ".env.*.local"
+        #     - ".private"
+        #     - ".secret"
+        #     - ".pk"
+        #     - ".cert"
+        #
+        # These patterns define what Pillar 1 "owns". Pillar 2 will never
+        # report a matching file as a crumb (P1 has priority and authority).
         ignore_patterns:
           - "PATH"
           - "HOME"
@@ -172,19 +191,77 @@ pillar1:
 
 pillar2:
   enabled: false                 # opt-in (recommended: true once you trust it)
-  target_dirs:
-    - "~/Downloads"
-    - "~/Documents"
-    - "~/Desktop"
-    # Add any other locations an attacker would look first if they had
-    # your user account (backup volumes, mounted shares, ~/tmp, etc.).
-    # - "~/backups"
-    # - "/Volumes/Archive"
+  # The only supported shape is dirs[] (per-surface control).
+  # Each entry can declare its own files[] patterns so different locations
+  # can have completely different "what counts as a crumb here" rules.
+  #
+  # dirs:
+  #   - path: "~/Downloads"
+  #     # "I want to look for EVERYTHING in Downloads — it doesn't matter what it is."
+  #     files: ["**/*"]
+  #
+  #   - path: "~/dev/myproject"
+  #     # Narrower policy for a dev tree.
+  #     files: ["*/*", "**/debug*", "**/*secret*", "**/*.log"]
+  #
+  #   - path: "~/work"
+  #     files: ["**/*"]   # hunt broadly in this tree too
+  dirs:
+    - path: "~/Downloads"
+      files: ["**/*"]
+    - path: "~/Documents"
+      files: ["**/*"]
+    - path: "~/Desktop"
+      files: ["**/*"]
 
-  flag_suspicious_filenames: true   # catches obvious names even without deep parsing
+    # Example: Surgical "residue only" hunting in Downloads
+    # Instead of blindly scanning the entire Downloads folder (which can be huge and noisy),
+    # you can be very deliberate and only look for known dangerous patterns that frequently
+    # contain leaked secrets. This is the modern replacement for the old global
+    # flag_suspicious_filenames behavior.
+    #
+    # - path: "~/Downloads"
+    #   files:
+    #     # Editor / temp / backup residue (the classic "I left a swap file" cases)
+    #     - "**/*.swp"
+    #     - "**/*.swo"
+    #     - "**/*~"
+    #     - "**/*.bak"
+    #     - "**/*.backup"
+    #     - "**/*.tmp"
+    #     - "**/.*_backup*"
+    #     - "**/.#*"
+    #     # High-risk credential dump names (still very worth catching)
+    #     - "**/*bitwarden*"
+    #     - "**/*password*"
+    #     - "**/*secret*"
+    #     - "**/*creds*"
+    #     - "**/*export*"
+    #     - "**/*vault*"
 
+  # =====================================================================
+  # CRITICAL RULE: PILLAR 1 HAS AUTHORITY OVER PILLAR 2
+  # =====================================================================
+  # Pillar 1 declares its "approved secret containers" via
+  #   pillar1.sources.env.options.env_file_patterns
+  # (e.g. [".env.local", ".env.*.local", ".private", ".secret", ".pk", ".cert"]).
+  #
+  # ANY file that matches those patterns under a P1 project_root is
+  # **off-limits** to Pillar 2. It will never be reported as a crumb,
+  # even if the exact same directory appears in a pillar2.dirs[] entry
+  # with files: ["**/*"].
+  #
+  # This is not a warning. It is automatic, silent, correct behavior.
+  # P1 wins. Always.
+  #
+  # This enables the three supported stories:
+  # 1. P1 and P2 on completely separate directories → no interaction.
+  # 2. P1 env source disabled → P2 can hunt everything under its dirs.
+  # 3. Same directory under both: P1 claims only its listed env patterns;
+  #    P2 sees everything else (source code, debug dumps, wrong-named envs, etc.).
+  #
   # (detectors, entropy thresholds, and size gates are intentionally not
-  #  user-configurable in v1. The job is "fuck you, don't do this.")
+  #  user-configurable. The job is "fuck you, don't do this.")
 
 # ==============================================================================
 # PILLAR 3 — History Hygiene

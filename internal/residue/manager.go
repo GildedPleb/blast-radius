@@ -3,13 +3,15 @@ package residue
 import (
 	"os"
 	"path/filepath"
-	"strings"
+	"sort"
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/discovery"
 	"github.com/GildedPleb/blast-radius/internal/logging"
+	"github.com/GildedPleb/blast-radius/internal/policy"
 	"github.com/GildedPleb/blast-radius/internal/registry"
+	"github.com/GildedPleb/blast-radius/internal/util"
 )
 
 // test hook to control UserHomeDir for fast coverage of len(targets)==0 without walking real home.
@@ -55,17 +57,6 @@ func (m *Manager) RunScan() *ScanResult {
 		return res
 	}
 
-	targets := m.cfg.Pillar2.TargetDirs
-	if len(targets) == 0 {
-		// sensible defaults even if user left the list empty
-		home, _ := userHomeDir()
-		targets = []string{
-			filepath.Join(home, "Downloads"),
-			filepath.Join(home, "Documents"),
-			filepath.Join(home, "Desktop"),
-		}
-	}
-
 	// Reuse the single source of truth for scan hygiene (skip/ignore lists).
 	// These now live under pillar1.sources.env.options after the legacy top-level
 	// fields were removed.
@@ -87,18 +78,22 @@ func (m *Manager) RunScan() *ScanResult {
 	scanned := 0
 	examined := 0
 
-	for _, raw := range targets {
-		expanded := expandPath(raw)
-		abs, err := filepath.Abs(expanded)
-		if err != nil {
-			res.Errors = append(res.Errors, "bad target: "+raw)
-			continue
-		}
+	// Build effective P2 surfaces (new dirs[] preferred; legacy TargetDirs supported for compat).
+	// Each surface carries its own files[] patterns so different locations can have different rules.
+	surfaces := effectiveP2Surfaces(m.cfg.Pillar2)
+
+	// The Classifier is the single source of truth for "P1 authority wins".
+	// It is consulted on every file before we spend time on detection.
+	// This is what makes the three user stories (and "P1 overrides P2") work.
+	classifier := policy.New(m.cfg)
+
+	for _, surf := range surfaces {
+		abs := surf.absDir
 
 		// per-root ignore matcher (reuses discovery logic exactly)
 		ign := discovery.NewIgnoreMatcher(abs, ignoreFiles)
 
-		err = filepath.WalkDir(abs, func(path string, de os.DirEntry, err error) error {
+		walkErr := filepath.WalkDir(abs, func(path string, de os.DirEntry, err error) error {
 			if err != nil {
 				res.Errors = append(res.Errors, path+": "+err.Error())
 				return nil
@@ -119,9 +114,20 @@ func (m *Manager) RunScan() *ScanResult {
 			if ign.ShouldIgnore(path) {
 				return nil
 			}
+
+			// === P1 authority + P2 surface gate (single source of truth) ===
+			// The Classifier already performed the full decision:
+			// - Is this path claimed by an active P1 env source?
+			// - Is this path under a configured P2 surface?
+			// - Does it match that surface's files[] patterns (including broad **/*)?
+			// If ShouldTreatFileAsCrumb returns false, we must skip it.
+			if treat, _ := classifier.ShouldTreatFileAsCrumb(path); !treat {
+				return nil
+			}
+
 			examined++
 
-			finding, scanErr := ScanFile(path, m.cfg.Pillar2, m.reg)
+			finding, scanErr := ScanFile(path, m.reg)
 			if scanErr != nil {
 				// per-file errors are soft
 				res.Errors = append(res.Errors, path+": "+scanErr.Error())
@@ -132,8 +138,8 @@ func (m *Manager) RunScan() *ScanResult {
 			}
 			return nil
 		})
-		if err != nil {
-			res.Errors = append(res.Errors, "walk "+abs+": "+err.Error())
+		if walkErr != nil {
+			res.Errors = append(res.Errors, "walk "+abs+": "+walkErr.Error())
 		}
 	}
 
@@ -146,6 +152,8 @@ func (m *Manager) RunScan() *ScanResult {
 	logging.Printf("Crumbs scan complete: %d findings, %d dirs, %d files, %v", len(res.Findings), scanned, examined, res.Duration)
 	return res
 }
+
+// Note: Only the dirs[] + files[] shape is supported (alpha — old target_dirs shape removed).
 
 // GetLastResult returns the most recent scan (or nil). Does not trigger a new scan.
 func (m *Manager) GetLastResult() *ScanResult {
@@ -184,19 +192,55 @@ func firstFewLocations(findings []ResidueFinding, n int) []string {
 	return out
 }
 
-// expandPath duplicates the tiny helper from discovery/manager.go (KISS per plan —
-// no new internal/util package until 3+ call sites exist).
-func expandPath(path string) string {
-	if path == "~" || path == "~/" {
-		if h := os.Getenv("HOME"); h != "" {
-			return h
-		}
-		return path
-	}
-	if strings.HasPrefix(path, "~/") {
-		if h := os.Getenv("HOME"); h != "" {
-			return filepath.Join(h, path[2:])
-		}
-	}
-	return path
+
+
+// p2Surface is an internal helper representing one configured hunting surface
+// (from the dirs[] shape).
+type p2Surface struct {
+	absDir string
+	files  []string // per-dir file patterns (empty = broad "everything under this dir")
 }
+
+// effectiveP2Surfaces returns the list of directories + their file patterns
+// that Pillar 2 should consider. Only the dirs[] shape is supported
+// (legacy target_dirs was removed in the alpha cleanup).
+//
+// Entries with the same canonical absDir are deduplicated. Their files[]
+// patterns are merged (union) so that overlapping user configuration
+// does not cause duplicate walks or duplicate findings.
+func effectiveP2Surfaces(p2 config.Pillar2Config) []p2Surface {
+	type set map[string]struct{}
+	byDir := make(map[string]set)   // absDir -> set of patterns
+	order := make([]string, 0)      // first-seen order for determinism
+
+	for _, d := range p2.Dirs {
+		if d.Path == "" {
+			continue
+		}
+		abs, err := filepath.Abs(util.ExpandPath(d.Path))
+		if err != nil {
+			continue
+		}
+		if _, seen := byDir[abs]; !seen {
+			order = append(order, abs)
+			byDir[abs] = make(set)
+		}
+		for _, pat := range d.Files {
+			byDir[abs][pat] = struct{}{}
+		}
+	}
+
+	out := make([]p2Surface, 0, len(order))
+	for _, abs := range order {
+		files := make([]string, 0, len(byDir[abs]))
+		for pat := range byDir[abs] {
+			files = append(files, pat)
+		}
+		// Sort for deterministic output (nice for tests and logs)
+		sort.Strings(files)
+		out = append(out, p2Surface{absDir: abs, files: files})
+	}
+	return out
+}
+
+

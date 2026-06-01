@@ -11,9 +11,13 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/registry"
+	"github.com/GildedPleb/blast-radius/internal/util"
 )
 
-// Scanner discovers .env* files, parses them, and populates the registry.
+// Scanner discovers files matching the Pillar 1 env source's configured
+// env_file_patterns (positive include list declaring "these are my authoritative
+// secret containers"), parses them, and populates the registry.
+// Legacy default behavior (no patterns specified) remains ".env*".
 type Scanner struct {
 	registry *registry.Registry
 	cfg      *config.Config
@@ -80,8 +84,9 @@ func (s *Scanner) ScanDirectory(root string) error {
 			return nil
 		}
 
-		// Only process regular files starting with .env
-		if info.Mode().IsRegular() && strings.HasPrefix(filepath.Base(path), ".env") {
+		// Only process regular files that match the configured env file patterns
+		// (Pillar 1 authority declaration). Default is [".env*"] for backward compat.
+		if info.Mode().IsRegular() && s.matchesEnvFile(filepath.Base(path)) {
 			projectDir := filepath.Dir(path)
 			projectID := makeOpaqueProjectID(projectDir)
 			displayName := computeDisplayName(projectDir)
@@ -141,8 +146,9 @@ func (s *Scanner) processEnvFile(path string, projectID registry.ProjectID) erro
 	return scanner.Err()
 }
 
-// CollectEnvHashes performs .env* discovery for the given roots and returns
-// only the hashes (no registration). Used by the logical layer (EnvCollector).
+// CollectEnvHashes performs discovery of files matching the Pillar 1 env
+// source's env_file_patterns for the given roots and returns only the hashes
+// (no registration). Used by the logical layer (EnvCollector).
 func (s *Scanner) CollectEnvHashes(roots []string) ([]registry.SecretHash, error) {
 	var allHashes []registry.SecretHash
 
@@ -203,7 +209,7 @@ func (s *Scanner) collectHashesInDir(root string) ([]registry.SecretHash, error)
 			return nil
 		}
 
-		if info.Mode().IsRegular() && strings.HasPrefix(filepath.Base(path), ".env") {
+		if info.Mode().IsRegular() && s.matchesEnvFile(filepath.Base(path)) {
 			fileHashes, err := s.collectHashesFromFile(path)
 			if err != nil {
 				logging.Printf("Warning: failed to process %s: %v", path, err)
@@ -333,4 +339,23 @@ func computeDisplayName(absDir string) string {
 		return strings.Join(parts[len(parts)-2:], "/")
 	}
 	return parts[len(parts)-1]
+}
+
+// matchesEnvFile returns whether the given basename matches any of the
+// configured env file patterns for the Pillar 1 "env" source (or the
+// legacy default [".env*"] when none are specified).
+//
+// This replaces the previous hardcoded strings.HasPrefix(base, ".env").
+// The patterns come from pillar1.sources.env.options.env_file_patterns —
+// the positive declaration of which on-disk containers are legitimate
+// secret sources (P1 authority).
+func (s *Scanner) matchesEnvFile(base string) bool {
+	if s.cfg == nil {
+		return strings.HasPrefix(base, ".env") // ultra-safe fallback
+	}
+	pats := s.cfg.GetEnvOptions().EnvFilePatterns
+	if len(pats) == 0 {
+		pats = []string{".env*"}
+	}
+	return util.MatchesAnyGlobPattern(base, pats)
 }

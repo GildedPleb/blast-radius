@@ -98,7 +98,7 @@ func (m *Manager) RunInitialDiscovery() {
 	var hadError bool
 	for _, root := range roots {
 		expanded := expandPath(root)
-		logging.Printf("Scanning for .env* files in: %s", expanded)
+		logging.Printf("Scanning for Pillar 1 env file patterns in: %s", expanded)
 		if err := m.scanner.ScanDirectory(expanded); err != nil {
 			logging.Printf("Error during scan of %s: %v", expanded, err)
 			hadError = true

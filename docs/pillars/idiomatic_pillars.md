@@ -89,6 +89,6 @@ On macOS, the clipboard is an extremely high-blast-radius location. This pillar 
 
 This framing makes the system feel coherent:
 
-- Pillar 1 builds the map of the "good" world.
-- Pillar 2 is its dark mirror — it looks for the same secrets (and dangerous high-entropy artifacts) in the "bad" world.
+- Pillar 1 builds the map of the "good" world by explicitly declaring its approved on-disk secret containers (`pillar1.sources.env.options.env_file_patterns`). This declaration is authoritative.
+- Pillar 2 is its dark mirror — it looks for secrets/residue in the "bad" world, but **Pillar 1 has priority and authority**. Anything P1 has claimed is automatically off-limits to P2 (enforced by the internal Classifier; never surfaced as a "conflict" in UX — the rule is documented clearly instead).
 - The other three pillars deal with the common ways secrets escape the good world and how to contain or clean the damage.

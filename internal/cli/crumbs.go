@@ -75,7 +75,7 @@ func RunCrumbs(jsonOutput bool) {
 	if e, ok := resp["files_examined"].(float64); ok {
 		examined = int(e)
 	}
-	fmt.Printf("Scanned %d files across configured target directories.\n", examined)
+	fmt.Printf("Scanned %d files across configured Pillar 2 surfaces.\n", examined)
 	fmt.Println("==================================================")
 	fmt.Println("All detection is advisory. No files are modified automatically.")
 }
