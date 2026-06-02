@@ -62,10 +62,16 @@ func RunClipboard(args []string) {
 			}
 			h := registry.HashValue([]byte(cand))
 			hashHex := fmt.Sprintf("%x", h[:])
-			cmd := fmt.Sprintf("CHECK_HASH %s\n", hashHex)
-			conn.Write([]byte(cmd))
-
-			resp, _ := reader.ReadString('\n')
+			cmdLine := fmt.Sprintf("CHECK_HASH %s\n", hashHex)
+			if _, err := conn.Write([]byte(cmdLine)); err != nil {
+				logging.Printf("RunClipboard: CHECK_HASH write error (candidate %s): %v (count may be incomplete)", hashHex, err)
+				continue
+			}
+			resp, err := reader.ReadString('\n')
+			if err != nil {
+				logging.Printf("RunClipboard: CHECK_HASH read error (candidate %s): %v (count may be incomplete)", hashHex, err)
+				continue
+			}
 			if strings.Contains(resp, `"known":true`) {
 				found++
 			}

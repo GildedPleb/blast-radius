@@ -2,8 +2,11 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -35,7 +38,7 @@ func TestRunEnvCheck(t *testing.T) {
 	// unknown pillar cmd (early return before dial/exec)
 	RunEnvCheck("")
 	RunEnvCheck("default-env")
-	RunEnvCheck("nonexistent-pillar5-command")
+	RunEnvCheck("nonexistent-pillar4-command")
 
 	// valid pillar cmd + exec success + dial fail (override dial to be instant, no 2s timeout)
 	cfgWithCmd := defaultTestConfig()
@@ -114,8 +117,8 @@ func TestRunEnvCheck_HappyPath(t *testing.T) {
 }
 
 // TestRunEnvCheck_DirectExec verifies the hard security invariant:
-// Runtime hygiene commands (Pillar 4 / `pillar4.commands` in config, historically `pillar5_commands`)
-// are always executed via direct argv (never through "sh -c").
+// The Pillar 4 env primitive (commands under `pillar4.commands`) is always
+// executed via direct argv (never through "sh -c").
 // This eliminates shell injection risk from user config.
 func TestRunEnvCheck_DirectExec(t *testing.T) {
 	defer resetTestOverrides(t)
@@ -144,7 +147,7 @@ func TestRunEnvCheck_DirectExec(t *testing.T) {
 		t.Errorf("expected direct exec of 'echo ...', got %q (shell injection risk)", calledWith)
 	}
 	if strings.Contains(calledWith, "sh -c") {
-		t.Error("shell was incorrectly used for a runtime hygiene command (Pillar 4)")
+		t.Error("shell was incorrectly used for the Pillar 4 env primitive")
 	}
 }
 
@@ -203,4 +206,107 @@ func TestRunEnvCheck_AuthReadFailure(t *testing.T) {
 	}
 
 	RunEnvCheck("auth-fail")
+}
+
+// TestRunEnvCheck_CommandFailsButReportsCount exercises the path where the
+// configured command fails (nonzero exit) but still produces output containing
+// secrets. With the fix, candidates are extracted unconditionally, CHECK_HASH
+// queries are performed (if daemon reachable), and the final JSON is an error
+// that *includes* "secrets_found":N so callers see the exposure even for
+// "failing" introspection commands.
+func TestRunEnvCheck_CommandFailsButReportsCount(t *testing.T) {
+	defer resetTestOverrides(t)
+
+	// Use a failing exec that still emits realistic printenv-style output
+	// containing a secret value. CombinedOutput will return non-nil runErr.
+	// Use a value that does not trigger isCommonNoise (avoids "secret"/"password" etc.
+	// substrings for len<20) so the detector actually produces a plausible candidate.
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		return exec.Command("sh", "-c", `printf "PATH=/usr/bin\nREAL=superlonghighentropyvalueABCDEF1234567890\nNORMAL=normal\n"; exit 42`)
+	}
+
+	cfg := defaultTestConfig()
+	cfg.Pillar4.Commands = []config.RuntimeCommand{{Name: "fail-env", Cmd: "printenv"}}
+	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
+
+	// Successful dial + pipe server that will reply to CHECK_HASH.
+	// (Same pattern as HappyPath; because we use a temp socket path from
+	// resetTestOverrides, the .auth read will fail and no AUTH line is sent,
+	// so the server only needs to respond to CHECK_HASH lines.)
+	clientConn, serverConn := net.Pipe()
+	netDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		return clientConn, nil
+	}
+
+	go func() {
+		defer serverConn.Close()
+		reader := bufio.NewReader(serverConn)
+		knownCount := 0
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "CHECK_HASH ") {
+				continue
+			}
+			knownCount++
+			resp := `{"known":false}`
+			if knownCount == 1 {
+				// The REAL_SECRET value should be the first plausible candidate
+				// extracted by the detector from the failing command's output.
+				resp = `{"known":true}`
+			}
+			_, _ = fmt.Fprintf(serverConn, "%s\n", resp)
+		}
+	}()
+
+	// Capture stdout because this test wants to assert the *exact* error JSON
+	// emitted by the runErr path (status=error + secrets_found in it).
+	// We intentionally do not call silenceOutput() for this test (similar to
+	// the dispatch tests in cli_test.go) so the fmt.Printf from RunEnvCheck
+	// goes to our pipe instead of /dev/null.
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	RunEnvCheck("fail-env")
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	out := buf.String()
+
+	// The error path must have been taken (runErr was non-nil) and the count
+	// from the successful CHECK must be included in the JSON.
+	if !strings.Contains(out, `"status":"error"`) {
+		t.Errorf("expected error status in output, got: %q", out)
+	}
+	if !strings.Contains(out, `"command failed: exit status 42"`) {
+		t.Errorf("expected command failed message in output, got: %q", out)
+	}
+	if !strings.Contains(out, `"secrets_found":1`) {
+		t.Errorf("expected secrets_found:1 in error JSON (the REAL_SECRET should have matched), got: %q", out)
+	}
+
+	// Also exercise the dispatch-level unexpected arg handling (nit #10 fix) using
+	// active test overrides. The check is early in Run() before RunEnvCheck, so it
+	// emits the clear error JSON and returns without side effects.
+	{
+		old := os.Stdout
+		r2, w2, _ := os.Pipe()
+		os.Stdout = w2
+		Run([]string{"env", "--foo", "bar"})
+		w2.Close()
+		os.Stdout = old
+		var b2 bytes.Buffer
+		io.Copy(&b2, r2)
+		out2 := b2.String()
+		if !strings.Contains(out2, "unexpected arguments for env") {
+			t.Errorf("expected 'unexpected arguments for env' error JSON from dispatch, got %q", out2)
+		}
+	}
 }

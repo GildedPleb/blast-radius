@@ -29,7 +29,7 @@ Blast Radius is a local, hash-only tool for secret exposure reduction. It has co
   CLI command + status integration shipped in Stage 1; 1.5 added the authority foundation. Full stages 2-6 remain.
   See the 2026 P2 audit notes in the Known Limitations section below, config.example.yaml (loud P1 precedence docs), and [TODO.md](../TODO.md) for the remaining Stages 2–6 (now tracked as individual stories after the detailed plan was retired).
 - **Pillar 3**: History Hygiene (`scrub-history`) — ✅ v1 + major blast-radius gap closed (broad auto-rotated + history_roots discovery, v2 regfp receipts for sustainable incrementality + deterministic rewrite/restore observation, `--full`, multi-artifact runs, full tests). Remaining post-v1 items (fish structured redaction, fake secrets, pillar3 observability in status) tracked in [TODO.md](../TODO.md).
-- **Pillar 4**: Runtime Environment Hygiene (`env` / user-defined commands) — ✅ Implemented
+- **Pillar 4**: Runtime Environment Hygiene (the `env` primitive function call) — ✅ Implemented
 - **Pillar 5**: Clipboard Hygiene (`clipboard`) — ✅ Implemented (auto-clear timer not yet built)
 
 The system remains strictly **hash-only, minimal-metadata, local-only** with safe degradation.
@@ -44,7 +44,7 @@ The system remains strictly **hash-only, minimal-metadata, local-only** with saf
 | Discovery + Registry (Pillar 1)          | ✅ Complete        | Recursive `.env*` scanning, SHA-256 hashing, ignore engine, pruning, opaque ProjectIDs, duplicates detection                                                                 |
 | Zsh HUD                                  | ✅ Complete        | Thin prompt segment + status wrappers (no capture hooks)                                                                                                                     |
 | History Hygiene (Pillar 3)               | ✅ v1 + gap closed | `scrub-history` + broad discovery (rotated siblings + `history_roots`), v2 regfp receipts for incremental + deterministic rewrite/restore detection, `--full`. See TODO for remaining post-v1 items. |
-| Runtime Hygiene (Pillar 4)               | ✅ Complete        | `env` command, extensible `pillar4.commands` in config                                                                                                                       |
+| Runtime Hygiene (Pillar 4)               | ✅ Complete        | `env` primitive function call (runs cmds, searches output, surfaces count only, logs to daemon); `pillar4.commands` + `enabled` |
 | Clipboard Hygiene (Pillar 5)             | ✅ Complete        | `clipboard` status/check/clear (macOS)                                                                                                                                       |
 | Redaction/Recorder Pillar                | ❌ **Removed**     | Entire `recorder/` package, protection mode, `redact [N]`, per-TTY sockets, sealed windows, and all supporting code/docs deleted                                             |
 | Pillar 2 (Illegitimate Residue / Crumbs) | ✅ **v1 complete** | `crumbs` command + `residue` package (detector + manager) + daemon handler + status integration. Config section `pillar2`. See implementation plan for remaining stages 2-6. |
@@ -106,8 +106,9 @@ No `recorder/` package remains.
 **Note on removed configuration options (2026 hardenings):**
 
 - `socket_path` is no longer accepted in `config.yaml` (the path is now a hard-coded invariant).
-- The `shell:` key under the old `pillar5_commands` (now `pillar4.commands`) is no longer accepted. All commands run via direct `exec`.
+- The `shell:` key under the old `pillar5_commands` (now `pillar4.commands`) is no longer accepted. All commands run via direct `exec` (hard invariant of the Pillar 4 primitive).
   Old keys are silently ignored by the YAML parser. Users relying on previous behavior should migrate to wrapper scripts for complex commands and remove the old keys.
+- The `auto_on_prompt` key under `pillar4.commands[].*` was renamed to `enabled` (to reflect that the primitive is the core and auto/prompt wiring is future work). Old keys are ignored; `enabled` defaults to false.
 
 ---
 
@@ -121,7 +122,7 @@ blastradius stop / halt      # Graceful shutdown
 blastradius duplicates       # Pillar 1: cross-project secret duplication
 blastradius crumbs           # Pillar 2: forgotten vault exports & high-entropy residue in high-risk dirs
 blastradius scrub-history    # Pillar 3: scrub known secrets from shell history
-blastradius env [name]       # Pillar 4: run runtime hygiene command (e.g. printenv)
+blastradius env [--json] [name]  # Pillar 4 primitive: run cmd, search output for secrets, report count (no values); --json for prompts
 blastradius clipboard        # Pillar 5: clipboard status / clear (macOS)
 blastradius logs             # View daemon log
 blastradius config           # Basic config surface

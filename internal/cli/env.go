@@ -12,15 +12,19 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
-// RunEnvCheck executes a runtime hygiene command (Pillar 4 / env) and reports any known secrets found.
-// Commands are configured under `pillar4.commands` in config.
+// RunEnvCheck is the Pillar 4 primitive function call.
+// It runs the named command (from pillar4.commands), searches its output
+// content for known secrets (via unified detection + registry), surfaces
+// a count in JSON and logs the result (to daemon log) — without ever
+// showing secret values. --json is accepted by the caller for prompt readers.
+// The function does one thing only; timers/prompt wiring are later.
 func RunEnvCheck(name string) {
 	_ = logging.Init(getDaemonLogPathFn())
 
 	if name == "" {
 		name = "default-env"
 	}
-	logging.Printf("RunEnvCheck: running runtime hygiene command (Pillar 4) %q", name)
+	logging.Printf("RunEnvCheck: running Pillar 4 primitive %q", name)
 
 	cfg, _, err := configLoad()
 	if err != nil {
@@ -38,8 +42,8 @@ func RunEnvCheck(name string) {
 		}
 	}
 	if cmd.Name == "" {
-		logging.Printf("RunEnvCheck: unknown pillar4 command: %s", name)
-		fmt.Printf(`{"status":"error","message":"unknown pillar4 command: %s"}`+"\n", name)
+		logging.Printf("RunEnvCheck: unknown pillar4 primitive command: %s", name)
+		fmt.Printf(`{"status":"error","message":"unknown pillar4 primitive command: %s"}`+"\n", name)
 		return
 	}
 
@@ -47,14 +51,20 @@ func RunEnvCheck(name string) {
 	// This eliminates an entire class of injection and arbitrary execution risks from config.
 	parts := strings.Fields(cmd.Cmd)
 	if len(parts) == 0 {
-		fmt.Printf(`{"status":"error","message":"empty command"}` + "\n")
+		fmt.Printf(`{"status":"error","message":"empty command (pillar4 primitive)"}` + "\n")
 		return
 	}
 	output, runErr := execCommand(parts[0], parts[1:]...).CombinedOutput()
+
+	// Always search the output content (the core job of the Pillar 4 primitive).
+	// Even on nonzero exit the command may have emitted secret material
+	// (common with kubectl, wrappers, etc.). We still want to alert.
+	candidates := detection.NewDetector().ExtractCandidates(output)
+
 	if runErr != nil {
-		logging.Printf("RunEnvCheck: command failed: %v", runErr)
-		fmt.Printf(`{"status":"error","message":"command failed: %v"}`+"\n", runErr)
-		return
+		logging.Printf("RunEnvCheck: command failed: %v (output was still searched)", runErr)
+		// fall through to do the check+count so we can surface secrets_found
+		// even for failing commands, then emit error JSON containing the count.
 	}
 
 	// Send candidate secret values (not whole lines) to daemon for hashing/checking.
@@ -79,23 +89,34 @@ func RunEnvCheck(name string) {
 	// will reject them with the standard auth error. Existing callers treat
 	// any failure here as "daemon not running" which is acceptable.
 
-	candidates := detection.NewDetector().ExtractCandidates(output)
 	found := 0
+	reader := bufio.NewReader(conn)
 	for _, cand := range candidates {
 		if strings.TrimSpace(cand) == "" {
 			continue
 		}
 		h := registry.HashValue([]byte(cand))
 		hashHex := fmt.Sprintf("%x", h[:])
-		cmd := fmt.Sprintf("CHECK_HASH %s\n", hashHex)
-		conn.Write([]byte(cmd))
-		reader := bufio.NewReader(conn)
-		resp, _ := reader.ReadString('\n')
+		cmdLine := fmt.Sprintf("CHECK_HASH %s\n", hashHex)
+		if _, err := conn.Write([]byte(cmdLine)); err != nil {
+			logging.Printf("RunEnvCheck: CHECK_HASH write error (candidate %s): %v (count may be incomplete)", hashHex, err)
+			continue
+		}
+		resp, err := reader.ReadString('\n')
+		if err != nil {
+			logging.Printf("RunEnvCheck: CHECK_HASH read error (candidate %s): %v (count may be incomplete)", hashHex, err)
+			continue
+		}
 		if strings.Contains(resp, `"known":true`) {
 			found++
 		}
 	}
 
 	logging.Printf("RunEnvCheck: command=%s, secrets_found=%d", name, found)
+
+	if runErr != nil {
+		fmt.Printf(`{"status":"error","message":"command failed: %v","secrets_found":%d}`+"\n", runErr, found)
+		return
+	}
 	fmt.Printf(`{"status":"ok","command":"%s","secrets_found":%d}`+"\n", name, found)
 }

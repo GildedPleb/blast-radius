@@ -262,7 +262,7 @@ func ProjectDisplayName(id ProjectID) string {
 }
 
 // IsKnownHashHex checks if a hex-encoded SHA-256 hash is in the registry.
-// Used by runtime hygiene (env) and clipboard checks to query the daemon registry.
+// Used by the Pillar 4 env primitive (and clipboard) to query the daemon registry.
 // Returns false for invalid input.
 func (r *Registry) IsKnownHashHex(hexHash string) bool {
 	if len(hexHash) != 64 {

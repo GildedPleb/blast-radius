@@ -139,7 +139,7 @@ func TestRun_Dispatch(t *testing.T) {
 	})
 
 	t.Run("env-extra", func(t *testing.T) {
-		// unknown pillar command via dispatcher
+		// unknown pillar command via dispatcher (Pillar 4 primitive)
 		Run([]string{"env", "nonexistent-pillar"})
 	})
 }

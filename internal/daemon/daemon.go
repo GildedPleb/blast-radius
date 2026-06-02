@@ -308,7 +308,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	}
 
 	// Auth succeeded — now process commands on this connection (supports
-	// the multi-CHECK_HASH pattern used by the env command).
+	// the multi-CHECK_HASH pattern used by the Pillar 4 env primitive and clipboard).
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {

@@ -396,13 +396,17 @@ pillar3:
 
 # ==============================================================================
 # PILLAR 4 — Runtime Environment Hygiene
-# "Detecting secrets that are currently live in process environments."
+# The primitive function call (`blastradius env [name]`) that runs commands
+# and detects known secrets in their output.
 #
-# Periodically (or on prompt) runs the commands you list here and scans
-# their output for anything that matches the Pillar 1 registry.
+# The function does one thing: exec the configured cmd (direct only), search
+# the output *content* for secrets (via unified detector + P1 registry hashes),
+# surface the count in JSON + log to daemon log. Never shows secret values.
 #
-# The classic use is `printenv`. Also useful for `kubectl get secrets`,
-# `env | grep -i secret`, docker inspect, etc.
+# --json is for prompt/machine readers. That's it.
+#
+# This is the pure primitive. Later (not here) we can invoke it from prompts
+# or wrappers (e.g. every 30s). No timers here.
 #
 # HARD SECURITY INVARIANT:
 # Every command listed here is **always** executed with direct exec
@@ -413,22 +417,22 @@ pillar3:
 #   1. Write a tiny wrapper script you control (e.g. ~/bin/scan-env)
 #   2. Put the absolute (or PATH-resolvable) name of *that script* here.
 #
-# Recommended: keep the first command as "default-env" with auto_on_prompt.
+# `enabled: true` marks commands for future prompt/automation use.
 # ==============================================================================
 
 pillar4:
   commands:
     - name: "default-env"
       cmd: "printenv"
-      auto_on_prompt: true
+      enabled: true
 
     # - name: "k8s-secrets"
     #   cmd: "kubectl get secrets --ignore-not-found -o yaml"
-    #   auto_on_prompt: false
+    #   enabled: false
 
     # - name: "docker-env"
     #   cmd: "/Users/you/bin/scan-docker"   # your wrapper that does the complex stuff
-    #   auto_on_prompt: false
+    #   enabled: false
 
 # ==============================================================================
 # PILLAR 5 — Clipboard Hygiene

@@ -55,15 +55,19 @@ It is a cleanup pillar that operates on the record of past actions.
 
 ## Pillar 4 — Runtime Environment Hygiene
 
-**Detecting secrets that are currently live in process environments.**
+**A primitive function call that runs commands and detects known secrets in their output.**
 
-This pillar periodically (or on prompt) runs user-defined commands (most commonly `printenv`) and scans their output for known secrets. It tells you, right now, whether dangerous material is sitting in your shell or tool environments.
+Pillar 4 lives entirely in the `blastradius env [name]` command. This focused primitive runs the configured command(s) from `pillar4.commands` via direct `exec`, searches the output for known secrets using the unified detector and Pillar 1 registry, surfaces a `secrets_found` count (in JSON), and logs the result to the daemon log — without ever showing secret values.
+
+The `--json` option is supported for prompt and machine reading.
 
 **Hard security invariant**: Commands listed under `pillar4.commands` are always executed via direct `exec` (never through a shell). This eliminates shell metacharacter injection and arbitrary code execution risks from configuration. If you need pipes or complex logic, point at a wrapper script you control.
 
-**Core question it answers**: "What secrets are currently readable by running `printenv` or similar introspection commands?"
+**Core question it answers**: "If I run this introspection command right now, will its output contain any known secrets?"
 
-This is the "can I safely run printenv right now without burning anything?" check.
+Commands carry an `enabled` field for later prompt/periodic wiring. The primitive itself is the whole of Pillar 4; no timers or hooks are included here.
+
+This is the safe "run printenv (or similar) right now without burning anything?" check. The function performs the introspection internally but never leaks material.
 
 ---
 
@@ -79,13 +83,13 @@ On macOS, the clipboard is an extremely high-blast-radius location. This pillar 
 
 ## Summary — The Idiomatic Framing
 
-| Pillar | Idiomatic Name               | Core Job                                      | "Should Be" vs "Should Not Be" |
-| ------ | ---------------------------- | --------------------------------------------- | ------------------------------ |
-| 1      | Legitimate Secret Discovery  | Collect secrets from controlled sources       | Where they _should_ be         |
-| 2      | Illegitimate Residue Hunting | Find secrets in accidental, dangerous places  | Where they _should not_ be     |
-| 3      | History Hygiene              | Remove secrets from command history           | Cleanup of past mistakes       |
-| 4      | Runtime Environment Hygiene  | Detect live secrets in current environments   | "Is it in my shell right now?" |
-| 5      | Clipboard Hygiene            | Limit damage on the highest-risk copy surface | Single dangerous clipboard     |
+| Pillar | Idiomatic Name               | Core Job                                                              | "Should Be" vs "Should Not Be"    |
+| ------ | ---------------------------- | --------------------------------------------------------------------- | --------------------------------- |
+| 1      | Legitimate Secret Discovery  | Collect secrets from controlled sources                               | Where they _should_ be            |
+| 2      | Illegitimate Residue Hunting | Find secrets in accidental, dangerous places                          | Where they _should not_ be        |
+| 3      | History Hygiene              | Remove secrets from command history                                   | Cleanup of past mistakes          |
+| 4      | Runtime Environment Hygiene  | Primitive: run commands + detect known secrets in output (count only) | The `env` introspection primitive |
+| 5      | Clipboard Hygiene            | Limit damage on the highest-risk copy surface                         | Single dangerous clipboard        |
 
 This framing makes the system feel coherent:
 

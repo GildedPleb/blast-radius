@@ -38,25 +38,37 @@ type Config struct {
 	// (zsh, bash, and other common shells per the LCD research in the Pillar 3 plan).
 	Pillar3 Pillar3Config `yaml:"pillar3,omitempty"`
 
-	// Pillar4 configures Runtime Environment Hygiene (commands whose output is scanned
-	// for secrets, most commonly printenv). All commands execute via direct exec only.
+	// Pillar4 configures the commands for the Pillar 4 primitive (the `env`
+	// function call). The primitive runs the cmd via direct exec, searches its
+	// output for known secrets via the unified detector, surfaces a count and
+	// logs to the daemon log (never the secret values). See RuntimeCommand for
+	// the `enabled` field used by future wiring.
 	Pillar4 Pillar4Config `yaml:"pillar4,omitempty"`
 
 	// Pillar5 configures Clipboard Hygiene (macOS auto-clear timer today).
 	Pillar5 Pillar5Config `yaml:"pillar5,omitempty"`
 }
 
-// RuntimeCommand represents a single command whose output should be scanned for secrets
-// (Pillar 4 — Runtime Environment Hygiene).
+// RuntimeCommand represents a single command that the Pillar 4 primitive
+// (`blastradius env [name]`) can run.
+//
+// The primitive (RunEnvCheck) does one thing: exec the cmd (direct only),
+// search its output content via unified detection for known secrets (from P1
+// registry), surface a count + log the result to the daemon log — never
+// showing secret values.
 //
 // Commands are always executed via direct exec (no shell) as a hard security
 // invariant. This prevents shell metacharacter injection and arbitrary command
 // execution from user configuration. If you need pipes or complex logic, point
 // at a wrapper script you control instead of putting shell syntax here.
+//
+// The `enabled` field indicates commands that should be considered for future
+// automation (prompt wiring, periodic callers, etc.). The primitive runs any
+// named command regardless.
 type RuntimeCommand struct {
-	Name         string `yaml:"name"`
-	Cmd          string `yaml:"cmd"`
-	AutoOnPrompt bool   `yaml:"auto_on_prompt"`
+	Name    string `yaml:"name"`
+	Cmd     string `yaml:"cmd"`
+	Enabled bool   `yaml:"enabled"`
 }
 
 // Pillar2Dir describes one configured surface for Pillar 2 residue hunting.
@@ -89,7 +101,8 @@ type Pillar2Config struct {
 	Dirs    []Pillar2Dir `yaml:"dirs,omitempty"`
 }
 
-// Pillar4Config groups the runtime hygiene commands (Pillar 4).
+// Pillar4Config groups the commands available to the Pillar 4 primitive
+// function call (`blastradius env [name]` / RunEnvCheck).
 type Pillar4Config struct {
 	Commands []RuntimeCommand `yaml:"commands,omitempty"`
 }
@@ -223,7 +236,7 @@ func DefaultConfig() *Config {
 		},
 		Pillar4: Pillar4Config{
 			Commands: []RuntimeCommand{
-				{Name: "default-env", Cmd: "printenv", AutoOnPrompt: true},
+				{Name: "default-env", Cmd: "printenv", Enabled: true},
 			},
 		},
 		Pillar5: Pillar5Config{

@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
@@ -70,8 +71,20 @@ func Run(osArgs []string) {
 		RunDaemon()
 	case "env":
 		name := ""
-		if len(tail) > 0 {
-			name = tail[0]
+		unexpected := []string{}
+		for _, t := range tail {
+			if t == "--json" {
+				continue // for prompt/machine reading; RunEnvCheck always emits JSON
+			}
+			if name == "" {
+				name = t
+			} else {
+				unexpected = append(unexpected, t)
+			}
+		}
+		if len(unexpected) > 0 {
+			fmt.Printf(`{"status":"error","message":"unexpected arguments for env: %s"}`+"\n", strings.Join(unexpected, " "))
+			return
 		}
 		RunEnvCheck(name)
 	case "clipboard":

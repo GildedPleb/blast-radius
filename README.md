@@ -74,7 +74,7 @@ See the "Coverage model" section near the top of [Makefile](Makefile) for the (n
 - Local-only communication over Unix domain socket
 - **Hard security invariants** (as of 2026 hardenings):
   - The IPC socket path is **not user-configurable** and always lives at `~/.local/state/blastradius/blastradius.sock` (0700 dir + 0600 socket + capability token auth).
-  - Pillar 5 (`env`) commands are **always executed via direct `exec` with no shell** (`sh -c` is never used). For complex logic, point at a wrapper script you control.
+  - Pillar 4 (`env`) primitive commands are **always executed via direct `exec` with no shell** (`sh -c` is never used). For complex logic, point at a wrapper script you control.
 - Safe degradation on failure
 - Designed with a local attacker in mind (see security review in repo history for the four 2026 hardenings)
 
