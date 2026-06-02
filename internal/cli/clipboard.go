@@ -14,7 +14,7 @@ import (
 
 // RunClipboard handles Pillar 5 clipboard operations (macOS only for v1)
 func RunClipboard(args []string) {
-	_ = logging.Init(logging.DefaultDaemonLogPath())
+	_ = logging.Init(getDaemonLogPathFn())
 
 	if len(args) == 0 {
 		args = []string{"status"}

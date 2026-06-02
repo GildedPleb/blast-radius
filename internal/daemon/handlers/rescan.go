@@ -1,16 +1,10 @@
 package handlers
 
-import (
-	"github.com/GildedPleb/blast-radius/internal/logging"
-)
-
 type RescanHandler struct{}
 
 func (RescanHandler) Name() string { return "RESCAN" }
 
 func (RescanHandler) Handle(_ string, d DaemonContext) (any, error) {
-	logging.Println("Handling RESCAN request (Pillar 1 manual refresh)")
-
 	if err := d.TriggerPillar1Rescan(); err != nil {
 		return map[string]any{
 			"status":  "error",

@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"time"
-
-	"github.com/GildedPleb/blast-radius/internal/logging"
 )
 
 type CrumbsHandler struct{}
@@ -11,8 +9,6 @@ type CrumbsHandler struct{}
 func (CrumbsHandler) Name() string { return "CRUMBS" }
 
 func (CrumbsHandler) Handle(_ string, d DaemonContext) (any, error) {
-	logging.Println("Handling CRUMBS request (Pillar 2)")
-
 	res := d.RunCrumbsScan()
 	if res == nil {
 		return map[string]any{

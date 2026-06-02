@@ -33,6 +33,7 @@ func PrintHelp() {
 	fmt.Println("  logs           Show recent daemon log output")
 	fmt.Println("  duplicates     Show secret hashes duplicated across multiple projects (Pillar 1)")
 	fmt.Println("  scrub-history  Scrub shell history of known secret values (Pillar 3)")
+	fmt.Println("                 --mode=delete|redact  --dry-run  --json  --file=PATH")
 	fmt.Println("  env [name]     Run Pillar 4 runtime hygiene check (default: printenv)")
 	fmt.Println("  clipboard      Pillar 5 clipboard status / clear (macOS)")
 	fmt.Println("  crumbs         Pillar 2: locate forgotten vault exports & high-entropy dumps in high-risk dirs")

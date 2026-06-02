@@ -28,7 +28,7 @@ Blast Radius is a local, hash-only tool for secret exposure reduction. It has co
   The three user stories work correctly; P1-claimed containers are never reported as crumbs.
   CLI command + status integration shipped in Stage 1; 1.5 added the authority foundation. Full stages 2-6 remain.
   See the 2026 P2 audit notes in the Known Limitations section below, config.example.yaml (loud P1 precedence docs), and [TODO.md](../TODO.md) for the remaining Stages 2–6 (now tracked as individual stories after the detailed plan was retired).
-- **Pillar 3**: History Hygiene (`scrub-history`) — ✅ Implemented
+- **Pillar 3**: History Hygiene (`scrub-history`) — ✅ v1 + major blast-radius gap closed (broad auto-rotated + history_roots discovery, v2 regfp receipts for sustainable incrementality + deterministic rewrite/restore observation, `--full`, multi-artifact runs, full tests). Remaining post-v1 items (fish structured redaction, fake secrets, pillar3 observability in status) tracked in [TODO.md](../TODO.md).
 - **Pillar 4**: Runtime Environment Hygiene (`env` / user-defined commands) — ✅ Implemented
 - **Pillar 5**: Clipboard Hygiene (`clipboard`) — ✅ Implemented (auto-clear timer not yet built)
 
@@ -43,7 +43,7 @@ The system remains strictly **hash-only, minimal-metadata, local-only** with saf
 | Foundations (Phase 0)                    | ✅ Complete        | Singleton daemon, Unix socket (0600), CLI coordinator, config system, invariants                                                                                             |
 | Discovery + Registry (Pillar 1)          | ✅ Complete        | Recursive `.env*` scanning, SHA-256 hashing, ignore engine, pruning, opaque ProjectIDs, duplicates detection                                                                 |
 | Zsh HUD                                  | ✅ Complete        | Thin prompt segment + status wrappers (no capture hooks)                                                                                                                     |
-| History Hygiene (Pillar 3)               | ✅ Complete        | `scrub-history` command + daemon handler                                                                                                                                     |
+| History Hygiene (Pillar 3)               | ✅ v1 + gap closed | `scrub-history` + broad discovery (rotated siblings + `history_roots`), v2 regfp receipts for incremental + deterministic rewrite/restore detection, `--full`. See TODO for remaining post-v1 items. |
 | Runtime Hygiene (Pillar 4)               | ✅ Complete        | `env` command, extensible `pillar4.commands` in config                                                                                                                       |
 | Clipboard Hygiene (Pillar 5)             | ✅ Complete        | `clipboard` status/check/clear (macOS)                                                                                                                                       |
 | Redaction/Recorder Pillar                | ❌ **Removed**     | Entire `recorder/` package, protection mode, `redact [N]`, per-TTY sockets, sealed windows, and all supporting code/docs deleted                                             |
@@ -138,19 +138,9 @@ Zsh integration (source `zsh/blastradius.zsh`):
 
 - **Pillar 1**: Key filtering for non-secret .env keys (via `pillar1.sources.env.options.ignore_patterns` under the logical layer) and collector-based rescan for sources (env + bitwarden) are complete.
 - **Pillar 1 reactivity**: Full filesystem reactivity (`fsnotify` / automatic rescan on file changes) is **deliberately not implemented** and is permanently out of scope. The security surface area and complexity were judged to outweigh the benefits. On-demand manual `rescan` (plus initial discovery at daemon start) is the supported and intentional mechanism.
-- **Pillar 2 (Crumbs)**: v1 + Coordination/Authority Foundation shipped (only `dirs[]` + per-dir `files[]` shape, P1 authority enforced by internal Classifier, three user stories supported). Old flat `target_dirs` shape has been removed (alpha software). Remaining Stages 2–6 are tracked as individual stories in [TODO.md](../TODO.md) (the detailed implementation plan was retired post-audit). The P1-precedence rule is the explicit foundation for safe future expansion.
-- History scrubbing supports Zsh only.
-
-**P2 Audit Notes (2026 post-refactor review):** A targeted compliance audit against idiomatic_pillars.md and the (now-retired) detailed design documents confirmed that core intent is correctly implemented: scoped high-likelihood hunter, fixed dangerous-artifact detectors (never user-disableable), hash-only known-match path via the shared detection package, privacy-safe names, on-demand only, and especially the non-negotiable "P1 has authority and priority" rule enforced by Classifier (all three user stories pass, P1-claimed files are silently never reported as crumbs). 
-
-Surfaced items were almost entirely maintenance drift from later refactors:
-- The sentence "No new CLI or status surfaces" (previously accurate for pure 1.5 work) has been removed — it contradicted the shipped `crumbs` command + pillar2 status key.
-- Minor duplication remains in residue/detector.go (its own entropy + format detectors) vs the unified internal/detection package (only the known_matches path was migrated). Format classification + "always surface known dangerous artifacts" policy legitimately stays P2-specific; pure counting can be further aligned.
-- `crumbs` command when `pillar2.enabled: false` previously printed the generic "clean" message (no explicit disabled notice). This was addressed to match the documented intent.
-
-The detailed `pillar2-implementation-plan.md` was retired after the audit (it had become heavily outdated post-refactors). Remaining Stages 2–6 are now tracked as individual actionable stories in the top-level [TODO.md](../TODO.md). See the session plan artifact for the full audit record, findings, and verification steps. The implementation (v1 + 1.5) is solid; gaps were documentation + one small UX seam, not missing functionality.
 - No editor / AI prompt integration.
 - Clipboard auto-clear timer (Pillar 5) is declared in config but not yet implemented.
+- **Pillar 3** v1 is complete (modes + dry-run + multi-shell). Deferred post-v1 items (fake secrets spike, fish structured redaction, pillar3 observability in status) are tracked in [TODO.md](../TODO.md).
 
 **Architecture improvement (2026)**: All secret detection across Pillars 2–5 now routes through a single `internal/detection` package with robust candidate extraction (wrappers, context, whitespace fallback, entropy + patterns). This replaced previous naive whole-line/blob or hash-hex-grep approaches. See plan session notes for details.
 

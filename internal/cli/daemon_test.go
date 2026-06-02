@@ -8,7 +8,10 @@ import (
 )
 
 func TestRunDaemon(t *testing.T) {
-	defer resetTestOverrides(t)
+	// Call synchronously (not via defer) so the hermetic overrides for sockets,
+	// config, home, *and* daemon logging path are active during RunDaemon().
+	// Using defer here would apply the resets only after the test body completes.
+	resetTestOverrides(t)
 	restore := silenceOutput()
 	defer restore()
 

@@ -163,5 +163,3 @@ func isBroadP2Surface(patterns []string) bool {
 	}
 	return false
 }
-
-

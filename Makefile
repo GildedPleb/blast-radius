@@ -53,7 +53,7 @@ endif
 # When adding/removing/splitting a package: edit exactly these lines.
 # -----------------------------------------------------------------------------
 
-PACKAGES := cli cmd config daemon handlers detection discovery logging registry residue sources
+PACKAGES := cli cmd config daemon handlers detection discovery logging registry residue sources util
 
 PKG_cli       := ./internal/cli
 PKG_cmd       := ./cmd/blastradius
@@ -66,6 +66,7 @@ PKG_logging   := ./internal/logging
 PKG_registry  := ./internal/registry
 PKG_residue   := ./internal/residue
 PKG_sources   := ./internal/sources
+PKG_util      := ./internal/util
 
 # -----------------------------------------------------------------------------
 # Public targets (what humans and CI actually type)

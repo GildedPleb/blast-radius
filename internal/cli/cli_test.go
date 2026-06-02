@@ -147,7 +147,9 @@ func TestRun_Dispatch(t *testing.T) {
 // TestRealSendDaemonCommand exercises the unmocked path using DI hooks and net.Pipe
 // for deterministic fast coverage of config err, dial err, write/read paths.
 func TestRealSendDaemonCommand(t *testing.T) {
-	defer resetTestOverrides(t)
+	// Synchronous call so overrides are active for the duration of the test body.
+	// Using defer would apply them only after the test completes.
+	resetTestOverrides(t)
 
 	// config load error path
 	configLoad = func() (*config.Config, string, error) {

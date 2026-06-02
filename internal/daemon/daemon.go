@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -46,6 +47,12 @@ var (
 	// authenticateConnection lets pipe-based handler tests bypass the AUTH
 	// requirement while still exercising the real command dispatch logic.
 	authenticateConnection = realAuthenticateConnection
+
+	// GetDaemonLogPathFnForTesting is the exported pointer to the internal
+	// getDaemonLogPathFn seam. Cross-package tests (especially in internal/cli)
+	// use it to force a per-test temp log location so we never touch the real
+	// user's ~/.local/state/blastradius directory. This is essential for hermeticity.
+	GetDaemonLogPathFnForTesting *func() string = &getDaemonLogPathFn
 )
 
 // Daemon represents the background singleton process.
@@ -60,6 +67,12 @@ type Daemon struct {
 	// authToken is the hex capability token written at startup.
 	// All client connections must present it as the first "AUTH ..." line.
 	authToken string
+
+	// mu + busy provide a coarse exclusive guard for long-running mutating
+	// operations (primarily SCRUB_HISTORY) to prevent concurrent mutation of
+	// the same history files via colliding temp names/renames.
+	mu   sync.Mutex
+	busy bool
 }
 
 // New creates a new Daemon instance.
@@ -151,6 +164,33 @@ func (d *Daemon) LastPillar1Rescan() *discovery.RescanResult {
 		return nil
 	}
 	return d.discovery.LastRescanResult()
+}
+
+// Pillar3Config implements the DaemonContext method for the SCRUB_HISTORY handler.
+func (d *Daemon) Pillar3Config() config.Pillar3Config {
+	if d.cfg == nil {
+		// Safe fallback (should never happen in prod)
+		return config.Pillar3Config{Enabled: true, Mode: "delete", RedactPlaceholder: "[REDACTED]"}
+	}
+	return d.cfg.Pillar3
+}
+
+// BeginExclusiveOp implements the DaemonContext method. It provides a simple
+// mutex-based guard so that only one long-running mutating op (scrub etc.) runs
+// at a time. Quick commands (STATUS, PING, etc.) are not serialized.
+func (d *Daemon) BeginExclusiveOp(name string) (func(), bool) {
+	d.mu.Lock()
+	if d.busy {
+		d.mu.Unlock()
+		return func() {}, false
+	}
+	d.busy = true
+	d.mu.Unlock()
+	return func() {
+		d.mu.Lock()
+		d.busy = false
+		d.mu.Unlock()
+	}, true
 }
 
 // Run starts the Unix domain socket server and blocks until shutdown.

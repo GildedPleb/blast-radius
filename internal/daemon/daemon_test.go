@@ -8,6 +8,8 @@ import (
 
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/registry"
+
+	handlers "github.com/GildedPleb/blast-radius/internal/daemon/handlers"
 )
 
 // init forces the AUTH hook to always succeed for the white-box net.Pipe handler tests.
@@ -16,6 +18,12 @@ import (
 func init() {
 	authenticateConnection = func(string, string) bool { return true }
 }
+
+// compile-time assertion: *Daemon must satisfy the DaemonContext interface as
+// declared in the handlers package. This catches divergence between the two
+// copies of the interface (in context.go and handlers/handlers.go) without
+// introducing an import cycle. See review nit #11.
+var _ handlers.DaemonContext = (*Daemon)(nil)
 
 func TestNewDaemon(t *testing.T) {
 	cfg := config.DefaultConfig()

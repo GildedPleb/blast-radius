@@ -10,7 +10,7 @@ import (
 
 // RunStart explicitly starts the daemon in the background.
 func RunStart() {
-	_ = logging.Init(logging.DefaultDaemonLogPath())
+	_ = logging.Init(getDaemonLogPathFn())
 
 	_, configPath, err := configLoad()
 	if err != nil {

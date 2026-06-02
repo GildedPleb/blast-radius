@@ -11,7 +11,7 @@ import (
 
 // RunDaemon is the internal entrypoint for the background daemon process.
 func RunDaemon() {
-	_ = logging.Init(logging.DefaultDaemonLogPath())
+	_ = logging.Init(getDaemonLogPathFn())
 
 	cfg, _, err := configLoad()
 	if err != nil {

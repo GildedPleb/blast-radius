@@ -322,20 +322,77 @@ pillar2:
 
 # ==============================================================================
 # PILLAR 3 — History Hygiene
-# "Removing secrets from places where they accumulated over time."
+# "Removing secrets from places where they accumulated over time through normal use."
 #
-# Scrubs known secrets (from the Pillar 1 registry) out of your shell
-# history (zsh today). Run via `blastradius scrub-history`.
+# This is a *reactive cleanup* pillar. It operates on the historical record
+# (shell history files) after secrets have already appeared in commands.
+# It is deliberately NOT a PTY redaction layer
 #
-# Currently has no user-configurable surface — it just works on the
-# registry that Pillar 1 already built.
+# CONFIG (current surface):
+#   enabled: true|false
+#   mode: "delete" | "redact"
+#   redact_placeholder: "[REDACTED]"   # or any string you prefer (e.g. "***")
+#   history_files: []                  # explicit extra absolute paths (ALL are processed)
+#   history_roots: []                  # additional base dirs searched for LCD names
+#                                      # + their common rotated/backup siblings
+#                                      # (e.g. .bash_history.1, *.old, *.bak, *.1-9).
+#                                      # Default behavior (empty): just $HOME.
+#                                      # Use this for containers, other user homes,
+#                                      # mounted volumes, etc.
 #
-# Future possibilities (not yet implemented): custom history file paths,
-# additional shells, more aggressive scrubbing policies.
+# Discovery model (addresses the major blast-radius gap):
+#   One `blastradius scrub-history` (no --file) now covers the *full* surface:
+#   - $HISTFILE (if set)
+#   - Built-in LCD live files under each history_root (bash priority + zsh, ksh, fish, etc.)
+#   - Auto-discovered rotated/backup siblings in the *same directories* as the live files
+#     (.bash_history.1, .zsh_history.old, *.bak, *.1 .. *.9, *~ , etc.)
+#   - Everything listed in history_files and history_roots.
+#   This ensures secrets in restorable artifacts (backups, logrotate, dedup/restore)
+#   are actually removed.
+#
+# Incremental model (receipt-driven, durable):
+#   - We plant/append small `# blastradius-scrub-receipt:v2:...:regfp=...`
+#     control lines inside the artifacts we scrub. These are the *deterministic*
+#     signal for "has this file been rewritten/restored/rotated since we last
+#     touched it?" and allow future runs to decide whether reprocessing is
+#     required (especially when the Pillar 1 registry has grown with new secrets).
+#   - When the Pillar 1 registry grows (new secrets), or a receipt is missing/stale,
+#     or content fingerprints diverge, we re-inspect the necessary portions.
+#   - No extra JSON state files on disk. Re-scan logic lives in the daemon.
+#
+# One-shot full work:
+#   `blastradius scrub-history --full` (or --reset) ignores all existing receipts
+#   and forces a complete pass over every discovered artifact. Useful after a
+#   big restore or when you want to be absolutely sure.
+#
+# SECURITY NOTES:
+# - Only secrets already in your Pillar 1 registry are ever scrubbed.
+# - During the scrub pass, candidate values exist transiently in memory
+#   (same model as every other pillar). They are never written anywhere.
+# - Atomic temp-file + 0600 + rename discipline is preserved for all writes.
+#
+# SHELL SUPPORT (LCD + best effort):
+#   bash (~/.bash_history + $HISTFILE) — Tier 1 priority, including rotated siblings
+#   zsh (including EXTENDED_HISTORY format)
+#   tcsh/csh, common ksh variants, fish (line-based best-effort; structured
+#     YAML-ish redaction remains a separate future item)
+#   dash / pure POSIX sh: graceful "no persistent history" handling
+#
+# The previous "only look after the last scrub-history marker in the file" trick
+# is still used (for live append-mostly files) but is now augmented by the
+# registry fingerprint in receipts so we don't miss new secrets in older regions
+# or in rotated copies.
 # ==============================================================================
 
-# pillar3:
-#   # (no settings in v1)
+pillar3:
+  enabled: true
+  mode: "redact"                 # or "delete" for removing whole entries
+  redact_placeholder: "[REDACTED]"
+  # history_roots:                # additional bases for LCD + auto-rotated discovery
+  #   - "/home/otheruser"
+  #   - "/mnt/container/root"
+  # history_files:                # fully explicit outliers (all processed)
+  #   - "/custom/path/to/.weird_history"
 
 # ==============================================================================
 # PILLAR 4 — Runtime Environment Hygiene

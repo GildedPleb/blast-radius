@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/daemon"
 )
 
 // resetTestOverrides installs safe test doubles for the CLI layer.
@@ -42,6 +43,14 @@ func resetTestOverrides(t testing.TB) {
 	sendDaemonCommandFn = realSendDaemonCommand
 	osExit = func(code int) {}                          // silent no-op during tests
 	readAuthTokenForSocket = realReadAuthTokenForSocket // reset to real (tests that need fake override it)
+
+	// Also force the *real* daemon package's logging path (used inside d.Run())
+	// to a per-test temp location. This is required for hermeticity of any test
+	// that constructs a *daemon.Daemon and calls its Run() method.
+	if daemon.GetDaemonLogPathFnForTesting != nil {
+		tmpLog := filepath.Join(t.TempDir(), "daemon.log")
+		*daemon.GetDaemonLogPathFnForTesting = func() string { return tmpLog }
+	}
 }
 
 // mockSendDaemonCommand returns a sendDaemonCommandFn that always returns the given line.

@@ -33,9 +33,10 @@ type Config struct {
 	// dumps in high-risk user directories (Downloads, Documents, Desktop, etc.).
 	Pillar2 Pillar2Config `yaml:"pillar2,omitempty"`
 
-	// Pillar3 (History Hygiene) currently has no user-configurable surface.
-	// Scrubbing uses the registry populated by Pillar 1. Placeholder kept for ordering.
-	Pillar3 struct{} `yaml:"pillar3,omitempty"`
+	// Pillar3 configures History Hygiene (scrub-history command).
+	// Supports configurable redaction modes for cleaning secrets from shell history
+	// (zsh, bash, and other common shells per the LCD research in the Pillar 3 plan).
+	Pillar3 Pillar3Config `yaml:"pillar3,omitempty"`
 
 	// Pillar4 configures Runtime Environment Hygiene (commands whose output is scanned
 	// for secrets, most commonly printenv). All commands execute via direct exec only.
@@ -96,6 +97,24 @@ type Pillar4Config struct {
 // Pillar5Config groups clipboard hygiene settings (Pillar 5).
 type Pillar5Config struct {
 	ClearSeconds int `yaml:"clear_seconds,omitempty"`
+}
+
+// Pillar3Config holds settings for Pillar 3 (History Hygiene).
+// Mode controls redaction strategy: "delete" (remove entire history entry, current default)
+// or "redact" (replace detected secret values in-place with the placeholder, preserving
+// command shape, timestamps in extended zsh format, etc.).
+// HistoryFiles allows fully explicit additional paths (all of them are now processed).
+// HistoryRoots allows additional base directories that will be searched for the
+// built-in LCD history names plus their common rotated/backup siblings
+// (.bash_history.1, *.old, *.bak, etc.). This is the primary mechanism for
+// covering containers, secondary homes, and other restorable locations without
+// listing every file. Defaults to the current user's home.
+type Pillar3Config struct {
+	Enabled           bool     `yaml:"enabled"`
+	Mode              string   `yaml:"mode"`                         // "delete" | "redact"
+	RedactPlaceholder string   `yaml:"redact_placeholder,omitempty"` // e.g. "[REDACTED]"
+	HistoryFiles      []string `yaml:"history_files,omitempty"`      // explicit paths (all processed)
+	HistoryRoots      []string `yaml:"history_roots,omitempty"`      // additional search bases for LCD + auto-rotated
 }
 
 // Pillar1Config configures the logical layer for legitimate secret discovery (Pillar 1).
@@ -195,8 +214,13 @@ func DefaultConfig() *Config {
 				{Path: "~/Desktop", Files: []string{"**/*"}},
 			},
 		},
-		// Pillar3 has no settings yet — struct{} keeps the key order visible if marshaled.
-		Pillar3: struct{}{},
+		Pillar3: Pillar3Config{
+			Enabled:           true,
+			Mode:              "delete",
+			RedactPlaceholder: "[REDACTED]",
+			HistoryFiles:      nil,
+			HistoryRoots:      nil, // discovery treats nil/empty as "use $HOME only"
+		},
 		Pillar4: Pillar4Config{
 			Commands: []RuntimeCommand{
 				{Name: "default-env", Cmd: "printenv", AutoOnPrompt: true},
@@ -238,6 +262,10 @@ func Load() (cfg *Config, configPath string, err error) {
 		def := DefaultConfig().Pillar2
 		cfg.Pillar2.Dirs = def.Dirs
 	}
+
+	// Pillar 3 (History Hygiene) — ensure mode and placeholder have sensible values
+	// even if the user only partially populates the pillar3 block.
+	normalizePillar3(cfg)
 
 	// Pillar 1 logical sources: ensure the map exists and both known v1 sources
 	// have entries. This gives collectors a stable place to look for options
@@ -306,6 +334,37 @@ func normalizeStringList(v any) []string {
 	default:
 		return []string{}
 	}
+}
+
+// normalizePillar3 ensures Pillar3 has safe defaults for Mode and RedactPlaceholder
+// even under partial YAML population. HistoryFiles and HistoryRoots are left
+// exactly as provided (nil or populated); the discovery layer treats nil/empty
+// as "just $HOME only" (plus explicit extras) for backward compat. After Load()
+// these fields may be nil in the returned config.
+func normalizePillar3(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	p := cfg.Pillar3
+	if !p.Enabled {
+		// If disabled, still ensure Mode has a value for any future "status" rendering.
+		if p.Mode == "" {
+			p.Mode = "delete"
+		}
+		cfg.Pillar3 = p
+		return
+	}
+	if p.Mode == "" || (p.Mode != "delete" && p.Mode != "redact") {
+		p.Mode = "delete"
+	}
+	if p.RedactPlaceholder == "" {
+		p.RedactPlaceholder = "[REDACTED]"
+	}
+	// HistoryFiles / HistoryRoots are deliberately *not* forced to non-nil here.
+	// The discovery logic (and docs) treat nil or empty as "use $HOME only"
+	// for backward compat. Callers after Load() may observe nil for these.
+	// (normalizePillar3 still ensures safe Mode/placeholder.)
+	cfg.Pillar3 = p
 }
 
 // GetSourceIgnorePatterns returns the normalized ignore patterns for a named

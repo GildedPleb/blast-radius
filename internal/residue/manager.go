@@ -192,8 +192,6 @@ func firstFewLocations(findings []ResidueFinding, n int) []string {
 	return out
 }
 
-
-
 // p2Surface is an internal helper representing one configured hunting surface
 // (from the dirs[] shape).
 type p2Surface struct {
@@ -210,8 +208,8 @@ type p2Surface struct {
 // does not cause duplicate walks or duplicate findings.
 func effectiveP2Surfaces(p2 config.Pillar2Config) []p2Surface {
 	type set map[string]struct{}
-	byDir := make(map[string]set)   // absDir -> set of patterns
-	order := make([]string, 0)      // first-seen order for determinism
+	byDir := make(map[string]set) // absDir -> set of patterns
+	order := make([]string, 0)    // first-seen order for determinism
 
 	for _, d := range p2.Dirs {
 		if d.Path == "" {
@@ -242,5 +240,3 @@ func effectiveP2Surfaces(p2 config.Pillar2Config) []p2Surface {
 	}
 	return out
 }
-
-

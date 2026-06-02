@@ -407,3 +407,49 @@ func TestGetEnvOptions_Empty(t *testing.T) {
 		t.Errorf("Expected non-nil slices for empty config, got %+v", opts)
 	}
 }
+
+func TestNormalizePillar3(t *testing.T) {
+	// nil config
+	normalizePillar3(nil)
+
+	// disabled + no mode → should default mode
+	cfg := &Config{Pillar3: Pillar3Config{Enabled: false}}
+	normalizePillar3(cfg)
+	if cfg.Pillar3.Mode != "delete" {
+		t.Errorf("disabled empty mode: got %q", cfg.Pillar3.Mode)
+	}
+
+	// enabled + invalid mode → reset to delete
+	cfg = &Config{Pillar3: Pillar3Config{Enabled: true, Mode: "banana"}}
+	normalizePillar3(cfg)
+	if cfg.Pillar3.Mode != "delete" {
+		t.Error("invalid mode should become delete")
+	}
+
+	// enabled + empty placeholder + nil HistoryFiles + nil HistoryRoots
+	// (we no longer force non-nil; discovery + docs treat nil as "use $HOME only")
+	cfg = &Config{Pillar3: Pillar3Config{Enabled: true, Mode: "redact"}}
+	normalizePillar3(cfg)
+	if cfg.Pillar3.RedactPlaceholder != "[REDACTED]" {
+		t.Error("empty placeholder should be defaulted")
+	}
+	if cfg.Pillar3.HistoryFiles != nil {
+		t.Error("HistoryFiles should remain nil (discovery treats nil/empty equivalently)")
+	}
+	if cfg.Pillar3.HistoryRoots != nil {
+		t.Error("HistoryRoots should remain nil (discovery treats nil/empty equivalently)")
+	}
+
+	// fully valid config should be left alone (including HistoryRoots)
+	cfg = &Config{Pillar3: Pillar3Config{
+		Enabled:           true,
+		Mode:              "redact",
+		RedactPlaceholder: "***",
+		HistoryFiles:      []string{"/custom/hist"},
+		HistoryRoots:      []string{"/other/home"},
+	}}
+	normalizePillar3(cfg)
+	if cfg.Pillar3.RedactPlaceholder != "***" || len(cfg.Pillar3.HistoryFiles) != 1 || len(cfg.Pillar3.HistoryRoots) != 1 {
+		t.Error("valid config was mutated")
+	}
+}

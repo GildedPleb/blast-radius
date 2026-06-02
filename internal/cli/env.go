@@ -15,7 +15,7 @@ import (
 // RunEnvCheck executes a runtime hygiene command (Pillar 4 / env) and reports any known secrets found.
 // Commands are configured under `pillar4.commands` in config.
 func RunEnvCheck(name string) {
-	_ = logging.Init(logging.DefaultDaemonLogPath())
+	_ = logging.Init(getDaemonLogPathFn())
 
 	if name == "" {
 		name = "default-env"

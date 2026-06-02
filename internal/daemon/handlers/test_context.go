@@ -3,6 +3,7 @@ package handlers
 import (
 	"time"
 
+	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/discovery"
 	"github.com/GildedPleb/blast-radius/internal/residue"
 )
@@ -18,6 +19,12 @@ type fakeContext struct {
 	shutdown     bool
 	crumbs       map[string]any
 	crumbsResult *residue.ScanResult // used for Pillar 2 (crumbs) handler tests
+
+	// pillar3 allows tests to inject a specific Pillar3Config (for testing
+	// disabled, custom placeholder, HistoryFiles, etc.).
+	// Use SetPillar3Config in tests to set a non-default value.
+	pillar3       config.Pillar3Config
+	hasPillar3Cfg bool
 }
 
 func (f *fakeContext) RegistrySnapshot() any                 { return f.snapshot }
@@ -42,4 +49,28 @@ func (f *fakeContext) Pillar1ScanStatus() map[string]any {
 }
 func (f *fakeContext) LastPillar1Rescan() *discovery.RescanResult {
 	return nil // tests can override if needed
+}
+
+// Pillar3Config returns the injected config if set via SetPillar3Config, otherwise a safe default.
+func (f *fakeContext) Pillar3Config() config.Pillar3Config {
+	if f.hasPillar3Cfg {
+		return f.pillar3
+	}
+	return config.Pillar3Config{
+		Enabled:           true,
+		Mode:              "delete",
+		RedactPlaceholder: "[REDACTED]",
+		HistoryFiles:      nil,
+	}
+}
+
+// BeginExclusiveOp for tests: always succeed (handler tests are single-threaded).
+func (f *fakeContext) BeginExclusiveOp(name string) (func(), bool) {
+	return func() {}, true
+}
+
+// SetPillar3Config is a helper for tests to inject a custom Pillar3Config.
+func (f *fakeContext) SetPillar3Config(c config.Pillar3Config) {
+	f.pillar3 = c
+	f.hasPillar3Cfg = true
 }

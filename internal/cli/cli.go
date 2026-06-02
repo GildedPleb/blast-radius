@@ -57,7 +57,7 @@ func Run(osArgs []string) {
 	case "duplicates":
 		RunDuplicates()
 	case "scrub-history", "scrub_history":
-		RunScrubHistory()
+		RunScrubHistory(tail)
 	case "check-hash":
 		if len(tail) < 1 {
 			fmt.Println(`{"known":false,"error":"missing hash argument"}`)
