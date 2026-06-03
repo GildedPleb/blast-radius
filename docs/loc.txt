@@ -1,0 +1,19 @@
+=== Blast Radius LOC (production *.go only; all _test.go excluded) ===
+
+  PACKAGE       FILES    LINES  FUNCS   STMTS
+  ----------------------------------------------------
+  cli              17     1208     26     360
+  cmd               1       21      2       2
+  config            1      595     12      98
+  daemon            2      824     32     245
+  handlers         11      930     47     237
+  detection         1      443     14     155
+  discovery         3      898     31     295
+  logging           1       46      6      11
+  registry          1      292     19      68
+  residue           4      610     14     217
+  sources           3      305     15      83
+  util              1      111      3      41
+  ----------------------------------------------------
+  TOTAL            46     6283    221    1812
+

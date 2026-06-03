@@ -58,18 +58,24 @@ func RunScrubHistory(tail []string) {
 		fmt.Println("Requesting history scrub (this may take a moment)...")
 	}
 
-	line, err := sendDaemonCommand(daemonCmd)
+	resp, raw, err := parseDaemonResponse(daemonCmd)
 	if err != nil {
+		if raw != "" {
+			// Live daemon but bad JSON payload.
+			if jsonOutput {
+				fmt.Printf(`{"status":"error","message":"bad daemon response","raw":%q}`+"\n", strings.TrimSpace(raw))
+			} else {
+				fmt.Printf("Daemon produced bad response (protocol error?): %s\n", strings.TrimSpace(raw))
+			}
+			return
+		}
 		if jsonOutput {
 			fmt.Println(`{"status":"error","message":"no running daemon"}`)
 		} else {
-			fmt.Println("No running Blast Radius daemon found. Start it with 'blastradius start'.")
+			fmt.Println(daemonNotRunningMsg)
 		}
 		return
 	}
-
-	var resp map[string]any
-	_ = json.Unmarshal([]byte(line), &resp) // best effort; malformed falls to error path
 
 	if jsonOutput {
 		// Emit exactly what the daemon returned (pretty enough for CLI).

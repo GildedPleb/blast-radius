@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
@@ -23,7 +24,8 @@ type Manager struct {
 
 	// projectMeta maps opaque ProjectID -> human friendly display name.
 	// This is the only place that knows the real filesystem location.
-	projectMeta map[registry.ProjectID]string
+	projectMeta   map[registry.ProjectID]string
+	projectMetaMu sync.RWMutex // protects projectMeta (bg RunInitialDiscovery + concurrent STATUS/RESCAN queries)
 
 	lastScan time.Time // time of most recent initial scan or manual rescan
 
@@ -69,14 +71,18 @@ func NewManager(cfg *config.Config, reg *registry.Registry) *Manager {
 
 		// Register a nice display name for the logical source
 		envID := logicalProjectID("env")
+		m.projectMetaMu.Lock()
 		m.projectMeta[envID] = "Environment Files"
+		m.projectMetaMu.Unlock()
 	}
 
 	// Bitwarden collector (skeleton from previous push)
 	if bw := sources.NewBitwardenCollector(cfg); bw.Enabled() {
 		m.collectors = append(m.collectors, bw)
 		bwID := logicalProjectID("bitwarden")
+		m.projectMetaMu.Lock()
 		m.projectMeta[bwID] = "Bitwarden"
+		m.projectMetaMu.Unlock()
 	}
 
 	return m
@@ -157,12 +163,16 @@ func expandPath(path string) string {
 
 // registerProject associates an opaque ID with a display name inside the manager.
 func (m *Manager) registerProject(id registry.ProjectID, displayName string) {
+	m.projectMetaMu.Lock()
 	m.projectMeta[id] = displayName
+	m.projectMetaMu.Unlock()
 }
 
 // GetProjectDisplayName returns a privacy-friendly name for a project.
 // Falls back to a truncated form if not found.
 func (m *Manager) GetProjectDisplayName(id registry.ProjectID) string {
+	m.projectMetaMu.RLock()
+	defer m.projectMetaMu.RUnlock()
 	if name, ok := m.projectMeta[id]; ok && name != "" {
 		return name
 	}

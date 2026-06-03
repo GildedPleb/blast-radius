@@ -9,25 +9,6 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
-func TestComputeEntropy(t *testing.T) {
-	tests := []struct {
-		s    string
-		want float64
-	}{
-		{"", 0},
-		{"aaaa", 0},
-		{"abcd", 2.0},                 // exactly 2 for 4 distinct
-		{"password123", 3.0},          // approximate; just > low
-		{"AKIAIOSFODNN7EXAMPLE", 3.5}, // high enough for our threshold
-	}
-	for _, tc := range tests {
-		got := ComputeEntropy(tc.s)
-		if got < tc.want-0.6 { // loose for float
-			t.Errorf("ComputeEntropy(%q) = %.2f, want >= %.1f", tc.s, got, tc.want)
-		}
-	}
-}
-
 func TestFilenameHeuristic(t *testing.T) {
 	// After removal of flag_suspicious_filenames, only the always-on
 	// high-risk export/credential name patterns are detected here.
@@ -70,16 +51,6 @@ func TestFilenameHeuristic_AlwaysOnPatterns(t *testing.T) {
 		if ok, _ := FilenameHeuristic(name); !ok {
 			t.Errorf("FilenameHeuristic(%q) should still return true for high-risk names", name)
 		}
-	}
-}
-
-func TestExtractHighEntropyStrings(t *testing.T) {
-	data := []byte(`password=AKIAIOSFODNN7EXAMPLESECRETKEY
-token: 0123456789abcdef0123456789abcdef01234567
-normal text here and some base64 ZmFrZVRva2VuVmFsdWVPZlZlcnlMb25nU2VjcmV0S2V5MTIzNDU2Nzg=`)
-	cnt := ExtractHighEntropyStrings(data, 12)
-	if cnt < 1 {
-		t.Errorf("expected >=1 high entropy hits, got %d", cnt)
 	}
 }
 

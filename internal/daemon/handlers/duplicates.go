@@ -6,6 +6,8 @@ type DuplicatesHandler struct{}
 
 func (DuplicatesHandler) Name() string { return "DUPLICATES" }
 
+func init() { Register(DuplicatesHandler{}) }
+
 func (DuplicatesHandler) Handle(_ string, d DaemonContext) (any, error) {
 	dups := d.FindDuplicates()
 	serializable := make([]map[string]any, 0, len(dups))

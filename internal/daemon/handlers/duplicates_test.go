@@ -1,12 +1,17 @@
 package handlers
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/GildedPleb/blast-radius/internal/registry"
+)
 
 func TestDuplicatesHandler(t *testing.T) {
-	hash := [32]byte{0xaa}
+	hash := registry.SecretHash{0xaa}
+	proj := registry.ProjectID("proj1")
 	f := &fakeContext{
-		dups:         map[[32]byte][]string{hash: {"proj1"}},
-		displayNames: map[string]string{"proj1": "myproj"},
+		dups:         map[registry.SecretHash][]registry.ProjectID{hash: {proj}},
+		displayNames: map[registry.ProjectID]string{proj: "myproj"},
 	}
 	h := DuplicatesHandler{}
 	resp, err := h.Handle("", f)

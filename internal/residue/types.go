@@ -45,8 +45,6 @@ const (
 // Default safety limits (hard-coded per v1 plan — no config surface for these).
 const (
 	maxFileSizeBytes = 10 * 1024 * 1024 // 10 MiB
-	minSecretLen     = 8
-	highEntropyMin   = 4.0 // bits/char threshold for "interesting"
 )
 
 // minHighEntropyHitsForGeneric is the hard-coded default for v1 (no config knob).

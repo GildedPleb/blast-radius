@@ -4,6 +4,8 @@ type StatusHandler struct{}
 
 func (StatusHandler) Name() string { return "STATUS" }
 
+func init() { Register(StatusHandler{}) }
+
 func (StatusHandler) Handle(_ string, d DaemonContext) (any, error) {
 	resp := map[string]any{
 		"status":   "ok",

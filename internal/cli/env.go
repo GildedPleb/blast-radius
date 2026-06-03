@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -9,7 +8,6 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/detection"
 	"github.com/GildedPleb/blast-radius/internal/logging"
-	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
 // RunEnvCheck is the Pillar 4 primitive function call.
@@ -71,49 +69,13 @@ func RunEnvCheck(name string) {
 	// Send candidate secret values (not whole lines) to daemon for hashing/checking.
 	// This uses the unified detection logic so that realistic output like
 	// "KEY=supersecretvalue" or "export FOO=..." is correctly handled.
-	socketPath := config.SocketPath()
-	conn, err := netDialTimeout("unix", socketPath, socketConnectTimeout)
+	known, err := batchCheckKnownSecrets(candidates)
 	if err != nil {
 		logging.Println("RunEnvCheck: daemon not running")
 		fmt.Println(`{"status":"error","message":"daemon not running"}`)
 		return
 	}
-	defer conn.Close()
-
-	// Send AUTH handshake (required after 2026 security hardening).
-	// Use the same sibling .auth file as the high-level sendDaemonCommand path.
-	if tokenBytes, readErr := os.ReadFile(socketPath + ".auth"); readErr == nil {
-		authLine := "AUTH " + strings.TrimSpace(string(tokenBytes)) + "\n"
-		if _, werr := conn.Write([]byte(authLine)); werr != nil {
-			logging.Printf("RunEnvCheck: AUTH write error: %v (count may be incomplete)", werr)
-		}
-	}
-	// If we can't read the token we still try the CHECK_HASH lines; the daemon
-	// will reject them with the standard auth error. Existing callers treat
-	// any failure here as "daemon not running" which is acceptable.
-
-	found := 0
-	reader := bufio.NewReader(conn)
-	for _, cand := range candidates {
-		if strings.TrimSpace(cand) == "" {
-			continue
-		}
-		h := registry.HashValue([]byte(cand))
-		hashHex := fmt.Sprintf("%x", h[:])
-		cmdLine := fmt.Sprintf("CHECK_HASH %s\n", hashHex)
-		if _, err := conn.Write([]byte(cmdLine)); err != nil {
-			logging.Printf("RunEnvCheck: CHECK_HASH write error (candidate %s): %v (count may be incomplete)", hashHex, err)
-			continue
-		}
-		resp, err := reader.ReadString('\n')
-		if err != nil {
-			logging.Printf("RunEnvCheck: CHECK_HASH read error (candidate %s): %v (count may be incomplete)", hashHex, err)
-			continue
-		}
-		if strings.Contains(resp, `"known":true`) {
-			found++
-		}
-	}
+	found := len(known)
 
 	logging.Printf("RunEnvCheck: command=%s, secrets_found=%d", name, found)
 

@@ -83,7 +83,7 @@ func TestDaemon_Accessors(t *testing.T) {
 	// exercise the DaemonContext impls / accessors (these were 0% before)
 	_ = d.RegistrySnapshot()
 	_ = d.FindDuplicates()
-	_ = d.GetProjectDisplayName("demo-proj")
+	_ = d.GetProjectDisplayName(registry.ProjectID("demo-proj"))
 	_ = d.IsKnownHashHex("deadbeef") // invalid len -> false path
 	_ = d.AllHashes()
 	_ = d.Now()

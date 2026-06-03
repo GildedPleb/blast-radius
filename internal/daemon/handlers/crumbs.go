@@ -8,6 +8,8 @@ type CrumbsHandler struct{}
 
 func (CrumbsHandler) Name() string { return "CRUMBS" }
 
+func init() { Register(CrumbsHandler{}) }
+
 func (CrumbsHandler) Handle(_ string, d DaemonContext) (any, error) {
 	res := d.RunCrumbsScan()
 	if res == nil {

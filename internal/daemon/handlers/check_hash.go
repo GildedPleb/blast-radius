@@ -6,6 +6,8 @@ type CheckHashHandler struct{}
 
 func (CheckHashHandler) Name() string { return "CHECK_HASH" }
 
+func init() { Register(CheckHashHandler{}) }
+
 func (CheckHashHandler) Handle(args string, d DaemonContext) (any, error) {
 	hashHex := strings.TrimSpace(args)
 	known := d.IsKnownHashHex(hashHex)

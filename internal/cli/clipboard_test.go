@@ -4,14 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
-	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
 func TestRunClipboard(t *testing.T) {
@@ -34,11 +35,13 @@ func TestRunClipboard(t *testing.T) {
 }
 
 // TestRunClipboard_CheckWithSecrets exercises the new candidate-based clipboard
-// checking path (instead of hashing the entire clipboard blob).
+// checking path (instead of hashing the entire clipboard blob). It uses a real
+// net.Pipe + daemon simulator (the sendDaemonCommandFn override is no longer
+// used by the batchCheckKnownSecrets path) and asserts on the emitted JSON.
 func TestRunClipboard_CheckWithSecrets(t *testing.T) {
 	defer resetTestOverrides(t)
-	restore := silenceOutput()
-	defer restore()
+	// Intentionally do not call silenceOutput(): we want to capture the exact
+	// JSON emitted by the "check" path (similar to env_test capture patterns).
 
 	// Simulate pbpaste returning content with a known secret inside a realistic wrapper
 	planted := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567890"
@@ -49,22 +52,52 @@ func TestRunClipboard_CheckWithSecrets(t *testing.T) {
 		return exec.Command("true")
 	}
 
-	// Use a real registry with the secret
-	reg := registry.New()
-	reg.Add(registry.HashValue([]byte(planted)), "testproj")
-
-	// Override sendDaemonCommandFn to simulate daemon responses for CHECK_HASH
-	sendDaemonCommandFn = func(cmd string) (string, error) {
-		if strings.HasPrefix(cmd, "CHECK_HASH ") {
-			hex := strings.TrimPrefix(cmd, "CHECK_HASH ")
-			known := reg.IsKnownHashHex(hex)
-			return fmt.Sprintf(`{"status":"ok","known":%t}`, known), nil
-		}
-		return `{"status":"ok"}`, nil
+	// Set up a pipe so the batch check path exercises the real conn + AUTH/CHECK loop.
+	clientConn, serverConn := net.Pipe()
+	netDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		return clientConn, nil
 	}
 
-	// Run the check path — this now exercises candidate extraction + multiple CHECK_HASH calls
+	// Simulate daemon side: consume AUTH (best-effort) + CHECK_HASH, always reply known:true
+	// for this test (the "known via candidate extraction" story).
+	go func() {
+		defer serverConn.Close()
+		r := bufio.NewReader(serverConn)
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "AUTH ") {
+				continue
+			}
+			if strings.HasPrefix(line, "CHECK_HASH ") {
+				_, _ = fmt.Fprintf(serverConn, "%s\n", `{"status":"ok","known":true}`)
+			}
+		}
+	}()
+
+	// Capture stdout so we can assert the JSON report (secrets_found > 0).
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
 	RunClipboard([]string{"check"})
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	out := buf.String()
+
+	if !strings.Contains(out, `"known":true`) {
+		t.Errorf("expected known:true in check output, got: %q", out)
+	}
+	if !strings.Contains(out, `"secrets_found":1`) {
+		t.Errorf("expected secrets_found:1 (the planted secret should have been reported), got: %q", out)
+	}
 }
 
 // TestRunClipboard_CheckNoCandidates exercises the new early-return path

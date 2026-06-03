@@ -86,11 +86,12 @@ help:
 	@echo "  \033[36mmake clean\033[0m         Remove all artifacts, coverage files, test binaries, caches"
 	@echo ""
 	@echo "  \033[36mmake fmt\033[0m           Check formatting (fails if dirty)"
+	@echo "  \033[36mmake fmt-fix\033[0m       Fixes formatting"
 	@echo "  \033[36mmake vet\033[0m           Run go vet"
 	@echo "  \033[36mmake tidy\033[0m          Run go mod tidy"
+	@echo "  \033[36mmake loc\033[0m           Lines of code (prod only; files/lines/funcs/stmts per package)"
 	@echo "  \033[36mmake check\033[0m         Local safety gate (test + vet + fmt + test-cover)"
-	@echo ""
-	@echo "  See the 'Coverage model' section near the top for the Go toolchain story."
+	@echo "  \033[36mmake check-fix\033[0m     Check but with fmt-fix"
 	@echo ""
 
 ## test: Run the entire test suite (fast, no coverage, 5 s suite timeout)
@@ -177,14 +178,29 @@ _quiet-cover-%: build-coverage-testbin-%
 # Optional developer niceties (cheap + welcoming for day-to-day work)
 # -----------------------------------------------------------------------------
 
-## fmt: Run gofmt and show diffs (fails if the tree is not formatted)
+## fmt: Check formatting + imports (fails if dirty). Requires goimports.
 fmt:
-	@if [ -n "$$(gofmt -l -s .)" ]; then \
-		echo "Formatting issues found:"; \
-		gofmt -l -s -d .; \
+	@command -v goimports >/dev/null 2>&1 || { \
+		echo "goimports is not installed."; \
+		echo "   Run:  go install golang.org/x/tools/cmd/goimports@latest"; \
+		exit 1; \
+	}
+	@if [ -n "$$(goimports -l .)" ]; then \
+		echo "Formatting/import issues found:"; \
+		goimports -l .; \
 		exit 1; \
 	fi
-	@echo "gofmt clean"
+	@echo "goimports clean"
+
+## fmt-fix: Automatically fix formatting and imports. Requires goimports.
+fmt-fix:
+	@command -v goimports >/dev/null 2>&1 || { \
+		echo "goimports is not installed."; \
+		echo "   Run:  go install golang.org/x/tools/cmd/goimports@latest"; \
+		exit 1; \
+	}
+	goimports -l -w .
+	@echo "Formatting and imports fixed"
 
 ## vet: Run go vet over the whole module
 vet:
@@ -195,11 +211,27 @@ tidy:
 	go mod tidy
 	@echo "go mod tidy complete — check 'git diff go.mod go.sum' if you care"
 
+## loc: Report production (non-test) lines of code.
+##      Uses scripts/loc.sh (the single contained implementation, like coverage.sh).
+##      Buckets follow the PACKAGES list exactly. Includes rough func + stmt counts.
+##      Run before/after architectural simplification work to prove measurable reduction.
+##
+##      The report is also written to docs/loc.txt (via LOC_OUT). Keep docs/loc.txt
+##      in git; after changes, `make loc` updates it so `git diff docs/loc.txt` (or
+##      comparing the committed snapshot vs a prior commit's version) shows the
+##      numeric LOC impact.
+loc:
+	@LOC_OUT=docs/loc.txt PACKAGES="$(PACKAGES)" scripts/loc.sh
+
 ## check: Local "am I safe to push?" gate (tests + vet + fmt + the full coverage gate)
 check: test vet fmt test-cover
+	@$(MAKE) loc
 	@echo "All checks passed."
 
-.PHONY: help test build clean cover test-cover ci fmt vet tidy check
+check-fix: fmt-fix
+	@$(MAKE) check
+
+.PHONY: help test build clean cover test-cover ci fmt fmt-fix vet tidy loc check
 # The cover-* and build-coverage-testbin-* targets are provided by pattern
 # rules (they are never literal files on disk). All the difficult coverage
 # collection + gate logic is in scripts/coverage.sh.

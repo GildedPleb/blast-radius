@@ -94,7 +94,7 @@ func TestScrubHistoryHandler_RemovesMatchingLines(t *testing.T) {
 	defer func() { discoverHistoryTargetsFn = origDiscover }()
 
 	ctx := &fakeContext{
-		hashes: [][32]byte{h1, h2},
+		hashes: toSecretHashes(h1, h2),
 	}
 
 	h := ScrubHistoryHandler{}
@@ -140,7 +140,7 @@ func TestScrubHistoryHandler_NoSensitiveLinesFound(t *testing.T) {
 	for i := range unrelated {
 		unrelated[i] = 0x42
 	}
-	ctx := &fakeContext{hashes: [][32]byte{unrelated}}
+	ctx := &fakeContext{hashes: toSecretHashes(unrelated)}
 
 	h := ScrubHistoryHandler{}
 	resp, err := h.Handle("", ctx)
@@ -174,7 +174,7 @@ func TestScrubHistoryHandler_RedactModeViaArgs(t *testing.T) {
 	discoverHistoryTargetsFn = func([]string, []string) []string { return []string{histPath} }
 	defer func() { discoverHistoryTargetsFn = origDiscover }()
 
-	ctx := &fakeContext{hashes: [][32]byte{h}}
+	ctx := &fakeContext{hashes: toSecretHashes(h)}
 
 	hdl := ScrubHistoryHandler{}
 	respIface, err := hdl.Handle("mode=redact", ctx)
@@ -229,7 +229,7 @@ func TestScrubHistoryHandler_ZshExtendedRedactPreservesPrefix(t *testing.T) {
 	discoverHistoryTargetsFn = func([]string, []string) []string { return []string{histPath} }
 	defer func() { discoverHistoryTargetsFn = origDiscover }()
 
-	ctx := &fakeContext{hashes: [][32]byte{h}}
+	ctx := &fakeContext{hashes: toSecretHashes(h)}
 
 	hdl := ScrubHistoryHandler{}
 	_, err := hdl.Handle("mode=redact", ctx)
@@ -257,7 +257,7 @@ func TestScrubHistoryHandler_DryRunDoesNotWrite(t *testing.T) {
 	discoverHistoryTargetsFn = func([]string, []string) []string { return []string{histPath} }
 	defer func() { discoverHistoryTargetsFn = origDiscover }()
 
-	ctx := &fakeContext{hashes: [][32]byte{h}}
+	ctx := &fakeContext{hashes: toSecretHashes(h)}
 
 	hdl := ScrubHistoryHandler{}
 	respIface, err := hdl.Handle("mode=redact dry-run", ctx)
@@ -311,7 +311,7 @@ func TestScrubHistoryHandler_BashPlainRedactAndDelete(t *testing.T) {
 	discoverHistoryTargetsFn = func([]string, []string) []string { return []string{histPath} }
 	defer func() { discoverHistoryTargetsFn = origDiscover }()
 
-	ctx := &fakeContext{hashes: [][32]byte{h}}
+	ctx := &fakeContext{hashes: toSecretHashes(h)}
 
 	hdl := ScrubHistoryHandler{}
 
@@ -389,7 +389,7 @@ func TestScrubHistoryHandler_HistoryFilesFromConfig(t *testing.T) {
 	defer func() { discoverHistoryTargetsFn = origDiscover }()
 
 	ctx := &fakeContext{
-		hashes: [][32]byte{h},
+		hashes: toSecretHashes(h),
 	}
 	ctx.SetPillar3Config(config.Pillar3Config{
 		Enabled:      true,
@@ -450,7 +450,7 @@ func TestScrubHistoryHandler_InvalidModeIgnored(t *testing.T) {
 	discoverHistoryTargetsFn = func([]string, []string) []string { return []string{histPath} }
 	defer func() { discoverHistoryTargetsFn = origDiscover }()
 
-	ctx := &fakeContext{hashes: [][32]byte{h}}
+	ctx := &fakeContext{hashes: toSecretHashes(h)}
 
 	hdl := ScrubHistoryHandler{}
 	// Pass invalid mode — should be ignored and fall back to delete (from config)
@@ -562,7 +562,7 @@ func TestScrubHistoryHandler_EndToEnd_RotatedSibling(t *testing.T) {
 	discoverHistoryTargetsFn = discoverHistoryTargets
 	defer func() { discoverHistoryTargetsFn = origDiscover }()
 
-	ctx := &fakeContext{hashes: [][32]byte{hsh}}
+	ctx := &fakeContext{hashes: toSecretHashes(hsh)}
 
 	hdl := ScrubHistoryHandler{}
 	respIface, err := hdl.Handle("", ctx)
@@ -590,4 +590,16 @@ func TestScrubHistoryHandler_EndToEnd_RotatedSibling(t *testing.T) {
 	if strings.Contains(string(after), secret) {
 		t.Errorf("secret still present in rotated sibling after end-to-end scrub:\n%s", after)
 	}
+}
+
+// toSecretHashes converts raw [32]byte (as commonly written in test data literals)
+// to the typed []registry.SecretHash required by the DaemonContext iface after the
+// type-alignment simplification (removal of conversion glue in daemon accessors).
+// Defined here (in a _test.go) so it does not contribute to production LOC counts.
+func toSecretHashes(raw ...[32]byte) []registry.SecretHash {
+	out := make([]registry.SecretHash, len(raw))
+	for i, b := range raw {
+		out[i] = registry.SecretHash(b)
+	}
+	return out
 }

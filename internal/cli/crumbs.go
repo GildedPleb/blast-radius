@@ -9,15 +9,15 @@ import (
 
 // RunCrumbs queries the daemon for Pillar 2 residue (crumbs) findings.
 func RunCrumbs(jsonOutput bool) {
-	line, err := sendDaemonCommand("CRUMBS")
+	resp, raw, err := parseDaemonResponse("CRUMBS")
 	if err != nil {
-		fmt.Println("No running Blast Radius daemon found. Start it with 'blastradius start'.")
-		return
-	}
-
-	var resp map[string]any
-	if err := json.Unmarshal([]byte(line), &resp); err != nil {
-		fmt.Printf("Failed to parse response: %v\nRaw: %s\n", err, line)
+		if raw != "" {
+			// We received a line from a live daemon but could not parse it as JSON.
+			// This is a protocol error, version skew, or daemon bug — surface it.
+			fmt.Printf("Daemon produced bad response (protocol error?): %s\n", strings.TrimSpace(raw))
+			return
+		}
+		fmt.Println(daemonNotRunningMsg)
 		return
 	}
 
@@ -36,6 +36,9 @@ func RunCrumbs(jsonOutput bool) {
 		fmt.Printf("Crumbs error: %s\n", msg)
 		return
 	}
+
+	// raw is only non-empty on JSON parse failure (handled above); ignore on success path.
+	_ = raw
 
 	total := 0
 	if t, ok := resp["total"].(float64); ok {

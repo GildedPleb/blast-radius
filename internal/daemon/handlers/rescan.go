@@ -4,6 +4,8 @@ type RescanHandler struct{}
 
 func (RescanHandler) Name() string { return "RESCAN" }
 
+func init() { Register(RescanHandler{}) }
+
 func (RescanHandler) Handle(_ string, d DaemonContext) (any, error) {
 	if err := d.TriggerPillar1Rescan(); err != nil {
 		return map[string]any{

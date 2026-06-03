@@ -232,12 +232,12 @@ func TestScrubReceipt_RoundtripAndRewriteDetection(t *testing.T) {
 }
 
 func TestComputeRegistryFingerprint(t *testing.T) {
-	h1 := [32]byte{1}
-	h2 := [32]byte{2}
-	h3 := [32]byte{3}
+	h1 := registry.SecretHash{1}
+	h2 := registry.SecretHash{2}
+	h3 := registry.SecretHash{3}
 
-	fp1 := ComputeRegistryFingerprint([][32]byte{h1, h2})
-	fp2 := ComputeRegistryFingerprint([][32]byte{h2, h1}) // order must not matter
+	fp1 := ComputeRegistryFingerprint([]registry.SecretHash{h1, h2})
+	fp2 := ComputeRegistryFingerprint([]registry.SecretHash{h2, h1}) // order must not matter
 	if fp1 != fp2 || fp1 == "" || fp1 == "0" {
 		t.Errorf("fingerprint must be stable and non-empty, got %q vs %q", fp1, fp2)
 	}
@@ -247,7 +247,7 @@ func TestComputeRegistryFingerprint(t *testing.T) {
 		t.Error("empty set should produce '0'")
 	}
 
-	fp3 := ComputeRegistryFingerprint([][32]byte{h1, h2, h3})
+	fp3 := ComputeRegistryFingerprint([]registry.SecretHash{h1, h2, h3})
 	if fp3 == fp1 {
 		t.Error("different sets should produce different fingerprints")
 	}

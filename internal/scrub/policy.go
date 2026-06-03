@@ -329,7 +329,7 @@ func ShouldReprocess(lines []string, receipt *ScrubReceipt, currentRegFp string)
 // and hashing the concatenation. Only the first 16 hex chars are kept for
 // brevity in the receipt line. The value itself reveals nothing about the
 // underlying secret material.
-func ComputeRegistryFingerprint(hashes [][32]byte) string {
+func ComputeRegistryFingerprint(hashes []registry.SecretHash) string {
 	if len(hashes) == 0 {
 		return "0"
 	}

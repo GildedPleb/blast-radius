@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/logging"
@@ -19,9 +20,10 @@ import (
 // secret containers"), parses them, and populates the registry.
 // Legacy default behavior (no patterns specified) remains ".env*".
 type Scanner struct {
-	registry *registry.Registry
-	cfg      *config.Config
-	ignores  map[string]*IgnoreMatcher // per-root ignore matchers
+	registry  *registry.Registry
+	cfg       *config.Config
+	ignores   map[string]*IgnoreMatcher // per-root ignore matchers
+	ignoresMu sync.RWMutex              // protects ignores map (bg scan vs concurrent rescan/status)
 
 	// onProjectDiscovered is called when we find a new project root during scan.
 	// This allows the Manager to capture display names without the Registry seeing paths.
@@ -37,8 +39,15 @@ func NewScanner(cfg *config.Config, reg *registry.Registry) *Scanner {
 	}
 }
 
-// ScanDirectory recursively scans a directory for .env* files and populates the registry.
-func (s *Scanner) ScanDirectory(root string) error {
+// visitEnvFiles encapsulates the duplicated absRoot + ignore/skip setup +
+// Walk + early SkipDir + ignore + matchesEnvFile logic (previously duplicated
+// between ScanDirectory and collectHashesInDir).
+//
+// Calls onFile exactly once per matching regular env file (after all filters).
+// Per-file errors must be handled inside onFile (logged + swallowed); the
+// callback should return nil to continue the walk (matching prior behavior
+// in both paths). Returns the error from filepath.Walk (if any).
+func (s *Scanner) visitEnvFiles(root string, onFile func(path string) error) error {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -51,11 +60,16 @@ func (s *Scanner) ScanDirectory(root string) error {
 		ignoreFiles = []string{".gitignore", ".blastradiusignore"}
 	}
 
-	// Create or reuse ignore matcher for this root
+	// Create or reuse ignore matcher for this root.
+	// Brief write lock only for the map mutation; the matcher itself is then
+	// used without the lock (walks are CPU/IO bound; concurrent walks for
+	// different roots are fine).
+	s.ignoresMu.Lock()
 	if _, ok := s.ignores[absRoot]; !ok {
 		s.ignores[absRoot] = NewIgnoreMatcher(absRoot, ignoreFiles)
 	}
 	ignore := s.ignores[absRoot]
+	s.ignoresMu.Unlock()
 
 	// Build skipDirs set from config (user can extend/override via config)
 	skipDirs := make(map[string]bool)
@@ -63,12 +77,12 @@ func (s *Scanner) ScanDirectory(root string) error {
 		skipDirs[d] = true
 	}
 
+	// Fast path: skip known heavy/noisy directories early (structure from original ScanDirectory)
 	return filepath.Walk(absRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip problematic paths
 		}
 
-		// Fast path: skip known heavy/noisy directories early
 		if info.IsDir() {
 			base := filepath.Base(path)
 			if skipDirs[base] {
@@ -87,63 +101,42 @@ func (s *Scanner) ScanDirectory(root string) error {
 		// Only process regular files that match the configured env file patterns
 		// (Pillar 1 authority declaration). Default is [".env*"] for backward compat.
 		if info.Mode().IsRegular() && s.matchesEnvFile(filepath.Base(path)) {
-			projectDir := filepath.Dir(path)
-			projectID := makeOpaqueProjectID(projectDir)
-			displayName := computeDisplayName(projectDir)
-
-			if s.onProjectDiscovered != nil {
-				s.onProjectDiscovered(projectID, displayName)
-			}
-
-			if err := s.processEnvFile(path, projectID); err != nil {
-				logging.Printf("Warning: failed to process %s: %v", path, err)
+			if err := onFile(path); err != nil {
+				// onFile is responsible for any logging; we continue
+				// (do not return err here) to match prior Scan+collect behavior.
 			}
 		}
 		return nil
 	})
 }
 
+// ScanDirectory recursively scans a directory for .env* files and populates the registry.
+func (s *Scanner) ScanDirectory(root string) error {
+	return s.visitEnvFiles(root, func(path string) error {
+		projectDir := filepath.Dir(path)
+		projectID := makeOpaqueProjectID(projectDir)
+		displayName := computeDisplayName(projectDir)
+
+		if s.onProjectDiscovered != nil {
+			s.onProjectDiscovered(projectID, displayName)
+		}
+
+		if err := s.processEnvFile(path, projectID); err != nil {
+			logging.Printf("Warning: failed to process %s: %v", path, err)
+		}
+		return nil
+	})
+}
+
 func (s *Scanner) processEnvFile(path string, projectID registry.ProjectID) error {
-	file, err := os.Open(path)
+	hashes, err := s.collectHashesFromFile(path)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		// Split on first '=' only
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-		// Remove surrounding quotes if present
-		value = strings.Trim(value, `"'`)
-
-		if value == "" {
-			continue
-		}
-
-		// Phase 1 key filtering (Pillar 1 logical layer). Patterns come from the
-		// "env" source options (or legacy top-level until full migration).
-		// This is the same engine that will serve bitwarden and future sources.
-		if s.shouldIgnoreKey(key) {
-			continue
-		}
-
-		hash := registry.HashValue([]byte(value))
-		s.registry.Add(hash, projectID)
+	for _, h := range hashes {
+		s.registry.Add(h, projectID)
 	}
-
-	return scanner.Err()
+	return nil
 }
 
 // CollectEnvHashes performs discovery of files matching the Pillar 1 env
@@ -165,61 +158,16 @@ func (s *Scanner) CollectEnvHashes(roots []string) ([]registry.SecretHash, error
 }
 
 func (s *Scanner) collectHashesInDir(root string) ([]registry.SecretHash, error) {
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return nil, err
-	}
-
-	// Reuse ignore + skip logic from ScanDirectory
-	envOpts := s.cfg.GetEnvOptions()
-	ignoreFiles := envOpts.IgnoreFiles
-	if len(ignoreFiles) == 0 {
-		ignoreFiles = []string{".gitignore", ".blastradiusignore"}
-	}
-
-	if _, ok := s.ignores[absRoot]; !ok {
-		s.ignores[absRoot] = NewIgnoreMatcher(absRoot, ignoreFiles)
-	}
-	ignore := s.ignores[absRoot]
-
-	skipDirs := make(map[string]bool)
-	for _, d := range envOpts.SkipDirs {
-		skipDirs[d] = true
-	}
-
 	var hashes []registry.SecretHash
-
-	err = filepath.Walk(absRoot, func(path string, info os.FileInfo, err error) error {
+	err := s.visitEnvFiles(root, func(path string) error {
+		fileHashes, err := s.collectHashesFromFile(path)
 		if err != nil {
+			logging.Printf("Warning: failed to process %s: %v", path, err)
 			return nil
 		}
-
-		if info.IsDir() {
-			base := filepath.Base(path)
-			if skipDirs[base] {
-				return filepath.SkipDir
-			}
-			if ignore.ShouldIgnore(path) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if ignore.ShouldIgnore(path) {
-			return nil
-		}
-
-		if info.Mode().IsRegular() && s.matchesEnvFile(filepath.Base(path)) {
-			fileHashes, err := s.collectHashesFromFile(path)
-			if err != nil {
-				logging.Printf("Warning: failed to process %s: %v", path, err)
-				return nil
-			}
-			hashes = append(hashes, fileHashes...)
-		}
+		hashes = append(hashes, fileHashes...)
 		return nil
 	})
-
 	return hashes, err
 }
 

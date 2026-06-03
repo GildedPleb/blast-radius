@@ -90,7 +90,7 @@ func TestManager_GetProjectDisplayName(t *testing.T) {
 	m := NewManager(cfg, reg)
 
 	// unregistered id hits fallback path
-	fallback := m.GetProjectDisplayName("nonexistent-id-xyz")
+	fallback := m.GetProjectDisplayName(registry.ProjectID("nonexistent-id-xyz"))
 	if fallback == "" {
 		t.Error("fallback should not be empty")
 	}

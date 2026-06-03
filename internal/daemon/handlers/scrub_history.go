@@ -17,6 +17,8 @@ type ScrubHistoryHandler struct{}
 
 func (ScrubHistoryHandler) Name() string { return "SCRUB_HISTORY" }
 
+func init() { Register(ScrubHistoryHandler{}) }
+
 func (ScrubHistoryHandler) Handle(args string, d DaemonContext) (any, error) {
 	cfg := d.Pillar3Config()
 	if !cfg.Enabled {

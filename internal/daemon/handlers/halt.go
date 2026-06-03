@@ -4,6 +4,8 @@ type HaltHandler struct{}
 
 func (HaltHandler) Name() string { return "HALT" }
 
+func init() { Register(HaltHandler{}) }
+
 func (HaltHandler) Handle(_ string, d DaemonContext) (any, error) {
 	d.TriggerShutdown()
 	return map[string]string{

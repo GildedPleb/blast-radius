@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -10,15 +11,13 @@ import (
 // This is the Phase 3 mechanism for keeping the registry fresh.
 // Full fsnotify reactivity is permanently out of scope (security tradeoff).
 func RunRescan(jsonOutput bool) {
-	line, err := sendDaemonCommand("RESCAN")
+	resp, raw, err := parseDaemonResponse("RESCAN")
 	if err != nil {
-		fmt.Println("No running Blast Radius daemon found. Start it with 'blastradius start'.")
-		return
-	}
-
-	var resp map[string]any
-	if err := json.Unmarshal([]byte(line), &resp); err != nil {
-		fmt.Printf("Failed to parse response: %v\nRaw: %s\n", err, line)
+		if raw != "" {
+			fmt.Printf("Daemon produced bad response (protocol error?): %s\n", strings.TrimSpace(raw))
+			return
+		}
+		fmt.Println(daemonNotRunningMsg)
 		return
 	}
 

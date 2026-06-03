@@ -1,21 +1,19 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // RunDuplicates queries the daemon for duplicate secret hashes across projects (Pillar 1).
 func RunDuplicates() {
-	line, err := sendDaemonCommand("DUPLICATES")
+	resp, raw, err := parseDaemonResponse("DUPLICATES")
 	if err != nil {
-		fmt.Println("No running Blast Radius daemon found. Start it with 'blastradius start'.")
-		return
-	}
-
-	var resp map[string]any
-	if err := json.Unmarshal([]byte(line), &resp); err != nil {
-		fmt.Printf("Failed to parse response: %v\nRaw: %s\n", err, line)
+		if raw != "" {
+			fmt.Printf("Daemon produced bad response (protocol error?): %s\n", strings.TrimSpace(raw))
+			return
+		}
+		fmt.Println(daemonNotRunningMsg)
 		return
 	}
 

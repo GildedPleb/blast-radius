@@ -2,10 +2,8 @@ package residue
 
 import (
 	"encoding/json"
-	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -44,49 +42,6 @@ func FilenameHeuristic(name string) (bool, string) {
 	return false, ""
 }
 
-// ComputeEntropy returns Shannon entropy (bits per char) for s.
-func ComputeEntropy(s string) float64 {
-	if len(s) == 0 {
-		return 0
-	}
-	freq := make(map[rune]int)
-	for _, r := range s {
-		freq[r]++
-	}
-	ent := 0.0
-	n := float64(len(s))
-	for _, c := range freq {
-		p := float64(c) / n
-		if p > 0 {
-			ent -= p * math.Log2(p)
-		}
-	}
-	return ent
-}
-
-// highEntropyRegexes catch common high-entropy secret shapes.
-var (
-	reBase64 = regexp.MustCompile(`[A-Za-z0-9+/=]{20,}`)
-	reHex    = regexp.MustCompile(`[0-9a-fA-F]{32,}`)
-	reLong   = regexp.MustCompile(`[A-Za-z0-9._-]{24,}`)
-)
-
-// ExtractHighEntropyStrings scans data for long high-entropy candidates.
-// Returns count of distinct candidates meeting length + entropy gate.
-func ExtractHighEntropyStrings(data []byte, minLen int) int {
-	text := string(data)
-	cands := map[string]bool{}
-
-	for _, re := range []*regexp.Regexp{reBase64, reHex, reLong} {
-		for _, m := range re.FindAllString(text, -1) {
-			if len(m) >= minLen && ComputeEntropy(m) >= highEntropyMin {
-				cands[m] = true
-			}
-		}
-	}
-	return len(cands)
-}
-
 // DetectBitwardenJSON returns (hits, isExport) where hits is count of high-entropy secret values found.
 func DetectBitwardenJSON(data []byte) (int, bool) {
 	var doc map[string]any
@@ -117,7 +72,7 @@ func DetectBitwardenJSON(data []byte) (int, bool) {
 		// login
 		if login, ok := item["login"].(map[string]any); ok {
 			for _, k := range []string{"password", "totp", "username"} {
-				if v, ok := login[k].(string); ok && len(v) >= minSecretLen && ComputeEntropy(v) >= highEntropyMin {
+				if v, ok := login[k].(string); ok && len(v) >= 8 && detection.ComputeEntropy(v) >= 4.0 {
 					hits++
 				}
 			}
@@ -126,7 +81,7 @@ func DetectBitwardenJSON(data []byte) (int, bool) {
 		if fields, ok := item["fields"].([]any); ok {
 			for _, f := range fields {
 				if fm, ok := f.(map[string]any); ok {
-					if v, ok := fm["value"].(string); ok && len(v) >= minSecretLen && ComputeEntropy(v) >= highEntropyMin {
+					if v, ok := fm["value"].(string); ok && len(v) >= 8 && detection.ComputeEntropy(v) >= 4.0 {
 						hits++
 					}
 				}
@@ -134,7 +89,7 @@ func DetectBitwardenJSON(data []byte) (int, bool) {
 		}
 		// notes
 		if notes, ok := item["notes"].(string); ok && len(notes) > 0 {
-			hits += ExtractHighEntropyStrings([]byte(notes), 16)
+			hits += detection.ExtractHighEntropyStrings([]byte(notes), 16, 4.0)
 		}
 	}
 	isExport := len(items) > 0 || doc["encrypted"] != nil
@@ -148,7 +103,7 @@ func DetectBitwardenCSV(data []byte) (int, bool) {
 	if !strings.Contains(lower, "password") || !strings.Contains(lower, "login") {
 		return 0, false
 	}
-	hits := ExtractHighEntropyStrings(data, 12)
+	hits := detection.ExtractHighEntropyStrings(data, 12, 4.0)
 	return hits, hits > 0 || strings.Contains(lower, "bitwarden")
 }
 
@@ -156,7 +111,7 @@ func DetectBitwardenCSV(data []byte) (int, bool) {
 func DetectDashlane(data []byte) (int, bool) {
 	text := strings.ToLower(string(data))
 	if strings.Contains(text, "dashlane") || strings.Contains(text, `"username"`) && strings.Contains(text, `"password"`) {
-		hits := ExtractHighEntropyStrings(data, 12)
+		hits := detection.ExtractHighEntropyStrings(data, 12, 4.0)
 		return hits, hits > 0 || strings.Contains(text, "dashlane")
 	}
 	return 0, false
@@ -166,7 +121,7 @@ func DetectDashlane(data []byte) (int, bool) {
 func DetectOnePassword1pif(data []byte) (int, bool) {
 	text := string(data)
 	if strings.Contains(text, ".1pif") || strings.Contains(strings.ToLower(text), "onepassword") || strings.Contains(text, `"password"`) {
-		hits := ExtractHighEntropyStrings(data, 12)
+		hits := detection.ExtractHighEntropyStrings(data, 12, 4.0)
 		return hits, hits > 0
 	}
 	return 0, false
@@ -239,7 +194,7 @@ func ScanFile(path string, reg *registry.Registry) (*ResidueFinding, error) {
 
 	// Generic high-entropy pass + Dashlane/others fallback
 	if format == "" {
-		entropyHits = ExtractHighEntropyStrings(data, 12)
+		entropyHits = detection.ExtractHighEntropyStrings(data, 12, 4.0)
 		if entropyHits >= minHighEntropyHitsForGeneric {
 			format = FormatGenericHighEnt
 		} else if suspiciousName {
@@ -249,7 +204,7 @@ func ScanFile(path string, reg *registry.Registry) (*ResidueFinding, error) {
 
 	// If we have a format from name heuristic but no entropy yet, still count generic entropy
 	if format == "" && suspiciousName {
-		entropyHits = ExtractHighEntropyStrings(data, 12)
+		entropyHits = detection.ExtractHighEntropyStrings(data, 12, 4.0)
 		format = nameFormat
 	}
 

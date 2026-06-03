@@ -158,29 +158,15 @@ func New(cfg *config.Config, reg *registry.Registry) *Daemon {
 // --- Accessors for handlers (keep Daemon encapsulation) ---
 
 func (d *Daemon) RegistrySnapshot() any { return d.registry.Snapshot() }
-func (d *Daemon) FindDuplicates() map[[32]byte][]string {
-	dups := d.registry.FindDuplicates()
-	out := make(map[[32]byte][]string, len(dups))
-	for h, ps := range dups {
-		strs := make([]string, len(ps))
-		for i, p := range ps {
-			strs[i] = string(p)
-		}
-		out[h] = strs
-	}
-	return out
+func (d *Daemon) FindDuplicates() map[registry.SecretHash][]registry.ProjectID {
+	return d.registry.FindDuplicates()
 }
-func (d *Daemon) GetProjectDisplayName(p string) string {
-	return d.discovery.GetProjectDisplayName(registry.ProjectID(p))
+func (d *Daemon) GetProjectDisplayName(p registry.ProjectID) string {
+	return d.discovery.GetProjectDisplayName(p)
 }
 func (d *Daemon) IsKnownHashHex(h string) bool { return d.registry.IsKnownHashHex(h) }
-func (d *Daemon) AllHashes() [][32]byte {
-	hashes := d.registry.AllHashes()
-	out := make([][32]byte, len(hashes))
-	for i, h := range hashes {
-		out[i] = [32]byte(h)
-	}
-	return out
+func (d *Daemon) AllHashes() []registry.SecretHash {
+	return d.registry.AllHashes()
 }
 func (d *Daemon) Now() time.Time   { return time.Now() }
 func (d *Daemon) TriggerShutdown() { close(d.shutdown) }
@@ -421,27 +407,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			args = parts[1]
 		}
 
-		var handler handlers.CommandHandler
-		switch cmd {
-		case "STATUS":
-			handler = handlers.StatusHandler{}
-		case "PING":
-			handler = handlers.PingHandler{}
-		case "DUPLICATES":
-			handler = handlers.DuplicatesHandler{}
-		case "SCRUB_HISTORY":
-			handler = handlers.ScrubHistoryHandler{}
-		case "CHECK_HASH":
-			handler = handlers.CheckHashHandler{}
-		case "CRUMBS":
-			handler = handlers.CrumbsHandler{}
-		case "RESCAN":
-			handler = handlers.RescanHandler{}
-		case "HALT", "STOP":
-			handler = handlers.HaltHandler{}
-		default:
-			handler = handlers.UnknownHandler{}
-		}
+		handler := handlers.GetHandler(cmd)
 
 		response, _ := handler.Handle(args, d)
 
