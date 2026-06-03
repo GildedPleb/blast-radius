@@ -348,6 +348,21 @@ func TestDetector_KeyAwareJSONExtraction(t *testing.T) {
 	if !found {
 		t.Error("expected to extract secret value from within a JSON array/nested object")
 	}
+
+	// Non-high-value key with plausible secret value: exercises the isPlausibleSecret
+	// path inside extractStructuredCandidates (previously unreachable; high-value keys
+	// take the early-return branch).
+	plainKeyInput := `{"normal_field":"Kx7pQ9mR2vL8nT4wY6zX3cV5bN1mJ0hGfD9sA7pQ4rW2eT6yU8iO3pL5kJ7hG2fD4sA","other":"short"}`
+	cands = d.ExtractCandidates([]byte(plainKeyInput))
+	foundPlain := false
+	for _, c := range cands {
+		if strings.Contains(c, "Kx7pQ9mR2vL8nT4wY6zX3cV5bN1mJ0hGfD9sA7pQ4rW2eT6yU8iO3pL5kJ7hG2fD4sA") {
+			foundPlain = true
+		}
+	}
+	if !foundPlain {
+		t.Error("expected to extract plausible secret from non-high-value JSON key via isPlausibleSecret path")
+	}
 }
 
 // TestDetector_extractValueSide exercises the helper that recovers values
@@ -364,6 +379,7 @@ func TestDetector_extractValueSide(t *testing.T) {
 		{"noequals", "noequals"}, // should be unchanged
 		{"KEY=val=with=equals1234567890", "val=with=equals1234567890"},
 		{"=onlyequals", "onlyequals"}, // after stripping leading = via normalization
+		{"  SPACED =  valwithspaces1234567890  ", "valwithspaces1234567890"}, // exercises trim + side
 	}
 
 	for _, tc := range cases {

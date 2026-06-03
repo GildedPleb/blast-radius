@@ -105,12 +105,13 @@ func TestStartDaemonInBackground_Errors(t *testing.T) {
 		t.Error("expected mkdir error")
 	}
 
-	// open log file error (dir is file)
-	logDirAsFile := filepath.Join(tmp, "logdirfile")
-	_ = os.WriteFile(logDirAsFile, []byte("x"), 0600)
-	getDaemonLogPathFn = func() string { return filepath.Join(logDirAsFile, "d.log") }
+	// open log file error: mkdir succeeds (parent is real dir) but the target log path
+	// itself is an existing directory -> OpenFile(..., O_WRONLY) fails.
+	logAsDir := filepath.Join(tmp, "logasdir")
+	_ = os.Mkdir(logAsDir, 0700)
+	getDaemonLogPathFn = func() string { return logAsDir }
 	if err := startDaemonInBackground(); err == nil {
-		t.Error("expected open log error")
+		t.Error("expected open log error (target is dir)")
 	}
 
 	// cmd.Start error (nonexistent binary)
@@ -134,9 +135,9 @@ func TestRunStart_Errors(t *testing.T) {
 	osExecutable = func() (string, error) { return "/fake", nil }
 	execCommand = func(name string, arg ...string) *exec.Cmd { return exec.Command("true") }
 
-	// config load error -> osExit(1) but no-op; wrap to prevent deref of nil cfg in subsequent lines
+	// config load error -> osExit(1) no-op + explicit return (see RunStart and cli.go osExit contract)
 	configLoad = func() (*config.Config, string, error) { return nil, "", errForTest }
-	func() { defer func() { recover() }(); RunStart() }()
+	RunStart()
 
 	// start daemon error path
 	resetTestOverrides(t)
@@ -145,5 +146,5 @@ func TestRunStart_Errors(t *testing.T) {
 	execCommand = func(name string, arg ...string) *exec.Cmd {
 		return exec.Command("/no/such/exe")
 	}
-	func() { defer func() { recover() }(); RunStart() }()
+	RunStart()
 }

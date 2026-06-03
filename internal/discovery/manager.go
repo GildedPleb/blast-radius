@@ -36,6 +36,14 @@ type Manager struct {
 
 // NewManager creates a DiscoveryManager.
 func NewManager(cfg *config.Config, reg *registry.Registry) *Manager {
+	if reg == nil {
+		// Defensive: registry is required for all scan/rescan paths (Add, Clear,
+		// Count, SetScanState etc). Callers (daemon.New) always pass a fresh one,
+		// but tests or alternate wiring may pass nil; allocate so methods remain
+		// safe and the manager is always usable.
+		reg = registry.New()
+	}
+
 	m := &Manager{
 		registry:    reg,
 		cfg:         cfg,
@@ -76,6 +84,17 @@ func NewManager(cfg *config.Config, reg *registry.Registry) *Manager {
 
 // RunInitialDiscovery performs the first scan on configured roots.
 func (m *Manager) RunInitialDiscovery() {
+	if m.cfg == nil {
+		if m.registry != nil {
+			m.registry.SetScanState(registry.ScanStateCompleted)
+		}
+		return
+	}
+	if m.registry == nil {
+		// Should not happen (NewManager defensively allocates), but keep
+		// the manager methods robust against nil registry.
+		return
+	}
 	// Respect the logical layer: if the "env" source is explicitly disabled,
 	// skip .env* discovery entirely. This is the Phase 1 foundation for
 	// treating .env scanning as one activatable Pillar 1 source among others.
@@ -190,6 +209,25 @@ func (m *Manager) LastRescanResult() *RescanResult {
 // It is safe to call while the daemon is running and is the primary mechanism
 // (Phase 3) for keeping the Pillar 1 registry up to date without a restart.
 func (m *Manager) Rescan() *RescanResult {
+	if m.registry == nil {
+		// Defensive: NewManager guarantees a registry, but tolerate nil input
+		// for robustness (e.g. direct construction in tests or alternate DI).
+		return &RescanResult{
+			Timestamp:        time.Now().UTC(),
+			Errors:           []string{"registry not initialized"},
+			CollectorResults: make(map[string]int),
+		}
+	}
+	if m.cfg == nil {
+		// Can happen in degenerate test setups; still return a usable result
+		// without dereferencing cfg for GetEnvOptions or collector wiring.
+		return &RescanResult{
+			Timestamp:        time.Now().UTC(),
+			Errors:           []string{"configuration not loaded"},
+			CollectorResults: make(map[string]int),
+		}
+	}
+
 	start := time.Now()
 	before := m.registry.Count()
 

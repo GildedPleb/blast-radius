@@ -22,7 +22,8 @@ func SafeLocation(absPath string) string {
 		if len(parts) == 1 {
 			return parts[0]
 		}
-		return filepath.Base(absPath)
+		// len(parts)==0 is unreachable (strings.Split on trimmed home-rel path always yields >=1 elem).
+		// Fall through to the outer Base fallback (behavior for impossible input is not material).
 	}
 	// Fallback for non-home paths (mounted volumes etc.)
 	if strings.HasPrefix(absPath, "/") {

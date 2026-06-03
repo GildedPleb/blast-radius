@@ -20,12 +20,9 @@ func TestRunEnvCheck(t *testing.T) {
 	restore := silenceOutput()
 	defer restore()
 
-	// config error path (wrap to recover post-osExit deref caused by no-op osExit in tests)
+	// config error path (osExit(1) + explicit return; no recover needed, see osExit contract in cli.go)
 	configLoad = func() (*config.Config, string, error) { return nil, "", errForTest }
-	func() {
-		defer func() { recover() }()
-		RunEnvCheck("")
-	}()
+	RunEnvCheck("")
 
 	// reset to good config for remaining
 	resetTestOverrides(t)

@@ -166,3 +166,23 @@ func TestIgnoreMatcher_ComplexPatterns(t *testing.T) {
 		t.Error("*.min.js should be ignored")
 	}
 }
+
+func TestIgnoreMatcher_FallbackSimpleMatch(t *testing.T) {
+	dir := t.TempDir()
+	gitignore := filepath.Join(dir, ".gitignore")
+	_ = os.WriteFile(gitignore, []byte("secret.txt\n*.tmp\n"), 0644)
+
+	m := NewIgnoreMatcher(dir, []string{".gitignore"})
+
+	// Relative (non-absolute) path forces filepath.Rel error path (baseSlashed != targSlashed).
+	// This is the only call site of the old simpleMatch fallback.
+	if !m.ShouldIgnore("secret.txt") {
+		t.Error("fallback simpleMatch should ignore exact 'secret.txt'")
+	}
+	if !m.ShouldIgnore("foo.tmp") {
+		t.Error("fallback simpleMatch should handle *.tmp glob")
+	}
+	if m.ShouldIgnore("keep.txt") {
+		t.Error("unrelated relative name should not be ignored")
+	}
+}

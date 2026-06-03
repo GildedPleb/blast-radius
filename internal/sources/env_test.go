@@ -1,6 +1,7 @@
 package sources
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,13 @@ func TestEnvCollector_GetIgnorePatterns(t *testing.T) {
 }
 
 func TestEnvCollector_Validate(t *testing.T) {
+	t.Run("nil cfg", func(t *testing.T) {
+		c := NewEnvCollector(nil)
+		if err := c.Validate(); err == nil {
+			t.Error("expected error for nil cfg in Validate")
+		}
+	})
+
 	t.Run("disabled source", func(t *testing.T) {
 		cfg := &config.Config{
 			Pillar1: config.Pillar1Config{
@@ -123,6 +131,52 @@ func TestEnvCollector_Validate(t *testing.T) {
 		c := NewEnvCollector(cfg)
 		if err := c.Validate(); err == nil {
 			t.Error("expected error for nonexistent project root")
+		}
+	})
+
+	t.Run("tilde expansion in roots (exercises expandForValidation)", func(t *testing.T) {
+		t.Setenv("HOME", "/tmp/fakehome-for-env-test")
+		cfg := &config.Config{
+			Pillar1: config.Pillar1Config{
+				Sources: map[string]config.SourceConfig{
+					"env": {
+						Enabled: true,
+						Options: map[string]any{
+							"project_roots": []string{"~/nonexistent/12345"},
+						},
+					},
+				},
+			},
+		}
+		c := NewEnvCollector(cfg)
+		// Will fail on stat of expanded path (good, we just want the expand path executed)
+		if err := c.Validate(); err == nil {
+			t.Error("expected error for expanded nonexistent ~ root")
+		}
+	})
+
+	t.Run("root exists but cannot access (non-NotExist err, e.g. not-a-directory)", func(t *testing.T) {
+		// Use a path under a file (/dev/null) so os.Stat reliably fails with a non-IsNotExist error
+		// (e.g. "not a directory"). This hits the "cannot access configured project root" return
+		// without relying on chown/perm bits (owner can often still stat 000 dirs on macOS).
+		cfg := &config.Config{
+			Pillar1: config.Pillar1Config{
+				Sources: map[string]config.SourceConfig{
+					"env": {
+						Enabled: true,
+						Options: map[string]any{"project_roots": []string{"/dev/null/this-will-stat-fail-12345"}},
+					},
+				},
+			},
+		}
+		c := NewEnvCollector(cfg)
+		err := c.Validate()
+		if err == nil {
+			t.Error("expected error for inaccessible project root")
+		}
+		// Distinguish from the "does not exist" message to ensure the !IsNotExist path.
+		if err != nil && (strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "configured project root does not exist")) {
+			t.Errorf("got 'does not exist' error, wanted 'cannot access': %v", err)
 		}
 	})
 }

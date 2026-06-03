@@ -266,9 +266,11 @@ func TestLoad_ResidueDefaults(t *testing.T) {
 		userHomeDir = origHome
 	}()
 	userHomeDir = func() (string, error) { return dir, nil }
-	// yaml with pillar2 enabled:false + empty targets (triggers fill)
+	// yaml with pillar2 enabled:false + explicit empty dirs (triggers the fill block in Load,
+	// which would otherwise be skipped because DefaultConfig pre-populates Dirs and unmarshal
+	// of absent key leaves them).
 	osReadFile = func(name string) ([]byte, error) {
-		return []byte("pillar2:\n  enabled: false\n"), nil
+		return []byte("pillar2:\n  enabled: false\n  dirs: []\n"), nil
 	}
 	cfg, _, err := Load()
 	if err != nil {
@@ -297,6 +299,26 @@ func TestSave_MkdirError(t *testing.T) {
 	cfg := DefaultConfig()
 	if err := cfg.Save(); err == nil {
 		t.Error("expected mkdir error on Save")
+	}
+}
+
+func TestSave_MarshalError(t *testing.T) {
+	dir := t.TempDir()
+	origHome := userHomeDir
+	origMkdir := osMkdirAll
+	origMarshal := yamlMarshal
+	defer func() {
+		userHomeDir = origHome
+		osMkdirAll = origMkdir
+		yamlMarshal = origMarshal
+	}()
+	userHomeDir = func() (string, error) { return dir, nil }
+	osMkdirAll = func(path string, perm os.FileMode) error { return nil }
+	yamlMarshal = func(v any) ([]byte, error) { return nil, errors.New("yaml is angry today") }
+
+	cfg := DefaultConfig()
+	if err := cfg.Save(); err == nil {
+		t.Error("expected marshal error on Save")
 	}
 }
 
@@ -426,6 +448,46 @@ func TestGetEnvOptions_Empty(t *testing.T) {
 	}
 }
 
+func TestGetSourceIgnorePatterns_NilAndEmpty(t *testing.T) {
+	// nil receiver (early return)
+	var c *Config
+	if got := c.GetSourceIgnorePatterns("env"); len(got) != 0 {
+		t.Errorf("nil.GetSourceIgnorePatterns = %v, want []", got)
+	}
+	if got := c.GetSourceIgnorePatterns("bitwarden"); len(got) != 0 {
+		t.Errorf("nil.GetSourceIgnorePatterns(bw) = %v, want []", got)
+	}
+
+	// empty struct (Sources==nil path)
+	empty := &Config{}
+	if got := empty.GetSourceIgnorePatterns("env"); len(got) != 0 {
+		t.Errorf("empty.GetSourceIgnorePatterns = %v, want []", got)
+	}
+
+	// source present but no Options (or Options nil)
+	cfg := &Config{
+		Pillar1: Pillar1Config{
+			Sources: map[string]SourceConfig{
+				"bitwarden": {Enabled: true /* Options nil */},
+			},
+		},
+	}
+	if got := cfg.GetSourceIgnorePatterns("bitwarden"); got == nil {
+		t.Error("GetSourceIgnorePatterns for src with nil Options should be non-nil empty")
+	}
+	if got := cfg.GetSourceIgnorePatterns("missing-src"); len(got) != 0 {
+		t.Errorf("missing src = %v, want []", got)
+	}
+}
+
+func TestGetEnvOptions_NilReceiver(t *testing.T) {
+	var c *Config
+	opts := c.GetEnvOptions()
+	if opts.ProjectRoots == nil || opts.IgnorePatterns == nil {
+		t.Errorf("nil receiver GetEnvOptions should return non-nil slices, got %+v", opts)
+	}
+}
+
 func TestNormalizePillar3(t *testing.T) {
 	// nil config
 	normalizePillar3(nil)
@@ -494,5 +556,115 @@ func TestEffectiveRedactPlaceholder(t *testing.T) {
 				t.Errorf("EffectiveRedactPlaceholder(%q,%q,%q) = %q, want %q", c.p5, c.p3, c.fallback, got, c.want)
 			}
 		})
+	}
+}
+
+// TestNormalizeStringList_AllArms directly exercises the helper used by
+// normalizePillar1Sources (and thus Load) for project_roots/skip_dirs etc.
+// Covers all type arms that were showing 0-block coverage in prior runs.
+func TestNormalizeStringList_AllArms(t *testing.T) {
+	if got := normalizeStringList(nil); len(got) != 0 {
+		t.Errorf("nil -> %v", got)
+	}
+	if got := normalizeStringList([]string{"a", "b"}); len(got) != 2 || got[0] != "a" {
+		t.Errorf("[]string -> %v", got)
+	}
+	if got := normalizeStringList([]any{"x", 123, "y"}); len(got) != 2 || got[0] != "x" || got[1] != "y" {
+		t.Errorf("[]any mixed -> %v", got)
+	}
+	if got := normalizeStringList("single"); len(got) != 1 || got[0] != "single" {
+		t.Errorf("string -> %v", got)
+	}
+	if got := normalizeStringList(""); len(got) != 0 {
+		t.Errorf("empty string -> %v", got)
+	}
+	if got := normalizeStringList(42); len(got) != 0 {
+		t.Errorf("other type -> %v", got)
+	}
+}
+
+// TestDefaultSocketPath_ErrorPath hits the rare fallback in defaultSocketPath
+// (the 0-block at the userHomeDir err || empty check) using the internal seam.
+func TestDefaultSocketPath_ErrorPath(t *testing.T) {
+	orig := userHomeDir
+	defer func() { userHomeDir = orig }()
+	userHomeDir = func() (string, error) { return "", errors.New("no home for test") }
+
+	if got := defaultSocketPath(); got != "/tmp/blastradius.sock" {
+		t.Errorf("defaultSocketPath on home err = %q, want /tmp fallback", got)
+	}
+}
+
+// TestNormalizePillar1Sources_NilAndMissingSources directly exercises the nil-map make
+// and per-source !ok default-creation arms (the 0 blocks at 341/347) without going
+// through Load (which always starts from DefaultConfig that pre-populates Sources).
+func TestNormalizePillar1Sources_NilAndMissingSources(t *testing.T) {
+	// nil map case
+	cfg := &Config{Pillar1: Pillar1Config{Sources: nil}}
+	normalizePillar1Sources(cfg)
+	if cfg.Pillar1.Sources == nil {
+		t.Fatal("normalize should have created Sources map")
+	}
+	if _, ok := cfg.Pillar1.Sources["env"]; !ok {
+		t.Error("env entry should be created for nil starting map")
+	}
+
+	// missing one source (e.g. only bitwarden present)
+	cfg2 := &Config{
+		Pillar1: Pillar1Config{
+			Sources: map[string]SourceConfig{
+				"bitwarden": {Enabled: true, Options: map[string]any{}},
+			},
+		},
+	}
+	normalizePillar1Sources(cfg2)
+	if _, ok := cfg2.Pillar1.Sources["env"]; !ok {
+		t.Error("env should be created when missing")
+	}
+	if !cfg2.Pillar1.Sources["bitwarden"].Enabled {
+		t.Error("existing bitwarden entry preserved")
+	}
+	// Options normalized to non-nil even for created
+	if cfg2.Pillar1.Sources["env"].Options == nil {
+		t.Error("created env should have non-nil Options")
+	}
+}
+
+// TestLoad_Pillar1SourcesNilTriggersNormalize hits the Sources==nil make + per-name !ok creation
+// paths in normalizePillar1Sources (previously 0 blocks) by loading yaml with no pillar1 block at all.
+func TestLoad_Pillar1SourcesNilTriggersNormalize(t *testing.T) {
+	dir := t.TempDir()
+	origRead := osReadFile
+	origHome := userHomeDir
+	defer func() {
+		osReadFile = origRead
+		userHomeDir = origHome
+	}()
+	userHomeDir = func() (string, error) { return dir, nil }
+	osReadFile = func(name string) ([]byte, error) {
+		// No pillar1 at all -> after unmarshal Sources remains nil (from zero value)
+		// then normalize creates the map + env + bitwarden entries.
+		return []byte("log_level: info\n"), nil
+	}
+
+	cfg, _, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfg.Pillar1.Sources == nil {
+		t.Fatal("expected Sources map to be created by normalize")
+	}
+	if _, ok := cfg.Pillar1.Sources["env"]; !ok {
+		t.Error("env source should have been created")
+	}
+	if _, ok := cfg.Pillar1.Sources["bitwarden"]; !ok {
+		t.Error("bitwarden source should have been created")
+	}
+	// env defaults to enabled, bitwarden to disabled
+	if !cfg.Pillar1.Sources["env"].Enabled {
+		t.Error("env should be enabled by normalize default")
+	}
+	if cfg.Pillar1.Sources["bitwarden"].Enabled {
+		t.Error("bitwarden should be disabled by normalize default")
 	}
 }

@@ -97,6 +97,41 @@ func TestDetectBitwardenJSON(t *testing.T) {
 	}
 }
 
+// Additional cases to reach 100% on DetectBitwardenJSON (was 96.7%):
+// - encrypted export short-circuits
+// - empty items but has folders/collections -> isExport true (BW structure marker)
+// - empty items, no structure -> false
+// - non-map item in items list (exercises the !ok continue)
+func TestDetectBitwardenJSON_MoreBranches(t *testing.T) {
+	// encrypted
+	enc := []byte(`{"encrypted": true, "items": [{"login":{"password":"secret12345678"}}]}`)
+	h, e := DetectBitwardenJSON(enc)
+	if h != 0 || e {
+		t.Errorf("encrypted: got hits=%d isExport=%v", h, e)
+	}
+
+	// empty items but looks like BW export (folders)
+	emptyFolders := []byte(`{"encrypted": false, "items": [], "folders": []}`)
+	h, e = DetectBitwardenJSON(emptyFolders)
+	if h != 0 || !e {
+		t.Errorf("empty+folders: got hits=%d isExport=%v", h, e)
+	}
+
+	// empty items, no structure markers
+	emptyPlain := []byte(`{"encrypted": false, "items": []}`)
+	h, e = DetectBitwardenJSON(emptyPlain)
+	if h != 0 || e {
+		t.Errorf("empty plain: got hits=%d isExport=%v", h, e)
+	}
+
+	// items list with non-map entry (e.g. null or scalar) -> continue
+	badItem := []byte(`{"encrypted": false, "items": [null, "not a map", {"login": {"password": "Kx7pQ9mR2vL8nT4wY6zX3cV5bN1mJ0hGfD9sA7pQ4rW2eT6yU"}}]}`)
+	h, e = DetectBitwardenJSON(badItem)
+	if !e || h != 1 {
+		t.Errorf("bad item in list: got hits=%d isExport=%v", h, e)
+	}
+}
+
 func TestSafeLocation(t *testing.T) {
 	// We can't easily mock HOME in all envs; just exercise the function
 	home := os.Getenv("HOME")
@@ -427,4 +462,46 @@ func TestScanFile_LowConfidencePath(t *testing.T) {
 	finding, _ := ScanFile(f, registry.New())
 	// With current thresholds this may or may not produce a finding; we just want the code path exercised
 	_ = finding
+}
+
+// Hit the dashlane fallback inside .csv suffix handling (one of the remaining ScanFile decision blocks).
+func TestScanFile_CSVTriggersDashlane(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "export.csv")
+	// Has "username" + "password" (dashlane path) but lacks "login" so BWCSV check fails first.
+	content := "\"username\",\"password\"\nadmin,superlonghighentropysecrettokenvalue1234567890"
+	os.WriteFile(f, []byte(content), 0600)
+	finding, _ := ScanFile(f, registry.New())
+	if finding == nil || finding.Format != FormatDashlane {
+		t.Errorf("expected dashlane from csv fallback, got %+v", finding)
+	}
+}
+
+// TestScanFile_Errors exercises the early error returns in ScanFile (Stat, Open after Stat).
+// ReadFile err after successful header open is hard to force reliably for same-user without
+// races, so we focus on the easy controllable ones.
+func TestScanFile_Errors(t *testing.T) {
+	reg := registry.New()
+
+	// non-existent -> Stat err path
+	_, err := ScanFile("/this/path/does/not/exist/for/residue/test/12345.json", reg)
+	if err == nil {
+		t.Error("expected err from Stat on non-existent")
+	}
+
+	// existing regular file but Open fails (permission)
+	dir := t.TempDir()
+	f := filepath.Join(dir, "noopen.json")
+	if err := os.WriteFile(f, []byte(`{"encrypted":false,"items":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(f, 0000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(f, 0600)
+
+	_, err = ScanFile(f, reg)
+	if err == nil {
+		t.Error("expected err from Open on 0000 file")
+	}
 }

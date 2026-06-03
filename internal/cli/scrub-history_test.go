@@ -69,4 +69,9 @@ func TestRunScrubHistory(t *testing.T) {
 	// disabled in human (non-json) path; must not fall through to generic success message
 	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","message":"Pillar 3 (history hygiene) is disabled in config","file":""}`)
 	RunScrubHistory(nil)
+
+	// --full/--reset and bare --mode (non-=) flag parser branches (previously 0 blocks)
+	RunScrubHistory([]string{"--full"})
+	RunScrubHistory([]string{"--reset"})
+	RunScrubHistory([]string{"--mode", "redact"})
 }

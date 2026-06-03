@@ -26,4 +26,14 @@ func TestPrintHelp_NilCfgAndEmptyRoots(t *testing.T) {
 		return &config.Config{}, "/p", nil
 	}
 	PrintHelp()
+
+	// non-empty roots (covers the len>0 printf branch)
+	configLoad = func() (*config.Config, string, error) {
+		c := &config.Config{}
+		c.Pillar1.Sources = map[string]config.SourceConfig{
+			"env": {Options: map[string]any{"project_roots": []string{"~/proj", "~/work"}}},
+		}
+		return c, "/p", nil
+	}
+	PrintHelp()
 }

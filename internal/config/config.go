@@ -13,6 +13,7 @@ var (
 	osReadFile  = os.ReadFile
 	osWriteFile = os.WriteFile
 	osMkdirAll  = os.MkdirAll
+	yamlMarshal = yaml.Marshal
 )
 
 // Config holds user configuration. It must NEVER contain secrets or discovered hashes.
@@ -555,7 +556,7 @@ func (c *Config) Save() error {
 
 	path := filepath.Join(dir, "config.yaml")
 
-	data, err := yaml.Marshal(c)
+	data, err := yamlMarshal(c)
 	if err != nil {
 		return err
 	}

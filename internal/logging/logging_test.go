@@ -54,6 +54,22 @@ func TestInit_ErrorOnBadDir(t *testing.T) {
 	}
 }
 
+// TestInit_ErrorOnOpenFile hits the os.OpenFile error return path in Init
+// (previously a 0 block). By making the target logPath itself a directory,
+// OpenFile(..., O_WRONLY|APPEND) will fail.
+func TestInit_ErrorOnOpenFile(t *testing.T) {
+	tmp := t.TempDir()
+	logAsDir := filepath.Join(tmp, "log-is-dir")
+	if err := os.Mkdir(logAsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	err := Init(logAsDir)
+	if err == nil {
+		t.Error("expected error when OpenFile target is a directory")
+	}
+}
+
 // The wrapper functions are intentionally thin. We just need to call them
 // once each to get them off 0%.
 func TestLoggingWrappers_DoNotPanic(t *testing.T) {

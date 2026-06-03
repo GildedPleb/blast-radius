@@ -16,7 +16,11 @@ const (
 	daemonStartWait      = 500 * time.Millisecond
 )
 
-// Overridable for testing (DI via var assignment)
+// Overridable for testing (DI via var assignment). See RunDaemon, RunStart etc.
+// for how error arms use explicit "return" after osExit(1) so that test-time
+// no-op overrides (which do not terminate the process) do not fall through into
+// success-path code that assumes a non-nil *config.Config (or other post-load
+// state). This is the contract for all osExit call sites.
 var (
 	configLoad          = config.Load
 	netDialTimeout      = net.DialTimeout

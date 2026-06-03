@@ -140,13 +140,16 @@ func (r *Registry) Uptime() time.Duration {
 // Never includes any secret material.
 func (r *Registry) Snapshot() map[string]any {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
+	dup := r.duplicateCountLocked()
+	tracked := len(r.entries)
+	state := string(r.scanState)
+	r.mu.RUnlock()
 
 	return map[string]any{
-		"tracked_hashes":   len(r.entries),
-		"duplicate_hashes": r.DuplicateCount(),
+		"tracked_hashes":   tracked,
+		"duplicate_hashes": dup,
 		"uptime":           r.Uptime().String(),
-		"scan_state":       string(r.scanState),
+		"scan_state":       state,
 	}
 }
 
@@ -183,11 +186,10 @@ func (r *Registry) FindDuplicates() map[SecretHash][]ProjectID {
 	return dups
 }
 
-// DuplicateCount returns how many secret hashes are duplicated across projects.
-func (r *Registry) DuplicateCount() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
+// duplicateCountLocked reports duplicate hash count while the caller already
+// holds the lock. Used by Snapshot (to avoid re-acquiring RLock inside
+// DuplicateCount while the outer Snapshot lock is held) and by DuplicateCount.
+func (r *Registry) duplicateCountLocked() int {
 	count := 0
 	for _, entry := range r.entries {
 		if len(entry.Projects) > 1 {
@@ -195,6 +197,13 @@ func (r *Registry) DuplicateCount() int {
 		}
 	}
 	return count
+}
+
+// DuplicateCount returns how many secret hashes are duplicated across projects.
+func (r *Registry) DuplicateCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.duplicateCountLocked()
 }
 
 // Clear removes every secret hash from the registry.
@@ -245,12 +254,17 @@ func ProjectDisplayName(id ProjectID) string {
 		return "(unknown project)"
 	}
 
-	// Normalize and split
-	p = strings.TrimSuffix(p, "/")
-	parts := strings.Split(p, "/")
-	if len(parts) == 0 {
-		return ".../unknown"
+	// Normalize by stripping *all* leading and trailing slashes. This ensures
+	// absolute paths like "/foo" and root "/" produce clean output without
+	// double-slash artifacts ("...//foo") that the previous TrimSuffix-only
+	// logic produced for len(parts)==2 cases starting with empty element.
+	// Primary callers now use opaque hex IDs, so this is mostly for fallback
+	// and direct tests.
+	p = strings.Trim(p, "/")
+	if p == "" {
+		return "(unknown project)"
 	}
+	parts := strings.Split(p, "/")
 
 	// Show the last two meaningful segments when possible.
 	// This gives good context (e.g. ".../bitcoin-helps/backend") while
@@ -258,7 +272,7 @@ func ProjectDisplayName(id ProjectID) string {
 	if len(parts) >= 2 {
 		return ".../" + strings.Join(parts[len(parts)-2:], "/")
 	}
-	return ".../" + parts[len(parts)-1]
+	return ".../" + parts[0]
 }
 
 // IsKnownHashHex checks if a hex-encoded SHA-256 hash is in the registry.

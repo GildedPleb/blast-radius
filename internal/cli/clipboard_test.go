@@ -120,6 +120,43 @@ func TestRunClipboard_Scrub_PbpasteFails(t *testing.T) {
 	RunClipboard([]string{"redact"})
 }
 
+// TestRunClipboard_Scrub_PbcopyFails hits the pbcopy error branch inside the
+// redact/scrub success path (after finding secrets to redact).
+func TestRunClipboard_Scrub_PbcopyFails(t *testing.T) {
+	defer resetTestOverrides(t)
+	restore := silenceOutput()
+	defer restore()
+
+	// Use pipe so check/scrub path reaches pbcopy with a known secret.
+	clientConn, serverConn := net.Pipe()
+	netDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		return clientConn, nil
+	}
+
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		if name == "pbpaste" {
+			return exec.Command("sh", "-c", `printf "DB_PASS=sekret1234567890\n"`)
+		}
+		if name == "pbcopy" {
+			return exec.Command("false") // fail the redact write
+		}
+		return exec.Command("true")
+	}
+
+	go func() {
+		defer serverConn.Close()
+		r := bufio.NewReader(serverConn)
+		for {
+			if _, err := r.ReadString('\n'); err != nil {
+				return
+			}
+			_, _ = serverConn.Write([]byte(`{"status":"ok","known":true}` + "\n"))
+		}
+	}()
+
+	RunClipboard([]string{"scrub"})
+}
+
 // TestRunClipboard_CheckDaemonNotRunning hits the case where pbpaste succeeds
 // and candidates are found, but connecting to the daemon fails.
 func TestRunClipboard_CheckDaemonNotRunning(t *testing.T) {

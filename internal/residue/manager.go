@@ -17,6 +17,9 @@ import (
 // test hook to control UserHomeDir for fast coverage of len(targets)==0 without walking real home.
 var userHomeDir = os.UserHomeDir
 
+// test hook for filepath.Abs (used in effectiveP2Surfaces) to cover the error-continue path.
+var filepathAbs = filepath.Abs
+
 // Manager owns the residue (crumbs) scanning logic and last result cache.
 // Scans are on-demand only (no background goroutine per v1 plan decision).
 //
@@ -215,7 +218,7 @@ func effectiveP2Surfaces(p2 config.Pillar2Config) []p2Surface {
 		if d.Path == "" {
 			continue
 		}
-		abs, err := filepath.Abs(util.ExpandPath(d.Path))
+		abs, err := filepathAbs(util.ExpandPath(d.Path))
 		if err != nil {
 			continue
 		}

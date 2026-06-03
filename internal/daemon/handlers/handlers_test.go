@@ -14,6 +14,7 @@ func TestAllHandlers_Name(t *testing.T) {
 		{PingHandler{}, "PING"},
 		{ScrubHistoryHandler{}, "SCRUB_HISTORY"},
 		{StatusHandler{}, "STATUS"},
+		{RescanHandler{}, "RESCAN"},
 		{UnknownHandler{}, ""},
 	}
 

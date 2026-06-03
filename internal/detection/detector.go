@@ -182,11 +182,9 @@ func (d *Detector) ExtractCandidates(data []byte) []string {
 		// Guard: skip any token that still contains '=' — it should have been handled
 		// by the primary assignment branch above (prevents full "KEY=val" from leaking
 		// as a candidate, which would never match P1's value-only hashes).
+		// (= is a split delimiter, so tokens never contain it; the contains check was unreachable.)
 		tokens := regexp.MustCompile(`[\s"'=,:\[\]{}|;]+`).Split(line, -1)
 		for _, t := range tokens {
-			if strings.Contains(t, "=") {
-				continue
-			}
 			c := d.normalizeCandidate(t)
 			if d.isPlausibleSecret(c) {
 				cands[c] = struct{}{}
@@ -268,11 +266,10 @@ func (d *Detector) extractValueSide(s string) string {
 		return s
 	}
 	// Take after the first = (same policy as P1 .env parsing)
-	if idx := strings.Index(s, "="); idx != -1 {
-		rhs := strings.TrimSpace(s[idx+1:])
-		return d.normalizeCandidate(rhs)
-	}
-	return s
+	// (Contains guarantees Index succeeds; the prior redundant if+return was unreachable.)
+	idx := strings.Index(s, "=")
+	rhs := strings.TrimSpace(s[idx+1:])
+	return d.normalizeCandidate(rhs)
 }
 
 // isPlausibleSecret applies length + entropy gate (the core filter).

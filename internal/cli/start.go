@@ -17,6 +17,7 @@ func RunStart() {
 		logging.Printf("RunStart: failed to load config: %v", err)
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		osExit(1)
+		return
 	}
 
 	fmt.Printf("Starting Blast Radius daemon...\n")
@@ -27,6 +28,7 @@ func RunStart() {
 		logging.Printf("RunStart: failed to start daemon: %v", err)
 		fmt.Fprintf(os.Stderr, "Failed to start daemon: %v\n", err)
 		osExit(1)
+		return
 	}
 
 	logging.Println("RunStart: daemon start requested")

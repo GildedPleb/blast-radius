@@ -40,6 +40,24 @@ func TestRunStatus(t *testing.T) {
 	}`)
 	RunStatus(false)
 	RunStatus(true)
+
+	// Pillar5 clean + monitor active but last_change=="never" (should not print the clean msg per gate)
+	sendDaemonCommandFn = mockSendDaemonCommand(`{
+		"status":"ok",
+		"registry":{"tracked_hashes":3},
+		"pillar5":{"clipboard":{"secret_count":0,"last_change":"never","monitor_active":true}}
+	}`)
+	RunStatus(false)
+	RunStatus(true)
+
+	// Pillar2 present with count==0 or absent -> hits the "clean (last scan recent)" else branch
+	sendDaemonCommandFn = mockSendDaemonCommand(`{
+		"status":"ok",
+		"registry":{"tracked_hashes":5},
+		"pillar2":{"count":0}
+	}`)
+	RunStatus(false)
+	RunStatus(true)
 }
 
 // TestRunStatus_UnifiedJSONShape verifies that the refactored --json output

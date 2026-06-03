@@ -21,6 +21,7 @@ func RunLogs() {
 		logging.Printf("RunLogs: failed to read log file: %v", err)
 		fmt.Fprintf(os.Stderr, "Failed to read log file: %v\n", err)
 		osExit(1)
+		return
 	}
 
 	fmt.Printf("=== Blast Radius Daemon Logs (%s) ===\n\n", logPath)

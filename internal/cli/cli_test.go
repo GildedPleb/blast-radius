@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -86,6 +87,11 @@ func TestRun_Dispatch(t *testing.T) {
 		Run([]string{"env"})
 		Run([]string{"env", "default-env"})
 		Run([]string{"env", "nonexistent"})
+	})
+
+	t.Run("env-unexpected-args", func(t *testing.T) {
+		// exercises the "unexpected arguments for env" error path + return in Run
+		Run([]string{"env", "foo", "bar"})
 	})
 
 	t.Run("config", func(t *testing.T) {
@@ -232,5 +238,47 @@ func TestRealSendDaemonCommand(t *testing.T) {
 	s.Close() // close immediately so first write (AUTH) fails
 	if _, err := realSendDaemonCommand("PING"); err == nil {
 		t.Error("expected write error")
+	}
+
+	// cmd write failure *after* AUTH write succeeds (covers the second Write err block)
+	c, s = net.Pipe()
+	netDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		return c, nil
+	}
+	readAuthTokenForSocket = func(string) (string, error) { return "tok", nil }
+	go func() {
+		r := bufio.NewReader(s)
+		// read the AUTH line (so client AUTH write succeeds)
+		_, _ = r.ReadString('\n')
+		// now close without reading the cmd line -> client's second Write will fail
+		s.Close()
+	}()
+	if _, err := realSendDaemonCommand("PING"); err == nil {
+		t.Error("expected cmd write error after AUTH")
+	}
+}
+
+// TestRealReadAuthTokenForSocket exercises the real (non-overridden) impl directly
+// to cover its success (trim) and error (ReadFile fail) paths (75% func).
+func TestRealReadAuthTokenForSocket(t *testing.T) {
+	defer resetTestOverrides(t)
+
+	tmp := t.TempDir()
+	sock := filepath.Join(tmp, "br.sock")
+	auth := sock + ".auth"
+
+	// success + trim
+	if err := os.WriteFile(auth, []byte("  secret123  \n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tok, err := realReadAuthTokenForSocket(sock)
+	if err != nil || tok != "secret123" {
+		t.Errorf("realRead happy = %q, %v", tok, err)
+	}
+
+	// err path (no file)
+	_ = os.Remove(auth)
+	if _, err := realReadAuthTokenForSocket(sock); err == nil {
+		t.Error("expected err for missing .auth")
 	}
 }

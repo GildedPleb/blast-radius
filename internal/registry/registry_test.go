@@ -170,3 +170,78 @@ func TestRegistry_IsKnownHashHex_Happy(t *testing.T) {
 		t.Error("short hex should be false")
 	}
 }
+
+// Additional cases for previously partial functions (GetProjectsForHash !ok branch,
+// more IsKnownHashHex invalids, ProjectDisplayName edges).
+func TestRegistry_GetProjectsForHash_Missing(t *testing.T) {
+	r := New()
+	ps := r.GetProjectsForHash(HashValue([]byte("never-added")))
+	if ps != nil {
+		t.Errorf("GetProjectsForHash(missing) = %v, want nil", ps)
+	}
+}
+
+func TestRegistry_IsKnownHashHex_MoreInvalids(t *testing.T) {
+	r := New()
+	h := HashValue([]byte("more-invalids"))
+	r.Add(h, "p")
+	// valid len but bad chars
+	if r.IsKnownHashHex("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz") {
+		t.Error("bad hex chars should be false")
+	}
+	// too long
+	if r.IsKnownHashHex("a" + "00" /*64 would be exact but we add*/ + "ff") {
+		t.Error("wrong len should be false")
+	}
+}
+
+func TestRegistry_ProjectDisplayName_MoreEdges(t *testing.T) {
+	cases := []struct {
+		id   ProjectID
+		want string
+	}{
+		{"/trailing/slash/", ".../trailing/slash"},
+		{"single", ".../single"},
+		// Leading-slash single-segment and root cases (were producing "...//single"
+		// or similar due to Split on TrimSuffix-only input; see review nit).
+		{"/single", ".../single"},
+		{"/single/", ".../single"},
+		{"/", "(unknown project)"},
+		{"///", "(unknown project)"},
+	}
+	for _, c := range cases {
+		if got := ProjectDisplayName(c.id); got != c.want {
+			t.Errorf("ProjectDisplayName(%q) = %q, want %q", c.id, got, c.want)
+		}
+	}
+}
+
+func TestRegistry_Clear(t *testing.T) {
+	r := New()
+	r.Add(HashValue([]byte("c1")), "p1")
+	r.Add(HashValue([]byte("c2")), "p2")
+	r.Clear()
+	if r.Count() != 0 {
+		t.Error("Clear should leave registry empty")
+	}
+}
+
+func TestRegistry_ClearSource(t *testing.T) {
+	r := New()
+	h1 := HashValue([]byte("shared"))
+	h2 := HashValue([]byte("only-src1"))
+	r.Add(h1, "src1")
+	r.Add(h1, "src2")
+	r.Add(h2, "src1")
+	r.ClearSource("src1")
+	if !r.Has(h1) {
+		t.Error("shared hash should survive (still referenced by src2)")
+	}
+	if r.Has(h2) {
+		t.Error("h2 should have been removed (last project cleared)")
+	}
+	ps := r.GetProjectsForHash(h1)
+	if len(ps) != 1 || ps[0] != "src2" {
+		t.Errorf("unexpected projects after ClearSource: %v", ps)
+	}
+}

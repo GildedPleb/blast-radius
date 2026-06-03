@@ -94,6 +94,12 @@ func TestManager_GetProjectDisplayName(t *testing.T) {
 	if fallback == "" {
 		t.Error("fallback should not be empty")
 	}
+
+	// registered logical (from NewManager wiring) to hit the projectMeta path (66% partial)
+	// (env is always wired unless disabled)
+	if m.GetProjectDisplayName(logicalProjectID("env")) == "" {
+		t.Error("expected display name for registered env logical id")
+	}
 }
 
 func TestManager_RunInitialDiscovery_RegistersProjects(t *testing.T) {
@@ -298,6 +304,12 @@ func TestManager_Rescan(t *testing.T) {
 	if m.LastScan().IsZero() {
 		t.Error("expected LastScan to be set after Rescan")
 	}
+	if m.LastRescanResult() == nil {
+		t.Error("expected LastRescanResult to be non-nil after Rescan")
+	}
+	if m.LastRescanResult().AfterHashes != result.AfterHashes {
+		t.Error("LastRescanResult should match the returned result")
+	}
 }
 
 // TestManager_UsesNewStyleEnvOptions verifies that discovery reads project_roots
@@ -374,5 +386,56 @@ func TestManager_Rescan_CollectorValidation(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected env collector validation error in rescan result, got errors: %v", result.Errors)
+	}
+}
+
+// TestManager_RunInitialDiscovery_DisabledEnv hits the early return + SetScanState
+// path in RunInitialDiscovery when the env source is explicitly disabled (improves
+// the 70% RunInitialDiscovery coverage).
+func TestManager_RunInitialDiscovery_DisabledEnv(t *testing.T) {
+	cfg := config.DefaultConfig()
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Enabled = false
+		cfg.Pillar1.Sources["env"] = env
+	}
+
+	reg := registry.New()
+	m := NewManager(cfg, reg)
+
+	m.RunInitialDiscovery()
+
+	if reg.GetScanState() != registry.ScanStateCompleted {
+		t.Error("expected ScanStateCompleted when env source disabled")
+	}
+}
+
+// TestManager_NilRegistryIsDefensive covers NewManager(cfg, nil) + RunInitialDiscovery
+// and Rescan (per review suggestion). NewManager now defensively allocates a registry
+// so these paths never see a nil registry and do not panic. This was previously
+// possible only via direct construction; the daemon always supplies a real registry.
+func TestManager_NilRegistryIsDefensive(t *testing.T) {
+	dir := t.TempDir() // empty, no .env files -> fast, hermetic, no real $HOME walk
+	cfg := config.DefaultConfig()
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Options["project_roots"] = []string{dir}
+		env.Options["skip_dirs"] = []string{}
+		cfg.Pillar1.Sources["env"] = env
+	}
+
+	m := NewManager(cfg, nil)
+	if m == nil {
+		t.Fatal("NewManager(cfg, nil) returned nil")
+	}
+
+	// Should not panic on nil-reg input (ctor allocates internally).
+	m.RunInitialDiscovery()
+
+	res := m.Rescan()
+	if res == nil {
+		t.Error("Rescan returned nil even for degenerate input")
+	}
+	// With empty temp dir we expect 0 hashes and no errors.
+	if res.BeforeHashes != 0 || res.AfterHashes != 0 {
+		t.Errorf("expected 0 hashes for empty temp root, got before=%d after=%d", res.BeforeHashes, res.AfterHashes)
 	}
 }

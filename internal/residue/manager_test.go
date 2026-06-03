@@ -1,6 +1,7 @@
 package residue
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -197,6 +198,30 @@ func TestEffectiveP2Surfaces(t *testing.T) {
 	if len(overlap) != 3 {
 		t.Errorf("expected merged 3 unique patterns for overlapping dir, got %v", overlap)
 	}
+
+	// Empty Path entries are skipped (covers the continue at d.Path == "")
+	cfg3 := config.Pillar2Config{
+		Dirs: []config.Pillar2Dir{
+			{Path: "", Files: []string{"**/*"}}, // should be ignored
+			{Path: "/tmp/good", Files: []string{"*.log"}},
+		},
+	}
+	surfs3 := effectiveP2Surfaces(cfg3)
+	if len(surfs3) != 1 || surfs3[0].absDir != "/tmp/good" {
+		t.Errorf("empty Path should be skipped, got %d surfaces: %v", len(surfs3), surfs3)
+	}
+
+	// Force Abs error path via hook (covers the defensive continue)
+	origAbs := filepathAbs
+	defer func() { filepathAbs = origAbs }()
+	filepathAbs = func(string) (string, error) { return "", errors.New("abs boom") }
+	cfg4 := config.Pillar2Config{
+		Dirs: []config.Pillar2Dir{{Path: "/tmp/whatever", Files: []string{"**/*"}}},
+	}
+	surfs4 := effectiveP2Surfaces(cfg4)
+	if len(surfs4) != 0 {
+		t.Errorf("Abs error should skip the dir, got %d surfaces", len(surfs4))
+	}
 }
 
 func TestRunScan_NarrowFilesPatterns_OnlyMatchesIntended(t *testing.T) {
@@ -323,5 +348,61 @@ func TestRunScan_SurgicalResidueHunting_Example(t *testing.T) {
 		if f.Basename == "photo.jpg" || f.Basename == "readme.txt" {
 			t.Errorf("innocent file %s should not have been reported under narrow residue patterns", f.Basename)
 		}
+	}
+}
+
+// TestRunScan_CollectsErrors exercises per-dir and per-file error collection in RunScan
+// (scanErr from ScanFile etc.) using permission denial on a file inside the surface.
+func TestRunScan_CollectsErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	// Good file that should be found
+	good := filepath.Join(dir, "creds.json")
+	os.WriteFile(good, []byte(`{"encrypted":false,"items":[{"login":{"password":"Kx7pQ9mR2vL8nT4wY6zX3cV5bN1mJ0hGfD9sA7pQ4rW2eT6yU"}}]}`), 0600)
+
+	// File that will cause ScanFile to return err (no read perm after stat)
+	bad := filepath.Join(dir, "badperm.json")
+	os.WriteFile(bad, []byte(`{}`), 0600)
+	os.Chmod(bad, 0000)
+	defer os.Chmod(bad, 0600)
+
+	cfg := config.DefaultConfig()
+	cfg.Pillar2.Enabled = true
+	cfg.Pillar2.Dirs = []config.Pillar2Dir{{Path: dir, Files: []string{"**/*"}}}
+
+	m := NewManager(cfg, registry.New())
+	res := m.RunScan()
+
+	if res == nil {
+		t.Fatal("nil res")
+	}
+	// Should have collected at least the scan err for the badperm file
+	foundErr := false
+	for _, e := range res.Errors {
+		if strings.Contains(e, "badperm") {
+			foundErr = true
+			break
+		}
+	}
+	if !foundErr {
+		t.Logf("note: no per-file err captured for badperm (owner chmod 000 may still allow open on this FS); errors=%v", res.Errors)
+	}
+
+	// Also exercise Walk entry-err path by having an unreadable subdir (hits the if err !=nil append inside WalkDir)
+	restricted := filepath.Join(dir, "restricted-sub")
+	os.Mkdir(restricted, 0000)
+	defer os.Chmod(restricted, 0700)
+
+	// re-run scan on same cfg (dir now has the restricted sub)
+	res2 := m.RunScan()
+	foundWalkErr := false
+	for _, e := range res2.Errors {
+		if strings.Contains(e, "restricted-sub") {
+			foundWalkErr = true
+			break
+		}
+	}
+	if !foundWalkErr {
+		t.Logf("note: walk err for restricted sub not seen (may vary by FS); errors=%v", res2.Errors)
 	}
 }

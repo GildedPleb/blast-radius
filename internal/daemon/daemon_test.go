@@ -65,9 +65,19 @@ func TestDaemon_Close(t *testing.T) {
 
 func TestDaemon_Accessors(t *testing.T) {
 	cfg := config.DefaultConfig()
+	// Use a temp dir + override so TriggerPillar1Rescan (which does a discovery.Rescan)
+	// is instantaneous and does not walk $HOME. Matches the idiom in manager_test.go.
+	tmp := t.TempDir()
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Options["project_roots"] = []string{tmp}
+		env.Options["skip_dirs"] = []string{}
+		cfg.Pillar1.Sources["env"] = env
+	}
+
 	reg := registry.New()
 	h := registry.HashValue([]byte("acc-test"))
 	reg.Add(h, "demo-proj")
+	reg.Add(h, "demo-proj2") // duplicate so FindDuplicates mapping code is hit (was 50%)
 	d := New(cfg, reg)
 
 	// exercise the DaemonContext impls / accessors (these were 0% before)
@@ -88,6 +98,24 @@ func TestDaemon_Accessors(t *testing.T) {
 	if res == nil {
 		t.Error("RunCrumbsScan returned nil")
 	}
+
+	// Pillar 1 / Pillar 3 accessors that were previously 0% (TriggerPillar1Rescan,
+	// Pillar3Config, BeginExclusiveOp). The cfg override above keeps this fast.
+	_ = d.TriggerPillar1Rescan()
+	p3 := d.Pillar3Config()
+	if p3.Mode == "" {
+		t.Error("Pillar3Config returned zero value")
+	}
+	release, ok := d.BeginExclusiveOp("test-op-for-coverage")
+	if !ok {
+		t.Error("BeginExclusiveOp should succeed on fresh daemon")
+	}
+	// second while busy should hit the !ok return (improves 80% BeginExclusiveOp)
+	_, busyOk := d.BeginExclusiveOp("while-busy")
+	if busyOk {
+		t.Error("expected BeginExclusiveOp to reject while busy")
+	}
+	release()
 
 	// also cover the nil-residue branches by constructing a degenerate case isn't easy
 	// (New always wires one), but at least the happy paths above are covered now.
@@ -332,6 +360,41 @@ func TestRealRemoveAuthToken_FileDoesNotExist(t *testing.T) {
 	// Should not error (best-effort cleanup)
 	if err := realRemoveAuthToken(socketPath); err != nil {
 		t.Errorf("realRemoveAuthToken returned error when file did not exist: %v", err)
+	}
+}
+
+func TestRealWriteAuthToken(t *testing.T) {
+	dir := t.TempDir()
+	socketPath := filepath.Join(dir, "w.sock")
+	token := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+	if err := realWriteAuthToken(socketPath, token); err != nil {
+		t.Fatalf("realWriteAuthToken: %v", err)
+	}
+	authPath := socketPath + authTokenSuffix
+	data, err := os.ReadFile(authPath)
+	if err != nil || string(data) != token {
+		t.Errorf("wrote wrong content: %q err=%v", data, err)
+	}
+	if info, _ := os.Stat(authPath); info.Mode().Perm() != 0600 {
+		t.Errorf("expected 0600, got %o", info.Mode().Perm())
+	}
+}
+
+func TestRealReadAuthToken(t *testing.T) {
+	dir := t.TempDir()
+	socketPath := filepath.Join(dir, "r.sock")
+	authPath := socketPath + authTokenSuffix
+	_ = os.WriteFile(authPath, []byte("  abc123  \n"), 0600)
+
+	got, err := realReadAuthToken(socketPath)
+	if err != nil || got != "abc123" {
+		t.Errorf("realReadAuthToken happy = %q, %v", got, err)
+	}
+
+	// missing file
+	if _, err := realReadAuthToken(filepath.Join(dir, "nope.sock")); err == nil {
+		t.Error("expected error on missing auth file")
 	}
 }
 

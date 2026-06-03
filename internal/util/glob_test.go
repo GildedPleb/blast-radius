@@ -54,7 +54,28 @@ func TestMatchesGlobPattern(t *testing.T) {
 		{"double star anywhere", "**/*_backup*", "deep/nested/creds_backup.json", true},
 		{"double star prefix stripped", "**/*.bak", "file.bak", true},
 		{"base name matching", "foo.log", "dir/sub/foo.log", true}, // via Base fallback
+		// Explicit clean==name after **/ or ** strip (previously 0 block at the direct match after trim)
+		{"double star exact after strip", "**/foo", "foo", true},
+		{"double star bare exact", "**bar", "bar", true},
+		// Cases crafted to miss filepath.Match (special chars like [ : make it strict) and hit pragmatic suffix/prefix + count==1
+		{"pragmatic suffix special char", "AWS_*", "AWS_FOO:bar", true},
+		{"pragmatic prefix special char", "*_end", "foo[bar_end", true},
+		{"internal * with special (count1 path)", "pre*suf", "preX:suf", true},
+		// Force pragmatic suf return by using [ that makes filepath.Match reject while HasPrefix logic accepts
+		{"pragmatic suf [ bypass", "foo[*", "foo[bar", true},
+		{"pragmatic pre [ bypass", "*]bar", "foo]bar", true},
+		// Force count==1 and pre return blocks (Match+base miss due to [ in pattern)
+		{"count1 [ bypass", "pre[*]suf", "pre[XX]suf", true},
+		{"count1 ] [ bypass", "a]*[c", "a]b[c", true},
+		// Force the HasPrefix(clean,"*") / pre pragmatic return (bypass Match+base with [ )
+		{"pragmatic pre [ bypass2", "*[xSECRET", "foo[xSECRET", true},
+		{"pragmatic pre [ dir bypass", "*[yy", "dir/xx[yy", true},
 		{"complex internal", "prefix*suffix", "prefix-middle-suffix", true},
+		// Additional cases to hit pragmatic fallback and internal-* logic (previously 0 blocks)
+		{"pragmatic suffix after ** strip", "*_secret", "dir/creds_secret", true},
+		{"internal star empty pre (suffix only)", "*bar", "123bar", true},
+		{"internal star empty suf (prefix only)", "foo*", "foo123", true},
+		{"pragmatic prefix on cleaned", "AWS_*", "AWS_FOO", true},
 	}
 
 	for _, tc := range tests {

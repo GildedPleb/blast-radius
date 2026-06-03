@@ -31,6 +31,7 @@ func RunEnvCheck(name string) {
 		logging.Printf("RunEnvCheck: failed to load config: %v", err)
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
 		osExit(1)
+		return
 	}
 
 	// Find the command definition.
