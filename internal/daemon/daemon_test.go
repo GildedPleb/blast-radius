@@ -285,7 +285,7 @@ func TestDaemon_HandleConnection_LongLine(t *testing.T) {
 	d.handleConnection(server)
 }
 
-// TestDaemon_HandleConnection_AuthRequired exercises the 2026 security hardening:
+// TestDaemon_HandleConnection_AuthRequired exercises the capability token AUTH (hard security invariant):
 // a connection that does not begin with a valid AUTH line gets an error and is closed
 // without ever reaching command dispatch.
 func TestDaemon_HandleConnection_AuthRequired(t *testing.T) {

@@ -34,6 +34,8 @@ type Manager struct {
 	collectors []sources.Collector
 
 	lastRescan *RescanResult // most recent manual rescan result (for rich output)
+
+	lastMu sync.RWMutex // protects lastScan + lastRescan (bg initial discovery + concurrent STATUS/RESCAN handlers)
 }
 
 // NewManager creates a DiscoveryManager.
@@ -56,8 +58,8 @@ func NewManager(cfg *config.Config, reg *registry.Registry) *Manager {
 	scanner.onProjectDiscovered = m.registerProject
 	m.scanner = scanner
 
-	// Initialize logical layer collectors (Phase 4).
-	// We start with EnvCollector. Bitwarden will be added when its implementation matures.
+	// Initialize logical layer collectors.
+	// We wire the env source (primary) and the hard-coded bitwarden source when enabled.
 	if env := sources.NewEnvCollector(cfg); env.Enabled() {
 		// Provide a real scan function for the logical layer.
 		env.SetScanFunc(func() ([]registry.SecretHash, error) {
@@ -76,7 +78,7 @@ func NewManager(cfg *config.Config, reg *registry.Registry) *Manager {
 		m.projectMetaMu.Unlock()
 	}
 
-	// Bitwarden collector (skeleton from previous push)
+	// Bitwarden collector (hard-coded, owned by the project)
 	if bw := sources.NewBitwardenCollector(cfg); bw.Enabled() {
 		m.collectors = append(m.collectors, bw)
 		bwID := logicalProjectID("bitwarden")
@@ -102,7 +104,7 @@ func (m *Manager) RunInitialDiscovery() {
 		return
 	}
 	// Respect the logical layer: if the "env" source is explicitly disabled,
-	// skip .env* discovery entirely. This is the Phase 1 foundation for
+	// skip .env* discovery entirely. This is the foundation for
 	// treating .env scanning as one activatable Pillar 1 source among others.
 	envSrc := m.cfg.Pillar1.Sources["env"]
 	if !envSrc.Enabled {
@@ -136,7 +138,9 @@ func (m *Manager) RunInitialDiscovery() {
 	} else {
 		logging.Printf("Scan state changed: %s", registry.ScanStateCompleted)
 		m.registry.SetScanState(registry.ScanStateCompleted)
+		m.lastMu.Lock()
 		m.lastScan = time.Now()
+		m.lastMu.Unlock()
 	}
 }
 
@@ -180,7 +184,7 @@ func (m *Manager) GetProjectDisplayName(id registry.ProjectID) string {
 	return registry.ProjectDisplayName(id)
 }
 
-// Note: We deliberately chose high-quality on-demand rescan (Phase 3) instead of
+// Note: We deliberately chose high-quality on-demand rescan instead of
 // persistent file watching. Full fsnotify reactivity is permanently out of scope
 // for security reasons (attack surface + complexity outweigh the benefits).
 // Manual `rescan` (plus startup discovery) is the supported mechanism.
@@ -207,17 +211,21 @@ type RescanResult struct {
 
 // LastScan returns the time of the most recent discovery scan (initial or rescan).
 func (m *Manager) LastScan() time.Time {
+	m.lastMu.RLock()
+	defer m.lastMu.RUnlock()
 	return m.lastScan
 }
 
 // LastRescanResult returns the most recent manual rescan result, if any.
 func (m *Manager) LastRescanResult() *RescanResult {
+	m.lastMu.RLock()
+	defer m.lastMu.RUnlock()
 	return m.lastRescan
 }
 
 // Rescan performs a fresh discovery pass over the configured project roots.
 // It is safe to call while the daemon is running and is the primary mechanism
-// (Phase 3) for keeping the Pillar 1 registry up to date without a restart.
+// for keeping the Pillar 1 registry up to date without a restart.
 func (m *Manager) Rescan() *RescanResult {
 	if m.registry == nil {
 		// Defensive: NewManager guarantees a registry, but tolerate nil input
@@ -293,8 +301,10 @@ func (m *Manager) Rescan() *RescanResult {
 		result.RootsScanned = []string{"~"}
 	}
 
+	m.lastMu.Lock()
 	m.lastScan = start
 	m.lastRescan = result
+	m.lastMu.Unlock()
 
 	logging.Printf("Manual rescan complete: %d -> %d hashes in %v (registry was cleared first)", before, after, result.Duration)
 	return result

@@ -1,17 +1,21 @@
-- The skip directories and ignore files are kind of stupid. And also, that should just be the single source of truth. There should not be strong defaults, et cetera.
-- Automatically create and populate a config.yaml.
-- (Addressed) High-risk command context (printenv, etc.) now uses the unified detection package for proper candidate extraction instead of treating entire output as sensitive.
-- Documentation audit
 - File Structure audit
 - Security Audit
 - Architecture audit
 - Test Audit
-- logger audit
-- Backwards compatability audit (e.g. we can fully drop all backwards compatibility because we havent released any software yet, lol)
+- CLI audit
+- Config audit
+- Daemon testing suite
+- detection test suite/audit
+- discovery testing suite/audit
+- logger audit: get all logs fucking golden!
+- monolith audit
 - Bitwarden collector is still early. The Collect() implementation is functional but basic. It doesn't yet handle folders, organizations, attachments, TOTP secrets well, or have sophisticated error handling around bw states. This is the weakest part of the "done" story.
-- [P2 Stage 4] (optional but powerful) Lightweight git accident detection tied to configured project roots: reflog + stash + uncommitted working tree/index. Plus optional bounded recent-commit checks (gitleaks/trufflehog style). Opt-in.
+- [P2] (optional but powerful) Lightweight git accident detection tied to configured project roots: reflog + stash + uncommitted working tree/index. Plus optional bounded recent-commit checks (gitleaks/trufflehog style). Opt-in.
 
-- Pillar 3 (post-v1 future): Fake secrets replacement mode (research spike). Public prefixes (ghp\_, AKIA, sk- etc.), charset/length preservation via detection regex seeds, determinism (seeded rand), confirm no registry/P1 changes needed.
-- Pillar 3 (post-v1 future): Full safe in-place redaction for structured history formats (fish YAML-ish is the main gap; detection already works across shells). Other exotics (nushell, pwsh, etc.) as best-effort.
-- Pillar 3 (post-v1 future): Surface `pillar3` observability in `status --json` (last scrub time/counts/mode + summary) for symmetry with Pillar 2 and better visibility.
-- [Punted] Pillar 3 in-memory tracker / cache: A small daemon-owned in-memory structure (path → last regfp + fingerprints) was discussed as a fast path for repeated `scrub-history` calls within a single long-lived daemon process. Receipts already provide durability across restarts and external mutation detection. Adding an in-memory cache introduces difficult invalidation questions (time-based TTLs are too weak and risk allowing secrets to reappear; strong invalidation is hard to get right without false negatives). We are deliberately leaving this out for now. Revisit later if repeated hygiene runs become a measured performance problem. See plan session notes for the original hybrid design discussion.
+- Pillar 3 (future): Fake secrets replacement mode (research spike). Public prefixes (ghp_, AKIA, sk- etc.), charset/length preservation via detection regex seeds, determinism (seeded rand), confirm no registry/P1 changes needed.
+- Pillar 3 (future): Full safe in-place redaction for structured history formats (fish YAML-ish is the main gap; detection already works across shells). Other exotics (nushell, pwsh, etc.) as best-effort.
+- Pillar 3 (future): Surface `pillar3` observability in `status --json` (last scrub time/counts/mode + summary) for symmetry with Pillar 2 and better visibility.
+- [Punted] Pillar 3 in-memory tracker / cache: A small daemon-owned in-memory structure (path → last regfp + fingerprints) was considered as a fast path for repeated `scrub-history` calls within a single long-lived daemon process. Receipts already provide durability across restarts and external mutation detection. Adding an in-memory cache introduces difficult invalidation questions (time-based TTLs are too weak and risk allowing secrets to reappear; strong invalidation is hard to get right without false negatives). We are deliberately leaving this out for now. Revisit later if repeated hygiene runs become a measured performance problem.
+- Automatically create and populate a config.yaml.
+- Surface all useful commands to ZSH prompt functions. provide sensible defaults, sensible settings, and otherwise good recommendations for best practices. also we want to look at making it fun like a fun version where there's clever emojis that alert to items in a new and interesting way that actually maps to the usage. For instance, a lot of people will set up git in their directory in a particular way. they'll set up time and date in a particular way They'll set up their cube config status in a particular way. and for all of these things they have particular settings around the fonts, the symbols, the emojis they use. and so what we want to do is capture a new, unique, recognizable kind of branding for this.
+- Add a bunch of useful commands to pillar 4 as sensible suggestions but not defaults to the config file. We have a little bit, but it'd be worthwhile to add a whole bunch more.

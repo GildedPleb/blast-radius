@@ -8,7 +8,7 @@ import (
 )
 
 // RunRescan triggers a manual Pillar 1 discovery refresh (on-demand rescan).
-// This is the Phase 3 mechanism for keeping the registry fresh.
+// This is the on-demand mechanism for keeping the registry fresh.
 // Full fsnotify reactivity is permanently out of scope (security tradeoff).
 func RunRescan(jsonOutput bool) {
 	resp, raw, err := parseDaemonResponse("RESCAN")

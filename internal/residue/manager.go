@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
@@ -21,16 +22,20 @@ var userHomeDir = os.UserHomeDir
 var filepathAbs = filepath.Abs
 
 // Manager owns the residue (crumbs) scanning logic and last result cache.
-// Scans are on-demand only (no background goroutine per v1 plan decision).
+// Scans are on-demand only.
 //
-// Configuration: cfg.Pillar2 (enabled + target_dirs). Skip/ignore lists are
-// read from cfg.GetEnvOptions() (the Pillar 1 hygiene lists — single source
-// of truth after removal of legacy top-level fields).
+// last/lastScan are published under lastMu after each scan (compute-then-publish
+// to keep readers non-blocking during long walks). Concurrent RunScan calls are
+// allowed (each performs full work; last writer wins for the published snapshot).
+//
+// Configuration: cfg.Pillar2 (enabled + dirs[] with per-dir files[]). Skip/ignore
+// lists are read from cfg.GetEnvOptions() (the Pillar 1 hygiene lists).
 type Manager struct {
 	cfg      *config.Config
 	reg      *registry.Registry
 	last     *ScanResult
 	lastScan time.Time
+	lastMu   sync.RWMutex // protects last + lastScan for concurrent STATUS/CRUMBS + bg writers
 }
 
 // NewManager creates a residue manager.
@@ -41,7 +46,7 @@ func NewManager(cfg *config.Config, reg *registry.Registry) *Manager {
 	}
 }
 
-// RunScan performs a fresh scan of all configured target_dirs (if enabled).
+// RunScan performs a fresh scan of all configured dirs[] surfaces (if enabled).
 // Returns a result even when disabled (empty findings + status info).
 // Errors are collected per-dir/file and never abort the whole scan.
 func (m *Manager) RunScan() *ScanResult {
@@ -55,14 +60,16 @@ func (m *Manager) RunScan() *ScanResult {
 	if m.cfg == nil || !m.cfg.Pillar2.Enabled {
 		res.Duration = time.Since(start)
 		res.Errors = append(res.Errors, "pillar2.enabled is false")
+		m.lastMu.Lock()
 		m.last = res
 		m.lastScan = start
+		m.lastMu.Unlock()
 		return res
 	}
 
-	// Reuse the single source of truth for scan hygiene (skip/ignore lists).
-	// These now live under pillar1.sources.env.options after the legacy top-level
-	// fields were removed.
+	// Reuse the single source of truth for scan hygiene (skip/ignore lists) from
+	// cfg.GetEnvOptions() (the Pillar 1 env source options; the authority for
+	// what to skip/ignore during P2 crumb hunts).
 	envOpts := m.cfg.GetEnvOptions()
 	ignoreFiles := envOpts.IgnoreFiles
 	if len(ignoreFiles) == 0 {
@@ -81,7 +88,7 @@ func (m *Manager) RunScan() *ScanResult {
 	scanned := 0
 	examined := 0
 
-	// Build effective P2 surfaces (new dirs[] preferred; legacy TargetDirs supported for compat).
+	// Build effective P2 surfaces (dirs[] + per-dir files[]).
 	// Each surface carries its own files[] patterns so different locations can have different rules.
 	surfaces := effectiveP2Surfaces(m.cfg.Pillar2)
 
@@ -150,22 +157,28 @@ func (m *Manager) RunScan() *ScanResult {
 	res.FilesExamined = examined
 	res.Duration = time.Since(start)
 
+	m.lastMu.Lock()
 	m.last = res
 	m.lastScan = start
+	m.lastMu.Unlock()
 	logging.Printf("Crumbs scan complete: %d findings, %d dirs, %d files, %v", len(res.Findings), scanned, examined, res.Duration)
 	return res
 }
 
-// Note: Only the dirs[] + files[] shape is supported (alpha — old target_dirs shape removed).
+// Note: Only the dirs[] + files[] shape is supported.
 
 // GetLastResult returns the most recent scan (or nil). Does not trigger a new scan.
 func (m *Manager) GetLastResult() *ScanResult {
+	m.lastMu.RLock()
+	defer m.lastMu.RUnlock()
 	return m.last
 }
 
 // CrumbsSummary returns a tiny map for status embedding (count + recency only).
 // Full findings list is only exposed via the dedicated CRUMBS command.
 func (m *Manager) CrumbsSummary() map[string]any {
+	m.lastMu.RLock()
+	defer m.lastMu.RUnlock()
 	if m.last == nil {
 		return map[string]any{
 			"status": "never_scanned",
@@ -204,7 +217,7 @@ type p2Surface struct {
 
 // effectiveP2Surfaces returns the list of directories + their file patterns
 // that Pillar 2 should consider. Only the dirs[] shape is supported
-// (legacy target_dirs was removed in the alpha cleanup).
+// (only the dirs[] shape is supported).
 //
 // Entries with the same canonical absDir are deduplicated. Their files[]
 // patterns are merged (union) so that overlapping user configuration

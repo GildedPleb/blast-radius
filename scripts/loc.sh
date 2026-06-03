@@ -26,7 +26,18 @@ set -euo pipefail
 
 # PACKAGES comes from the Makefile (single source of truth).
 # If not provided, fall back to a reasonable default (for direct runs).
-PACKAGES="${PACKAGES:-cli cmd config daemon handlers detection discovery logging registry residue sources util}"
+PACKAGES="${PACKAGES:-cli cmd config daemon handlers detection discovery logging policy registry residue scrub sources util}"
+
+# Baseline for per-package and total deltas. We prefer `git show HEAD:docs/loc.txt`
+# (the previously committed snapshot) so deltas always reflect "current state vs.
+# what was committed before this run". This supports the in-line delta display.
+baseline_text=""
+if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  baseline_text=$(git show HEAD:docs/loc.txt 2>/dev/null || true)
+fi
+if [ -z "$baseline_text" ]; then
+  baseline_text=$(cat docs/loc.txt 2>/dev/null || true)
+fi
 
 # Map package short name -> filesystem dir (must stay in sync with Makefile PKG_*).
 pkg_dir() {
@@ -80,29 +91,99 @@ compute_counts() {
   echo "$fcnt $lcnt $gcnt $scnt"
 }
 
+# get_prev_nums extracts the four numbers (files lines funcs stmts) for a given
+# package name (or "TOTAL") from the baseline_text. Uses awk on $1 match because
+# data rows have pkgname as first field after whitespace split.
+get_prev_nums() {
+  local p="$1"
+  local text="$2"
+  if [ -z "$text" ]; then
+    echo "0 0 0 0"
+    return
+  fi
+
+  echo "$text" | awk -v pkg="$p" '
+    $1 == pkg {
+      # New format only: current values are fields 3, 7, 11, 15
+      print $3, $7, $11, $15
+      exit
+    }
+  ' || echo "0 0 0 0"
+}
+
+# Helper with cleaner formatting and better alignment
+format_metric() {
+  local current=$1
+  local prev=$2
+
+  if [ -z "$prev" ] || [ "$prev" -eq 0 ]; then
+    printf "%5s      0    0.00%%" "$current"
+    return
+  fi
+
+  local delta=$((current - prev))
+  local pct
+  pct=$(awk -v d="$delta" -v p="$prev" 'BEGIN { printf "%.2f", (d * 100.0 / p) }' 2>/dev/null || echo "0.00")
+
+  local delta_str
+  local pct_str
+
+  if [ "$delta" -gt 0 ]; then
+    delta_str=$(printf "+%d" "$delta")
+    pct_str=$(printf -- "+%.2f%%" "$pct")
+  elif [ "$delta" -lt 0 ]; then
+    delta_str=$(printf "%d" "$delta")
+    pct_str=$(printf -- "-%.2f%%" "${pct#-}")
+  else
+    delta_str=" 0"
+    pct_str="0.00%"
+  fi
+
+  printf "%5s  %5s  %7s" "$current" "$delta_str" "$pct_str"
+}
+
 print_loc_report() {
   echo "=== Blast Radius LOC (production *.go only; all _test.go excluded) ==="
   echo ""
 
-  # --- Per-package buckets (using PACKAGES list, same as cover) ---
-  printf "  %-12s %6s %8s %6s %7s\n" "PACKAGE" "FILES" "LINES" "FUNCS" "STMTS"
-  echo "  ----------------------------------------------------"
+  printf "  %-12s  %-22s  %-22s  %-22s  %-22s\n" \
+    "PACKAGE" "FILES" "LINES" "FUNCS" "STMTS"
 
-  total_files=0
-  total_lines=0
-  total_funcs=0
-  total_stmts=0
+  echo "  -------------------------------------------------------------------------------------------------------------"
+
+  total_files=0 total_lines=0 total_funcs=0 total_stmts=0
+  total_pf=0 total_pl=0 total_pg=0 total_ps=0
 
   for p in $PACKAGES; do
     dir=$(pkg_dir "$p")
     if [ ! -d "$dir" ]; then
-      printf "  %-12s %6s %8s %6s %7s\n" "$p" "0" "0" "0" "0"
+      printf "  %-11s | %-21s | %-22s | %-21s | %-21s\n" "$p" "0" "0" "0" "0"
       continue
     fi
 
     read fcnt lcnt gcnt scnt <<<"$(compute_counts "$dir")"
 
-    printf "  %-12s %6s %8s %6s %7s\n" "$p" "$fcnt" "$lcnt" "$gcnt" "$scnt"
+    if [ -n "$baseline_text" ]; then
+      prev_nums=$(get_prev_nums "$p" "$baseline_text")
+      read pf pl pg ps <<< "$prev_nums"
+
+      f_str=$(format_metric "$fcnt" "$pf")
+      l_str=$(format_metric "$lcnt" "$pl")
+      g_str=$(format_metric "$gcnt" "$pg")
+      s_str=$(format_metric "$scnt" "$ps")
+
+      total_pf=$((total_pf + pf))
+      total_pl=$((total_pl + pl))
+      total_pg=$((total_pg + pg))
+      total_ps=$((total_ps + ps))
+    else
+      f_str=$(format_metric "$fcnt" "")
+      l_str=$(format_metric "$lcnt" "")
+      g_str=$(format_metric "$gcnt" "")
+      s_str=$(format_metric "$scnt" "")
+    fi
+
+    printf "  %-11s | %s | %s | %s | %s\n" "$p" "$f_str" "$l_str" "$g_str" "$s_str"
 
     total_files=$((total_files + fcnt))
     total_lines=$((total_lines + lcnt))
@@ -110,22 +191,45 @@ print_loc_report() {
     total_stmts=$((total_stmts + scnt))
   done
 
-  echo "  ----------------------------------------------------"
-  printf "  %-12s %6s %8s %6s %7s\n" "TOTAL" "$total_files" "$total_lines" "$total_funcs" "$total_stmts"
-  echo ""
-  # To capture the authoritative total for before/after or tickets:
-  #   make loc | grep -E '  TOTAL'
+  echo "  -------------------------------------------------------------------------------------------------------------"
+
+  if [ -n "$baseline_text" ]; then
+    tf=$(format_metric "$total_files" "$total_pf")
+    tl=$(format_metric "$total_lines" "$total_pl")
+    tg=$(format_metric "$total_funcs" "$total_pg")
+    ts=$(format_metric "$total_stmts" "$total_ps")
+  else
+    tf=$(format_metric "$total_files" "")
+    tl=$(format_metric "$total_lines" "")
+    tg=$(format_metric "$total_funcs" "")
+    ts=$(format_metric "$total_stmts" "")
+  fi
+
+  printf "  %-11s | %s | %s | %s | %s\n" "TOTAL" "$tf" "$tl" "$tg" "$ts"
 }
 
-# Support for committed LOC snapshots:
+# Support for committed LOC snapshots + inline deltas:
 #   LOC_OUT=docs/loc.txt make loc
-# writes the exact report to the file (while still printing it via tee).
-# This lets you keep docs/loc.txt in git. After code changes that affect
-# architecture/LOC, run `make loc`; the updated docs/loc.txt in your tree
-# can then be diffed against the version from the previous commit to see
-# numeric impact ("prove measurable reduction").
+# writes the report (table + TOTAL + *inline per-package and TOTAL deltas*)
+# to the file via tee. The file is kept in git as the new baseline snapshot.
+#
+# Deltas are shown *granularly inline* under the LINES column.
+# CRITICAL FOR DIFFS: EVERY package row + TOTAL ALWAYS gets exactly two
+# sub-lines (even for 0 delta), and each is padded to full 45-char row width
+# with trailing spaces. This keeps block structure (3 lines per pkg) so
+# `git diff docs/loc.txt` doesn't get misaligned.
+#
+# Baseline from `git show HEAD:docs/loc.txt`. Current numbers use today's
+# PACKAGES. After changes, `make loc` writes the enhanced report (with
+# always-present padded sub-lines) to the file.
+#
+# After code changes, `make loc` (or `make check`) updates the snapshot and
+# shows the deltas inline for the story/PR.
 if [ -n "${LOC_OUT:-}" ]; then
   print_loc_report | tee "$LOC_OUT"
 else
   print_loc_report
 fi
+
+# (No separate delta section anymore: deltas are now shown inline in the table
+# above for better per-package targeting, as requested.)

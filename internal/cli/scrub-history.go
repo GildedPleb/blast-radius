@@ -7,7 +7,7 @@ import (
 )
 
 // RunScrubHistory triggers history file scrubbing (Pillar 3) with support for
-// --mode, --dry-run, --json, and --file overrides (Phase 2 of Pillar 3 plan).
+// --mode, --dry-run, --json, and --file overrides.
 func RunScrubHistory(tail []string) {
 	jsonOutput := false
 	mode := ""
@@ -84,8 +84,8 @@ func RunScrubHistory(tail []string) {
 		return
 	}
 
-	status, _ := resp["status"].(string)
-	if status != "ok" {
+	status, ok := resp["status"].(string)
+	if !ok || status != "ok" {
 		msg := "unknown error"
 		if m, ok := resp["message"].(string); ok {
 			msg = m
@@ -103,7 +103,7 @@ func RunScrubHistory(tail []string) {
 	}
 
 	// Human output paths
-	if dry, _ := resp["dry_run"].(bool); dry {
+	if dry, ok := resp["dry_run"].(bool); ok && dry {
 		fmt.Println("✓ Dry run complete (no changes written).")
 		if m, ok := resp["mode_used"].(string); ok {
 			fmt.Printf("  Mode: %s\n", m)
@@ -134,7 +134,7 @@ func RunScrubHistory(tail []string) {
 		return
 	}
 
-	// Real run output (backward compatible + richer).
+	// Real run output (richer JSON + human-friendly when not --json).
 	// Prefer classic single-file keys ("lines_removed", "entries_redacted") when present
 	// for existing callers/scripts. Fall back to the always-populated aggregate
 	// "deleted"/"redacted" so multi-target redact (and delete) produce correct human

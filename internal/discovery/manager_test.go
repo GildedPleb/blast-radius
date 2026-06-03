@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
@@ -225,7 +226,7 @@ func TestScanner_ProcessEnvFile_VariedContent(t *testing.T) {
 	}
 }
 
-// TestScanner_KeyFiltering_Pillar1 exercises the new Phase 1 ignore_patterns support
+// TestScanner_KeyFiltering_Pillar1 exercises ignore_patterns support
 // under the Pillar 1 logical layer (per-source options on the "env" source).
 func TestScanner_KeyFiltering_Pillar1(t *testing.T) {
 	dir := t.TempDir()
@@ -247,7 +248,7 @@ func TestScanner_KeyFiltering_Pillar1(t *testing.T) {
 	cfg := config.DefaultConfig()
 
 	// Provide the full env source config in one shot under the Pillar 1 logical layer.
-	// This is the canonical shape after the legacy top-level discovery fields were removed.
+	// This is the canonical shape (options live under pillar1.sources.<name>.options).
 	cfg.Pillar1.Sources["env"] = config.SourceConfig{
 		Enabled: true,
 		Options: map[string]any{
@@ -268,7 +269,7 @@ func TestScanner_KeyFiltering_Pillar1(t *testing.T) {
 	}
 }
 
-// TestManager_Rescan exercises the Phase 3 manual rescan path and lastScan tracking.
+// TestManager_Rescan exercises the manual rescan path and lastScan tracking.
 func TestManager_Rescan(t *testing.T) {
 	dir := t.TempDir()
 	envFile := filepath.Join(dir, ".env.rescan")
@@ -438,4 +439,37 @@ func TestManager_NilRegistryIsDefensive(t *testing.T) {
 	if res.BeforeHashes != 0 || res.AfterHashes != 0 {
 		t.Errorf("expected 0 hashes for empty temp root, got before=%d after=%d", res.BeforeHashes, res.AfterHashes)
 	}
+}
+
+// TestDiscoveryManager_ConcurrentLastAccess exercises lastScan/lastRescan under
+// concurrent Rescan (writer) + Last* (readers) calls, matching the daemon
+// goroutine-per-conn pattern (RESCAN + STATUS handlers + bg initial discovery).
+// Uses a cfg that hits the publish paths quickly with no heavy collector work.
+// Follows project rules: no sleeps, no real listeners/timeouts.
+func TestDiscoveryManager_ConcurrentLastAccess(t *testing.T) {
+	// Disable env source so NewManager wires no collectors; Rescan will still
+	// publish last* (after registry.Clear + RootsScanned) but stay fast/cheap.
+	cfg := config.DefaultConfig()
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Enabled = false
+		cfg.Pillar1.Sources["env"] = env
+	}
+	m := NewManager(cfg, registry.New())
+
+	var wg sync.WaitGroup
+	const iters = 10
+	for i := 0; i < iters; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = m.Rescan() // hits lastMu publish for lastScan + lastRescan
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = m.LastScan()
+			_ = m.LastRescanResult()
+		}()
+	}
+	wg.Wait()
 }

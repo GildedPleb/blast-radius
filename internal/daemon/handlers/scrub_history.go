@@ -92,7 +92,7 @@ func (ScrubHistoryHandler) Handle(args string, d DaemonContext) (any, error) {
 		}
 		targets = []string{overrideFile}
 	} else {
-		// Pure new-world discovery. No legacy single-file fallback.
+		// Current discovery path (LCD + rotated siblings under roots).
 		// Tests must override discoverHistoryTargetsFn (or configure HistoryRoots/HistoryFiles
 		// + getHistoryHome) to control what gets scrubbed.
 		roots := cfg.HistoryRoots
@@ -173,9 +173,9 @@ func (ScrubHistoryHandler) Handle(args string, d DaemonContext) (any, error) {
 		}
 
 		// We are going to process (at least) some portion of this file.
-		// For now (v1 of the big change) we keep the classic "from last human
-		// marker or full" logic for the actual ApplyBatch range, but we have
-		// already decided via the new ShouldReprocess that the file is "dirty".
+		// We keep the classic "from last human marker or full" logic for the
+		// actual ApplyBatch range, but we have already decided via ShouldReprocess
+		// (receipt + regfp) that the file is "dirty".
 		lastScrubIdx := scrub.FindLastScrubInvocation(lines)
 		receiptNear := scrub.FindScrubReceiptNear(lines, lastScrubIdx)
 
@@ -276,9 +276,8 @@ func (ScrubHistoryHandler) Handle(args string, d DaemonContext) (any, error) {
 	}
 
 	// At this point we have processed (or skipped) every target.
-	// Build the final aggregate response (rich for the new multi-file world,
-	// while keeping enough top-level fields for rough backward compat when
-	// only one file was involved).
+	// Build the final aggregate response (rich for the multi-file world,
+	// while keeping top-level aggregate fields for the common single-file case).
 
 	effectiveMode := mode
 	if effectiveMode == "" {
@@ -422,7 +421,7 @@ var getHistoryHome = func() string { return os.Getenv("HOME") }
 //   - The result is sorted (lexical) and unique for determinism (readdir order is
 //     not guaranteed stable across platforms or runs).
 //
-// This is the only supported discovery path. There is no legacy single-file fallback.
+// This is the supported discovery path (LCD live files + rotated siblings under the roots).
 func discoverHistoryTargets(roots []string, extras []string) []string {
 	home := getHistoryHome()
 	seen := map[string]bool{}

@@ -1,53 +1,57 @@
-# Blast Radius — Current State (Post Redaction/Recorder Pillar Sunset)
+# Blast Radius — Current Architecture and Capabilities
 
-**Date:** 2026 (post-sunset)
+**This document provides a snapshot of the current project state.** It is intended for onboarding and as a reference for architecture, decisions, invariants, commands, and known limitations.
 
-**This document provides a snapshot of the current project state.** It is intended to serve as onboarding and context for the state after the full removal of the terminal redaction / explicit protection / recorder pillar.
-
-The authoritative framing for the system is now in [docs/pillars/idiomatic_pillars.md](pillars/idiomatic_pillars.md).
+The authoritative framing for the system is in [docs/pillars/idiomatic_pillars.md](pillars/idiomatic_pillars.md).
 
 ---
 
 ## Executive Summary
 
-Blast Radius is a local, hash-only tool for secret exposure reduction. It has completed core infrastructure and four of the five idiomatic pillars. The complex "Pillar 3 / Phase 4" terminal redaction and per-TTY PTY recorder system (protection mode, `blastradius redact`, sealed windows, `REPLAY_REDACTED` protocol, etc.) has been **fully removed** as it proved disproportionately difficult to maintain and reason about.
+Blast Radius is a local, hash-only tool for secret exposure reduction and hygiene. Core infrastructure and all five idiomatic pillars are implemented and functional.
 
 **Current pillars (per idiomatic_pillars.md):**
 
-- **Pillar 1**: Legitimate Secret Discovery — ✅ Core complete + env_file_patterns authority model
-  - Key filtering for non-secrets (Phase 1)
-  - Improved ignore engine (Phase 2)
-  - High-quality manual `rescan` (Phase 3 — deliberate design choice; fsnotify reactivity permanently out of scope for security reasons)
-  - Logical layer with explicit sources: `env` + hard-coded `bitwarden` (Phase 4)
-  - Both sources participate in rescan, duplicates, and status via the collector model
-  - `env_file_patterns` (positive include list) added under pillar1.sources.env.options — this is the declaration of P1 authority that Pillar 2 must respect.
-  - Full documentation and example config updated (P1 precedence rule documented loudly)
-- **Pillar 2**: Illegitimate Secret Residue ("Crumbs") — ✅ **v1 + Coordination Foundation (Stage 1.5)**
-  `blastradius crumbs`. Only supported config shape is `pillar2.dirs[]` + per-dir `files[]` (per-surface control).
-  Internal `policy.Classifier` enforces "Pillar 1 has authority and priority over Pillar 2".
-  The three user stories work correctly; P1-claimed containers are never reported as crumbs.
-  CLI command + status integration shipped in Stage 1; 1.5 added the authority foundation. Full stages 2-6 remain.
-  See the 2026 P2 audit notes in the Known Limitations section below, config.example.yaml (loud P1 precedence docs), and [TODO.md](../TODO.md) for the remaining Stages 2–6 (now tracked as individual stories after the detailed plan was retired).
-- **Pillar 3**: History Hygiene (`scrub-history`) — ✅ v1 + major blast-radius gap closed (broad auto-rotated + history_roots discovery, v2 regfp receipts for sustainable incrementality + deterministic rewrite/restore observation, `--full`, multi-artifact runs, full tests). Remaining post-v1 items (fish structured redaction, fake secrets, pillar3 observability in status) tracked in [TODO.md](../TODO.md).
-- **Pillar 4**: Runtime Environment Hygiene (the `env` primitive function call) — ✅ Implemented
-- **Pillar 5**: Clipboard Hygiene (stories 1-5) — ✅ Implemented: visibility+scrub+clear primitives, reactive monitor with fast first-secret alert (story 4), two-tier auto (redact 30s / full-clear 60s, story 5), state in status, scrub/redact support. (See pillar5_user_stories.md + pillar5_evaluation.md)
+- **Pillar 1**: Legitimate Secret Discovery — ✅ Core complete + `env_file_patterns` authority model.
+  - Recursive scanning of `.env*` (or user-declared patterns) under configured `project_roots`.
+  - Per-source `ignore_patterns` + global skip/ignore machinery.
+  - Logical collector layer: `env` source + hard-coded `bitwarden` source (via official `bw` CLI when enabled).
+  - Both sources feed the same in-memory registry, participate in `rescan`, `duplicates`, and `status`.
+  - `env_file_patterns` (positive include list under `pillar1.sources.env.options`) is the declaration of P1 authority. Pillar 2 must respect it.
+- **Pillar 2**: Illegitimate Secret Residue ("Crumbs") — ✅ Functional.
+  - `blastradius crumbs` (and status summary).
+  - Only supported config shape is `pillar2.dirs[]` + per-dir `files[]` (per-surface control).
+  - `internal/policy.Classifier` enforces that Pillar 1 has authority and priority over Pillar 2. P1-claimed containers are never reported as crumbs.
+  - The three core user stories work: separate directories, P1 source disabled, and overlapping directories (P1 claims only its declared patterns; P2 sees the rest).
+- **Pillar 3**: History Hygiene (`scrub-history`) — ✅ Functional.
+  - Delete or redact modes, `--dry-run`, `--json`, `--file`, `--full`/`--reset`.
+  - Broad discovery: `$HISTFILE`, LCD live files for common shells under `$HOME` (and `history_roots`), plus auto-discovered rotated/backup siblings in the same directories.
+  - v2 receipt lines (`# blastradius-scrub-receipt:v2:...:regfp=...`) for durable, deterministic incrementality and external mutation detection. Re-inspects when the registry grows or receipts are stale.
+- **Pillar 4**: Runtime Environment Hygiene (the `env` primitive) — ✅ Functional.
+  - `blastradius env [name]` (defaults to the `default-env` command = `printenv`).
+  - Runs the configured command via direct `exec` (hard invariant — no shell), searches output with the unified detector against the P1 registry, surfaces only a `secrets_found` count (plus logs to daemon), never leaks values.
+  - `--json` supported for prompt/machine use. `enabled` field exists for future automation wiring (the primitive itself is the whole of Pillar 4).
+- **Pillar 5**: Clipboard Hygiene — ✅ Functional (macOS for reactive parts).
+  - Primitives: `status`/`check`, `clear`/`nuke`, `scrub`/`redact`.
+  - Optional background monitor (when `monitor_enabled: true`): polling-based reactive alerts on first secret (fast path), plus two-tier auto (redact after `redact_timeout_seconds`, full clear after `full_clear_timeout_seconds`).
+  - State surfaced in `status` (and `status --json` under `pillar5`).
+  - Placeholders prefer Pillar 5 config, then Pillar 3, then hard default. All primitives work even if the monitor is disabled.
 
-The system remains strictly **hash-only, minimal-metadata, local-only** with safe degradation.
+The system remains strictly **hash-only, minimal-metadata, local-only** with safe degradation. Full filesystem reactivity (`fsnotify`) is deliberately and permanently out of scope for security reasons. On-demand manual `rescan` (plus initial discovery at daemon start) is the supported mechanism.
 
 ---
 
-## Completed Work
+## Current Capabilities
 
-| Area                                     | Status             | Key Deliverables                                                                                                                                                             |
-| ---------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Foundations (Phase 0)                    | ✅ Complete        | Singleton daemon, Unix socket (0600), CLI coordinator, config system, invariants                                                                                             |
-| Discovery + Registry (Pillar 1)          | ✅ Complete        | Recursive `.env*` scanning, SHA-256 hashing, ignore engine, pruning, opaque ProjectIDs, duplicates detection                                                                 |
-| Zsh HUD                                  | ✅ Complete        | Thin prompt segment + status wrappers (no capture hooks)                                                                                                                     |
-| History Hygiene (Pillar 3)               | ✅ v1 + gap closed | `scrub-history` + broad discovery (rotated siblings + `history_roots`), v2 regfp receipts for incremental + deterministic rewrite/restore detection, `--full`. See TODO for remaining post-v1 items. |
-| Runtime Hygiene (Pillar 4)               | ✅ Complete        | `env` primitive function call (runs cmds, searches output, surfaces count only, logs to daemon); `pillar4.commands` + `enabled` |
-| Clipboard Hygiene (Pillar 5)             | ✅ Complete        | primitives (check/scrub/redact/clear) + daemon monitor (fast alerts on first secret + two-tier auto redact/full-clear with configurable timeouts) + pillar5 in status (macOS) |
-| Redaction/Recorder Pillar                | ❌ **Removed**     | Entire `recorder/` package, protection mode, `redact [N]`, per-TTY sockets, sealed windows, and all supporting code/docs deleted                                             |
-| Pillar 2 (Illegitimate Residue / Crumbs) | ✅ **v1 complete** | `crumbs` command + `residue` package (detector + manager) + daemon handler + status integration. Config section `pillar2`. See implementation plan for remaining stages 2-6. |
+| Area                        | Status    | Key Deliverables |
+| --------------------------- | --------- | ---------------- |
+| Foundations                 | ✅        | Singleton daemon via Unix domain socket (hard-coded path + 0600 + capability token auth), thin CLI coordinator, YAML config (pillar-organized, non-sensitive), safe degradation. |
+| Discovery + Registry (P1)   | ✅        | Logical collector model (`env` + `bitwarden`), recursive scan under `project_roots` respecting `env_file_patterns` / ignores / skips, SHA-256 only, opaque ProjectIDs, `duplicates`, on-demand `rescan`, collector results in status. |
+| Zsh HUD                     | ✅        | Thin prompt segment (`blastradius_prompt_info`) + convenience wrappers (`blastradius_status`, `blastradius_*` for other commands). Prompt is fast and safe for every invocation. |
+| History Hygiene (P3)        | ✅        | `scrub-history` (delete/redact, `--dry-run`/`--json`/`--file`/`--full`), broad LCD + rotated/backup discovery under home + `history_roots`, v2 regfp receipts for incremental + mutation detection, atomic temp+0600+rename writes. |
+| Runtime Hygiene (P4)        | ✅        | `blastradius env [name]` primitive: direct exec (hard invariant), unified detection against P1 registry, `secrets_found` count only (never values), logs to daemon, `--json`, `pillar4.commands` + `enabled`. |
+| Clipboard Hygiene (P5)      | ✅        | Primitives (`check`/`scrub`/`redact`/`clear`/`nuke`), optional macOS polling monitor (fast first-secret alert + two-tier auto with independent `redact_timeout_seconds` / `full_clear_timeout_seconds`), state in `status`, placeholder preference (P5 > P3 > default). |
+| Illegitimate Residue (P2)   | ✅        | `crumbs` command + JSON, `residue` (detector + manager), per-dir `dirs[]` + `files[]` model, daemon handler + status summary, `policy.Classifier` enforcing P1 authority (P1-claimed files never crumbs). |
 
 ---
 
@@ -61,22 +65,32 @@ cmd/blastradius/
 
 internal/
 ├── cli/
-│   └── cli.go              # Coordinator for all commands (start, status, stop, duplicates, scrub-history, env, clipboard, config, help)
+│   └── cli.go              # Coordinator for all commands (start, status, stop, logs, duplicates, crumbs, scrub-history, env, clipboard, config, help, rescan, check-hash internal)
 ├── daemon/
-│   └── daemon.go           # Unix socket server + handlers (STATUS, DUPLICATES, SCRUB_HISTORY, CHECK_HASH, etc.)
+│   └── daemon.go           # Unix socket server + request handling (STATUS, DUPLICATES, CRUMBS, SCRUB_HISTORY, CHECK_HASH, RESCAN, PING, HALT, etc.) + Pillar 5 monitor
 ├── registry/
-│   └── registry.go         # In-memory SecretHashRegistry (hash-only)
+│   └── registry.go         # In-memory SecretHashRegistry (hash-only by construction)
 ├── discovery/
-│   ├── manager.go
-│   ├── scanner.go
+│   ├── manager.go          # Logical collector wiring (env + bitwarden) + rescan + initial discovery
+│   ├── scanner.go          # Env file walking + env_file_patterns matching + ignore
 │   └── ignore.go
 ├── config/
-│   └── config.go           # YAML + defaults (no RedactionConfig)
+│   └── config.go           # YAML loading + normalization + pillar structs + Get* helpers
+├── detection/
+│   └── detector.go         # Unified candidate extraction (entropy + patterns + assignment + structured) used by P2–P5
+├── policy/
+│   └── classifier.go       # P1 authority enforcement over P2
+├── residue/
+│   ├── manager.go
+│   └── detector.go         # Pillar 2 (crumbs) scanning + export format detection
+├── sources/
+│   ├── env.go
+│   └── bitwarden.go        # Hard-coded collectors for the logical P1 layer
+├── scrub/
+│   └── policy.go           # History hygiene (receipts, reprocess decisions, modes)
 └── logging/
-    └── logging.go          # Daemon-only logging (recorder helpers removed)
+    └── logging.go          # Daemon + CLI logging (to ~/.local/state/blastradius/)
 ```
-
-No `recorder/` package remains.
 
 ### Key Properties
 
@@ -84,31 +98,26 @@ No `recorder/` package remains.
 - Daemon is started explicitly via `blastradius start`.
 - `status --json` is the stable machine interface.
 - Zsh layer is thin formatting only (prompt segment + convenience wrappers).
-- All secret detection uses the central registry via `CHECK_HASH`.
+- All secret detection (P2–P5) routes through the central registry via `CHECK_HASH` + the unified `detection` package.
+- P1 authority over P2 is enforced internally by `policy.Classifier` (never surfaced as a conflict to the user; documented in config and code).
 
 ---
 
 ## Core Invariants (Current)
 
-| #   | Invariant                                                                                                                                                      | Status    |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| 1   | Registry never contains plaintext                                                                                                                              | ✅        |
-| 2   | No secret material ever written to disk                                                                                                                        | ✅        |
-| 3   | IPC over Unix domain socket with 0600                                                                                                                          | ✅        |
-|     | **Hard invariant since 2026**: path is not user-configurable; always `~/.local/state/blastradius/blastradius.sock` + 0700 dir + 0600 socket + capability token |           |
-| 4   | True singleton daemon                                                                                                                                          | ✅        |
-| 5   | Minimal metadata (opaque ProjectIDs)                                                                                                                           | ✅        |
-| 6   | Persisted config is non-sensitive                                                                                                                              | ✅        |
-| 7   | Safe degradation on failure                                                                                                                                    | ✅        |
-| 8   | Respects ignore patterns                                                                                                                                       | ✅        |
-| 9   | **Pillar 5 commands use direct exec only (no shell)**                                                                                                          | ✅ (2026) |
+| #   | Invariant                                                                                                                              | Status |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 1   | Registry never contains plaintext                                                                                                      | ✅     |
+| 2   | No secret material ever written to disk                                                                                                | ✅     |
+| 3   | IPC over Unix domain socket (hard-coded path `~/.local/state/blastradius/blastradius.sock`, 0700 dir + 0600 socket + capability token) | ✅     |
+| 4   | True singleton daemon                                                                                                                  | ✅     |
+| 5   | Minimal metadata (opaque ProjectIDs)                                                                                                   | ✅     |
+| 6   | Persisted config is non-sensitive                                                                                                      | ✅     |
+| 7   | Safe degradation on failure                                                                                                            | ✅     |
+| 8   | Respects ignore patterns                                                                                                               | ✅     |
+| 9   | Pillar 4 / `pillar4.commands` always use direct `exec` only (no shell) — hard security invariant                                       | ✅     |
 
-**Note on removed configuration options (2026 hardenings):**
-
-- `socket_path` is no longer accepted in `config.yaml` (the path is now a hard-coded invariant).
-- The `shell:` key under the old `pillar5_commands` (now `pillar4.commands`) is no longer accepted. All commands run via direct `exec` (hard invariant of the Pillar 4 primitive).
-  Old keys are silently ignored by the YAML parser. Users relying on previous behavior should migrate to wrapper scripts for complex commands and remove the old keys.
-- The `auto_on_prompt` key under `pillar4.commands[].*` was renamed to `enabled` (to reflect that the primitive is the core and auto/prompt wiring is future work). Old keys are ignored; `enabled` defaults to false.
+The socket path and direct-exec rule are hard invariants (not user-configurable) to reduce attack surface. Old top-level discovery keys and `shell:` / `auto_on_prompt` keys under commands are not accepted (and are silently ignored by the YAML unmarshaler if present in user config). The supported shape is the pillar-organized structure in `config.example.yaml`.
 
 ---
 
@@ -117,33 +126,35 @@ No `recorder/` package remains.
 ```bash
 blastradius                  # Help + config location
 blastradius start            # Start background daemon + initial discovery
-blastradius status [--json]  # Daemon + registry state (tracked hashes, duplicates, scan state)
+blastradius status [--json]  # Daemon + registry state (tracked hashes, duplicates, scan state, pillar summaries)
 blastradius stop / halt      # Graceful shutdown
-blastradius duplicates       # Pillar 1: cross-project secret duplication
-blastradius crumbs           # Pillar 2: forgotten vault exports & high-entropy residue in high-risk dirs
-blastradius scrub-history    # Pillar 3: scrub known secrets from shell history
-blastradius env [--json] [name]  # Pillar 4 primitive: run cmd, search output for secrets, report count (no values); --json for prompts
-blastradius clipboard        # Pillar 5: status|check|clear|nuke|scrub|redact (primitives + monitor alerts/auto)
 blastradius logs             # View daemon log
-blastradius config           # Basic config surface
+blastradius duplicates       # Pillar 1: cross-project secret duplication
+blastradius crumbs           # Pillar 2: forgotten vault exports & high-entropy dumps in high-risk dirs
+blastradius scrub-history    # Pillar 3: scrub known secrets from shell history (--mode, --dry-run, --json, --file, --full)
+blastradius rescan           # Pillar 1: trigger manual on-demand rescan
+blastradius env [--json] [name]  # Pillar 4 primitive: run cmd (direct exec), search output for secrets, report count (no values)
+blastradius clipboard        # Pillar 5: status|check|clear|nuke|scrub|redact (primitives + monitor-backed alerts + two-tier auto)
+blastradius config           # Show configuration
 ```
 
 Zsh integration (source `zsh/blastradius.zsh`):
 
-- `blastradius_prompt_info` — compact prompt segment
-- `blastradius_status`
+- `blastradius_prompt_info` — compact prompt segment (Pillar 1 count)
+- `blastradius_status` + thin wrappers for other commands
 
 ---
 
 ## Known Limitations / Future Work
 
-- **Pillar 1**: Key filtering for non-secret .env keys (via `pillar1.sources.env.options.ignore_patterns` under the logical layer) and collector-based rescan for sources (env + bitwarden) are complete.
-- **Pillar 1 reactivity**: Full filesystem reactivity (`fsnotify` / automatic rescan on file changes) is **deliberately not implemented** and is permanently out of scope. The security surface area and complexity were judged to outweigh the benefits. On-demand manual `rescan` (plus initial discovery at daemon start) is the supported and intentional mechanism.
+- **Pillar 1 reactivity**: Full filesystem reactivity (`fsnotify` / automatic rescan on file changes) is **deliberately not implemented** and is permanently out of scope. The security surface area and complexity outweigh the benefits. On-demand manual `rescan` (plus initial discovery at daemon start) is the supported and intentional mechanism.
 - No editor / AI prompt integration.
-- Full docs refresh for Pillar 5 targeted stories (1-5) + two-timeout/fast-alert details lives in `docs/pillars/pillar5_user_stories.md` (quick list) and `pillar5_evaluation.md`. Monitor is polling-based (pragmatic); true OS events future. (No legacy single-timer support; alpha.)
-- **Pillar 3** v1 is complete (modes + dry-run + multi-shell). Deferred post-v1 items (fake secrets spike, fish structured redaction, pillar3 observability in status) are tracked in [TODO.md](../TODO.md).
+- Pillar 5 monitor is polling-based (pragmatic 750ms interval, hard-coded for alpha; true OS-level change events are future work).
+- **Pillar 3** post-v1 items (fish structured redaction for its YAML-ish format, fake secrets replacement mode research spike, surface pillar3 observability in `status --json`) are tracked in [TODO.md](../TODO.md).
+- Bitwarden collector (P1 source) is functional for common cases (logins, notes, custom fields) but does not yet handle folders, organizations, attachments, TOTP, or sophisticated error handling around `bw` states well. This is the weakest part of the "done" story for P1 sources.
+- One optional powerful P2 story (lightweight git accident detection: reflog + stash + uncommitted tree + bounded recent commits) remains in TODO.
 
-**Architecture improvement (2026)**: All secret detection across Pillars 2–5 now routes through a single `internal/detection` package with robust candidate extraction (wrappers, context, whitespace fallback, entropy + patterns). This replaced previous naive whole-line/blob or hash-hex-grep approaches. See plan session notes for details.
+All secret detection across Pillars 2–5 routes through the single `internal/detection` package (robust candidate extraction with wrappers, context-aware assignment parsing, high-entropy regex seeds, structured data walking, and entropy gating). This is the current implementation.
 
 ---
 

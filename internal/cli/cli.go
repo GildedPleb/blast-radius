@@ -98,6 +98,9 @@ func Run(osArgs []string) {
 	case "crumbs":
 		jsonOutput := len(tail) > 0 && tail[0] == "--json"
 		RunCrumbs(jsonOutput)
+	case "rescan":
+		jsonOutput := len(tail) > 0 && tail[0] == "--json"
+		RunRescan(jsonOutput)
 	default:
 		fmt.Printf("Unknown command: %s\n\n", cmd)
 		PrintHelp()

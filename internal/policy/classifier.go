@@ -53,7 +53,7 @@ func (c *Classifier) ShouldTreatFileAsCrumb(absPath string) (bool, string) {
 	}
 
 	// === 2. Is this path under any P2-configured surface? ===
-	// We support both the new dirs[] (preferred) and legacy target_dirs for full compat.
+	// Only the dirs[] + per-dir files[] shape is supported (per-surface control).
 	surfaceReason := c.underP2Surface(absPath)
 	if surfaceReason == "" {
 		// Not under any P2 hunting surface → nothing for P2 to do.
@@ -67,13 +67,10 @@ func (c *Classifier) ShouldTreatFileAsCrumb(absPath string) (bool, string) {
 	return true, surfaceReason
 }
 
-// Note: previous signature accepted (data []byte, reg *registry.Registry) for
-// promised content-based decisions that were never implemented. The parameters
-// were dead weight and have been removed (see review finding).
-
 // isClaimedByP1Env returns true if absPath lives under one of the active
 // "env" Pillar 1 source's project roots AND its basename matches one of that
-// source's env_file_patterns (or the legacy default ".env*" behavior).
+// source's env_file_patterns (defaults to [".env*"] when EnvFilePatterns is
+// empty after normalization).
 func (c *Classifier) isClaimedByP1Env(absPath string) bool {
 	// Respect the Enabled flag on the env source (story #2: if env is disabled,
 	// P1 makes no authority claims and P2 can hunt the surface).
@@ -87,7 +84,7 @@ func (c *Classifier) isClaimedByP1Env(absPath string) bool {
 		return false
 	}
 
-	// Determine effective patterns (empty → legacy default for compat)
+	// Determine effective patterns (empty → conventional [".env*"] default)
 	patterns := envOpts.EnvFilePatterns
 	if len(patterns) == 0 {
 		patterns = []string{".env*"}
@@ -117,8 +114,7 @@ func (c *Classifier) isClaimedByP1Env(absPath string) bool {
 }
 
 // underP2Surface returns a non-empty reason string if absPath falls under
-// at least one configured P2 dir (dirs[] shape only — legacy target_dirs
-// was removed in the alpha cleanup).
+// at least one configured P2 dir (dirs[] + per-dir files[] shape).
 // The reason is human-useful for logging inside the residue manager.
 //
 // Special patterns "**/*", "**", or empty files[] mean "everything

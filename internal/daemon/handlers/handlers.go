@@ -27,7 +27,7 @@ type DaemonContext interface {
 	CrumbsSummary() map[string]any
 	RunCrumbsScan() *residue.ScanResult
 
-	// TriggerPillar1Rescan + Pillar1ScanStatus for Phase 3 manual rescan.
+	// TriggerPillar1Rescan + Pillar1ScanStatus for manual rescan.
 	// (Full fsnotify reactivity is permanently out of scope for security reasons.)
 	TriggerPillar1Rescan() error
 	Pillar1ScanStatus() map[string]any

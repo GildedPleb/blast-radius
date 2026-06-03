@@ -192,7 +192,7 @@ var scrubReceiptRE = regexp.MustCompile(`^#\s*blastradius-scrub-receipt:v(\d+):l
 // for a receipt line we may have left. It returns the receipt if found (and
 // parses it), otherwise nil. It now populates RegFp for v2+ receipts.
 func FindScrubReceiptNear(lines []string, scrubIdx int) *ScrubReceipt {
-	if scrubIdx < 0 || scrubIdx+2 >= len(lines) {
+	if scrubIdx < 0 || scrubIdx+1 >= len(lines) {
 		return nil
 	}
 

@@ -302,3 +302,95 @@ func TestShouldReprocess(t *testing.T) {
 		t.Error("v1 receipt should force reprocess/upgrade")
 	}
 }
+
+func TestFindScrubReceiptNear(t *testing.T) {
+	// Basic setup: a scrub invocation, then a receipt 1 or 2 lines later.
+	base := []string{
+		"ls -l",
+		"blastradius scrub-history --mode=delete",
+		"# blastradius-scrub-receipt:v1:lines=5:tail=abc123",
+		"some other line",
+	}
+
+	// Happy: finds v1 immediately after (j = idx+1)
+	scrubIdx := 1
+	r := FindScrubReceiptNear(base, scrubIdx)
+	if r == nil || r.Version != 1 || r.TailHash != "abc123" || r.RegFp != "" {
+		t.Errorf("expected v1 receipt near, got %+v", r)
+	}
+
+	// v2 with regfp, two lines after
+	linesV2 := []string{
+		"cmd before",
+		"blastradius scrub-history",
+		"intervening noise",
+		"# blastradius-scrub-receipt:v2:lines=42:tail=cafebabe:regfp=deadbeef42",
+	}
+	r = FindScrubReceiptNear(linesV2, 1)
+	if r == nil || r.Version != 2 || r.RegFp != "deadbeef42" {
+		t.Errorf("expected v2 with regfp, got %+v", r)
+	}
+
+	// Negative: scrubIdx < 0
+	if FindScrubReceiptNear(base, -1) != nil {
+		t.Error("negative scrubIdx must return nil")
+	}
+
+	// Negative: not enough lines after (scrubIdx+2 >= len)
+	short := []string{"only", "scrub cmd here"}
+	if FindScrubReceiptNear(short, 1) != nil {
+		t.Error("insufficient lines after scrubIdx must return nil")
+	}
+
+	// Negative: no receipt in the +1..+3 window
+	noReceipt := []string{
+		"foo",
+		"blastradius scrub-history",
+		"unrelated1",
+		"unrelated2",
+		"unrelated3",
+		"later receipt but outside window",
+	}
+	if FindScrubReceiptNear(noReceipt, 1) != nil {
+		t.Error("no receipt in the 3-line window must return nil")
+	}
+
+	// Trims whitespace on candidate lines (minimal: receipt is the immediate next + last line in file)
+	ws := []string{
+		"scrub-invocation",
+		"   # blastradius-scrub-receipt:v2:lines=10:tail=fff:regfp=999   ",
+	}
+	r = FindScrubReceiptNear(ws, 0)
+	if r == nil || r.RegFp != "999" {
+		t.Errorf("should parse trimmed receipt line even as last line, got %+v", r)
+	}
+
+	// Explicit minimal case that the old +2 guard would have incorrectly rejected
+	minimal := []string{
+		"blastradius scrub-history",
+		"# blastradius-scrub-receipt:v2:lines=2:tail=aa:regfp=bb",
+	}
+	r = FindScrubReceiptNear(minimal, 0)
+	if r == nil || r.RegFp != "bb" {
+		t.Errorf("must find receipt when it is the immediate next line (last in file), got %+v", r)
+	}
+}
+
+func TestStripReceipts_Internal(t *testing.T) {
+	// stripReceipts is unexported but same-package; covers the marker stripping used by
+	// HistoryLikelyRewrittenSince before fingerprinting.
+	lines := []string{
+		"real cmd",
+		"# blastradius-scrub-receipt:v2:lines=3:tail=xx:regfp=yy",
+		"another real",
+		" # blastradius-scrub-receipt:v1:lines=1:tail=zz",
+		"final",
+	}
+	stripped := stripReceipts(lines)
+	if len(stripped) != 3 {
+		t.Errorf("expected 3 kept, got %d: %v", len(stripped), stripped)
+	}
+	if strings.Contains(strings.Join(stripped, "\n"), "blastradius-scrub-receipt") {
+		t.Error("receipt markers must be stripped")
+	}
+}

@@ -99,7 +99,7 @@ pillar1:
         # for this env source. Only files matching these patterns under the
         # project_roots will have their secrets collected into the registry.
         #
-        # Default (when omitted or empty) = [".env*"] for full backward compat.
+        # Default (when omitted or empty) = [".env*"] (the conventional secret container files).
         #
         # Examples:
         #   env_file_patterns:
@@ -378,10 +378,9 @@ pillar2:
 #     YAML-ish redaction remains a separate future item)
 #   dash / pure POSIX sh: graceful "no persistent history" handling
 #
-# The previous "only look after the last scrub-history marker in the file" trick
-# is still used (for live append-mostly files) but is now augmented by the
-# registry fingerprint in receipts so we don't miss new secrets in older regions
-# or in rotated copies.
+# The "only look after the last scrub-history marker" optimization is still used
+# for live append-mostly files. It is augmented by the registry fingerprint in
+# receipts so we don't miss new secrets in older regions or in rotated copies.
 # ==============================================================================
 
 pillar3:
@@ -464,8 +463,10 @@ pillar5:
 
   # full_clear_timeout_seconds: if still stable (independently of or after the
   #   redact timeout), do a full clipboard clear (nuke). The two timeouts are
-  #   independent; see pillar5_user_stories.md for "use window" semantics and
-  #   configuring flexible vs strict "redact-then-nuke" behavior.
+  #   independent. This gives an intentional "use window": copy a secret, paste it
+  #   where you need it quickly, and the system will clean up for you after the
+  #   redact timeout (without requiring you to remember to scrub manually).
+  #   Both timeouts are user-customizable and independent.
   full_clear_timeout_seconds: 60
 
   # redact_placeholder: the string to use when redacting detected secrets from

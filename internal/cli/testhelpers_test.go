@@ -9,6 +9,7 @@ import (
 
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/daemon"
+	"github.com/GildedPleb/blast-radius/internal/logging"
 )
 
 // resetTestOverrides installs safe test doubles for the CLI layer.
@@ -51,6 +52,17 @@ func resetTestOverrides(t testing.TB) {
 		tmpLog := filepath.Join(t.TempDir(), "daemon.log")
 		*daemon.GetDaemonLogPathFnForTesting = func() string { return tmpLog }
 	}
+
+	// Isolate *cli* logging (Init calls from RunEnvCheck, RunClipboard, RunStart,
+	// conn batch etc.) to a per-test temp file under this test's TempDir.
+	// This ensures:
+	//   - Logs for this test don't pollute other tests' files or the real $HOME log.
+	//   - We redirect the global log.SetOutput away from any prior Init's fd (which
+	//     may point to a now-deleted TempDir from a previous test after make clean / rebuild).
+	//   - Failure logs (see scripts/coverage.sh) stay bounded and relevant per test.
+	cliLog := filepath.Join(t.TempDir(), "cli.log")
+	getDaemonLogPathFn = func() string { return cliLog }
+	_ = logging.Init(cliLog) // best-effort redirect; dir exists via TempDir
 }
 
 // mockSendDaemonCommand returns a sendDaemonCommandFn that always returns the given line.
@@ -61,10 +73,27 @@ func mockSendDaemonCommand(respLine string) func(string) (string, error) {
 }
 
 // defaultTestConfig returns a minimal config for tests.
+// It populates a few fields so that code inspecting the cfg (e.g. new RunConfig
+// summary) sees sensible values rather than pure zeros, while keeping
+// Pillar4.Commands empty so that "env default-env" in broad dispatch tests
+// still hits the "unknown pillar4 primitive command" error path (no exec side effects).
 // Socket path is now a hard-coded invariant; tests override it via
 // config.SocketPathFn in resetTestOverrides.
 func defaultTestConfig() config.Config {
-	return config.Config{}
+	return config.Config{
+		Pillar3: config.Pillar3Config{
+			Enabled: false,
+			Mode:    "redact",
+		},
+		Pillar5: config.Pillar5Config{
+			MonitorEnabled:          false,
+			AlertsEnabled:           false,
+			RedactTimeoutSeconds:    30,
+			FullClearTimeoutSeconds: 60,
+		},
+		// P2.Dirs left nil/empty (surfaces=0), P4.Commands left empty on purpose,
+		// P1 uses GetEnvOptions which tolerates zero.
+	}
 }
 
 // richDaemonResponse is a full response that exercises the new Pillar 1 collector_results,

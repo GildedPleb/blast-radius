@@ -187,7 +187,7 @@ func (d *Daemon) RunCrumbsScan() *residue.ScanResult {
 	return d.residue.RunScan()
 }
 
-// Pillar 1 manual rescan support (Phase 3 — explicit on-demand only).
+// Pillar 1 manual rescan support (explicit on-demand only).
 // Full fsnotify reactivity is permanently out of scope (security tradeoff).
 func (d *Daemon) TriggerPillar1Rescan() error {
 	if d.discovery == nil {
@@ -309,7 +309,7 @@ func (d *Daemon) Run() error {
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
 
-	// SECURITY (2026): write a fresh capability token next to the socket.
+	// SECURITY: write a fresh capability token next to the socket (hard invariant).
 	// Clients must present it as the first message on every connection.
 	token := make([]byte, 32)
 	if _, err := rand.Read(token); err != nil {
@@ -324,7 +324,7 @@ func (d *Daemon) Run() error {
 
 	log.Printf("Blast Radius daemon started and listening on %s (0600 + token auth)", socketPath)
 
-	// Run initial discovery on startup (Phase 1) — runs in background
+	// Run initial discovery on startup — runs in background
 	go d.discovery.RunInitialDiscovery()
 
 	// Pillar 5 reactive monitor (stories 4 + 5): clipboard change detection,
@@ -370,7 +370,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
 
-	// SECURITY (2026): every connection must begin with a valid AUTH line.
+	// SECURITY: every connection must begin with a valid AUTH line (capability token).
 	// The authenticateConnection hook is overridable so net.Pipe tests can
 	// bypass it while still exercising the real command dispatch.
 	firstLine, err := reader.ReadString('\n')
@@ -441,7 +441,7 @@ func getDaemonLogPath() string {
 	return filepath.Join(home, ".local", "state", "blastradius", "daemon.log")
 }
 
-// --- Capability token helpers (Phase D security hardening) ---
+// --- Capability token helpers (hard security invariant) ---
 
 const authTokenSuffix = ".auth"
 

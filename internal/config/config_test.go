@@ -402,9 +402,8 @@ pillar1:
 	}
 }
 
-// Legacy GetEnvOptions fallback tests were removed when the top-level
-// project_roots / skip_dirs / ignore_files fields and migration logic were deleted.
-// The single source of truth is now pillar1.sources.env.options (see GetEnvOptions).
+// GetEnvOptions tests cover the pillar1.sources.env.options shape (the current single source of truth).
+// The single source of truth is pillar1.sources.env.options (see GetEnvOptions and AGENTS.md).
 
 func TestGetEnvOptions_NewStyleOnly(t *testing.T) {
 	cfg := &Config{

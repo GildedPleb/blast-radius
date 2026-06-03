@@ -18,7 +18,7 @@ import (
 // Scanner discovers files matching the Pillar 1 env source's configured
 // env_file_patterns (positive include list declaring "these are my authoritative
 // secret containers"), parses them, and populates the registry.
-// Legacy default behavior (no patterns specified) remains ".env*".
+// When no patterns are specified the conventional default [".env*"] is used.
 type Scanner struct {
 	registry  *registry.Registry
 	cfg       *config.Config
@@ -99,7 +99,7 @@ func (s *Scanner) visitEnvFiles(root string, onFile func(path string) error) err
 		}
 
 		// Only process regular files that match the configured env file patterns
-		// (Pillar 1 authority declaration). Default is [".env*"] for backward compat.
+		// (Pillar 1 authority declaration). Default is [".env*"].
 		if info.Mode().IsRegular() && s.matchesEnvFile(filepath.Base(path)) {
 			if err := onFile(path); err != nil {
 				// onFile is responsible for any logging; we continue
@@ -291,9 +291,8 @@ func computeDisplayName(absDir string) string {
 
 // matchesEnvFile returns whether the given basename matches any of the
 // configured env file patterns for the Pillar 1 "env" source (or the
-// legacy default [".env*"] when none are specified).
+// conventional default [".env*"] when none are specified).
 //
-// This replaces the previous hardcoded strings.HasPrefix(base, ".env").
 // The patterns come from pillar1.sources.env.options.env_file_patterns —
 // the positive declaration of which on-disk containers are legitimate
 // secret sources (P1 authority).

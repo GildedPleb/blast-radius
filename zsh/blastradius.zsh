@@ -1,9 +1,10 @@
 # blastradius.zsh — thin status / HUD layer
 #
 # Provides lightweight wrappers and a prompt segment for visibility into the
-# running Blast Radius daemon (primarily Pillar 1 tracked secrets + duplicates).
+# running Blast Radius daemon (Pillar 1 tracked count in the prompt segment;
+# full status and other commands via wrappers).
 #
-# All heavy lifting (discovery, scrubbing, hygiene checks) is done by the
+# All heavy lifting (discovery, scrubbing, hygiene checks, monitors) is done by the
 # `blastradius` CLI + daemon. This file is intentionally minimal.
 
 _blastradius() { command blastradius "$@"; }
@@ -29,3 +30,7 @@ blastradius_duplicates() { _blastradius duplicates; }
 blastradius_scrub_history() { _blastradius scrub-history; }
 blastradius_env() { _blastradius env "$@"; }
 blastradius_clipboard() { _blastradius clipboard "$@"; }
+blastradius_crumbs() { _blastradius crumbs "$@"; }
+blastradius_rescan() { _blastradius rescan; }
+blastradius_config() { _blastradius config; }
+blastradius_logs() { _blastradius logs; }

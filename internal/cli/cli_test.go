@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -50,11 +51,19 @@ func TestRun_Dispatch(t *testing.T) {
 	})
 
 	t.Run("rescan", func(t *testing.T) {
-		// No daemon
+		// No daemon: explicitly use a failing send so we exercise the "no daemon"
+		// path in RunRescan/parse *without* going through realSendDaemonCommand /
+		// openDaemonConn / real dial + readAuthTokenForSocket. This keeps the
+		// broad unsilenced dispatch test from having extra real-conn side effects
+		// (fd, auth reads, scheduling) that could affect later tests in the package
+		// (e.g. the pipe-based TestRealSendDaemonCommand).
+		prevSend := sendDaemonCommandFn
+		sendDaemonCommandFn = func(string) (string, error) { return "", fmt.Errorf("no daemon") }
 		Run([]string{"rescan"})
 		Run([]string{"rescan", "--json"})
+		sendDaemonCommandFn = prevSend
 
-		// With rich Pillar 1 response
+		// With rich Pillar 1 response (mocked send)
 		sendDaemonCommandFn = mockSendDaemonCommand(richDaemonResponse)
 		Run([]string{"rescan"})
 		Run([]string{"rescan", "--json"})

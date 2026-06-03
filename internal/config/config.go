@@ -187,13 +187,14 @@ type SourceConfig struct {
 }
 
 // EnvOptions holds the effective (typed) configuration for the "env" logical source
-// under pillar1.sources.env.options. This is the single source of truth after the
-// removal of the legacy top-level project_roots / skip_dirs / ignore_files fields.
+// under pillar1.sources.env.options. This is the single source of truth for
+// P1 discovery settings (project roots, skip/ignore lists, and env_file_patterns
+// which declares P1 authority over matching files).
 //
 // EnvFilePatterns is the positive list of file globs (e.g. ".env*", ".env.local",
 // ".private", ".secret", ".pk", ".cert") that this source claims as its authoritative
 // on-disk secret containers. This is the declaration of "P1 authority".
-// When empty after normalization, legacy default [".env*"] behavior is used for compat.
+// When empty after normalization, the conventional default [".env*"] is used.
 type EnvOptions struct {
 	ProjectRoots    []string `json:"project_roots,omitempty"`
 	SkipDirs        []string `json:"skip_dirs,omitempty"`
@@ -210,8 +211,8 @@ type BitwardenOptions struct {
 
 // DefaultConfig returns a safe default configuration.
 //
-// All defaults now live under the pillarN: sections (single source of truth).
-// The legacy top-level project_roots/skip_dirs/ignore_files fields have been removed.
+// All defaults live under the pillarN: sections (single source of truth). The
+// supported shape is the pillar-organized structure shown in config.example.yaml.
 func DefaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 
@@ -335,9 +336,8 @@ func Load() (cfg *Config, configPath string, err error) {
 // normalizePillar1Sources ensures the Pillar1.Sources map and the two v1
 // providers ("env", "bitwarden") always exist after unmarshal.
 //
-// With the legacy top-level project_roots/skip_dirs/ignore_files fields removed,
-// this function no longer performs any migration. It only guarantees a stable
-// shape for collectors and GetEnvOptions.
+// This function guarantees a stable shape for collectors and GetEnvOptions
+// (both "env" and "bitwarden" entries always exist after normalization).
 func normalizePillar1Sources(cfg *Config) {
 	if cfg.Pillar1.Sources == nil {
 		cfg.Pillar1.Sources = make(map[string]SourceConfig)
@@ -396,7 +396,7 @@ func normalizeStringList(v any) []string {
 // normalizePillar3 ensures Pillar3 has safe defaults for Mode and RedactPlaceholder
 // even under partial YAML population. HistoryFiles and HistoryRoots are left
 // exactly as provided (nil or populated); the discovery layer treats nil/empty
-// as "just $HOME only" (plus explicit extras) for backward compat. After Load()
+// as "just $HOME only" (plus explicit extras). After Load()
 // these fields may be nil in the returned config.
 func normalizePillar3(cfg *Config) {
 	if cfg == nil {
@@ -419,7 +419,7 @@ func normalizePillar3(cfg *Config) {
 	}
 	// HistoryFiles / HistoryRoots are deliberately *not* forced to non-nil here.
 	// The discovery logic (and docs) treat nil or empty as "use $HOME only"
-	// for backward compat. Callers after Load() may observe nil for these.
+	// Callers after Load() may observe nil for these (treated as "HOME only" by discovery).
 	// (normalizePillar3 still ensures safe Mode/placeholder.)
 	cfg.Pillar3 = p
 }
@@ -485,8 +485,7 @@ func (c *Config) GetSourceIgnorePatterns(sourceName string) []string {
 // (Pillar 1 legitimate secret discovery).
 //
 // This is now the single source of truth. All values come from
-// pillar1.sources.env.options (the legacy top-level project_roots / skip_dirs /
-// ignore_files fields and migration logic have been removed).
+// pillar1.sources.env.options (the single source of truth for env source settings).
 func (c *Config) GetEnvOptions() EnvOptions {
 	if c == nil {
 		return EnvOptions{

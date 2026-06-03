@@ -9,7 +9,7 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/logging"
 )
 
-// RunClipboard handles Pillar 5 clipboard operations (macOS only for v1)
+// RunClipboard handles Pillar 5 clipboard operations (macOS primitives + monitor-backed behaviors)
 func RunClipboard(args []string) {
 	_ = logging.Init(getDaemonLogPathFn())
 
@@ -56,7 +56,7 @@ func RunClipboard(args []string) {
 		}
 		fmt.Println(`{"status":"ok","message":"clipboard cleared"}`)
 	case "scrub", "redact":
-		// Story 2: redact only the secrets, preserve the rest of the content.
+		// Redact only the secrets, preserve the rest of the content.
 		logging.Println("RunClipboard: scrubbing clipboard (redact secrets only)")
 		out, err := execCommand("pbpaste").Output()
 		if err != nil {

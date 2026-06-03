@@ -31,7 +31,7 @@ func realReadAuthTokenForSocket(socketPath string) (string, error) {
 }
 
 // realSendDaemonCommand is the actual implementation.
-// It performs the 2026 AUTH handshake before the real command.
+// It performs the AUTH handshake (capability token) before the real command.
 func realSendDaemonCommand(cmd string) (string, error) {
 	conn, err := openDaemonConn()
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
@@ -405,4 +406,32 @@ func TestRunScan_CollectsErrors(t *testing.T) {
 	if !foundWalkErr {
 		t.Logf("note: walk err for restricted sub not seen (may vary by FS); errors=%v", res2.Errors)
 	}
+}
+
+// TestResidueManager_ConcurrentReadWrite exercises the last* fields under
+// concurrent calls (RunScan writers + CrumbsSummary/GetLastResult readers)
+// matching the daemon's go handleConnection pattern for CRUMBS + STATUS.
+// Uses the fast disabled path (no real FS work) + many goroutines.
+// Follows project test rules: no sleeps, no real listeners.
+func TestResidueManager_ConcurrentReadWrite(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Pillar2.Enabled = false // fast path: hits last= publish without walking
+	m := NewManager(cfg, registry.New())
+
+	var wg sync.WaitGroup
+	const iters = 20
+	for i := 0; i < iters; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = m.RunScan()
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = m.CrumbsSummary()
+			_ = m.GetLastResult()
+		}()
+	}
+	wg.Wait()
 }

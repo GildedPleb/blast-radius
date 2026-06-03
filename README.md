@@ -8,27 +8,7 @@ Blast Radius helps developers avoid leaking secrets through common workflow mist
 - Thin Zsh integration layer
 - Five extensible pillars for analysis, alerting, and hygiene
 
-**Current Status:** Core daemon + discovery + hygiene pillars complete. See docs/pillars/idiomatic_pillars.md for the current framing.
-
-See [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) for a detailed snapshot of architecture, decisions, invariants, and current capabilities.
-
-## Phase 0 – Foundations (Completed)
-
-- Singleton background daemon using Unix domain sockets with strict `0600` permissions
-- Clean `blastradius status` command (never auto-starts the daemon)
-- In-memory `SecretHashRegistry` (SHA-256 only, never stores plaintext)
-- Configuration loading from `~/.config/blastradius/config.yaml` (non-sensitive only)
-- All Phase 0 invariants upheld and documented
-- No secrets or hashes ever written to disk
-
-### Key Invariants (Phase 0)
-
-1. The registry **never** contains plaintext secret values.
-2. No secret material (plaintext or hashes) is ever written to disk.
-3. All IPC uses a local Unix domain socket with `0600` permissions.
-4. The background process is a true singleton.
-5. Only non-sensitive configuration is persisted.
-6. Failures degrade safely with clear status reporting.
+**Current Status:** Core daemon, discovery (Pillar 1), residue hunting (Pillar 2), and hygiene pillars (3–5) are implemented. See [docs/pillars/idiomatic_pillars.md](docs/pillars/idiomatic_pillars.md) for the current framing and [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) for architecture, commands, invariants, and capabilities.
 
 ## Building & Running
 
@@ -72,13 +52,13 @@ See the "Coverage model" section near the top of [Makefile](Makefile) for the (n
 - Hash-only operation (never stores or logs plaintext)
 - Minimal metadata (opaque ProjectIDs in the registry)
 - Local-only communication over Unix domain socket
-- **Hard security invariants** (as of 2026 hardenings):
+- **Hard security invariants**:
   - The IPC socket path is **not user-configurable** and always lives at `~/.local/state/blastradius/blastradius.sock` (0700 dir + 0600 socket + capability token auth).
-  - Pillar 4 (`env`) primitive commands are **always executed via direct `exec` with no shell** (`sh -c` is never used). For complex logic, point at a wrapper script you control.
+  - Pillar 4 (`env`) primitive commands (and any commands under `pillar4.commands`) are **always executed via direct `exec` with no shell** (`sh -c` is never used). For complex logic, point at a wrapper script you control.
 - Safe degradation on failure
-- Designed with a local attacker in mind (see security review in repo history for the four 2026 hardenings)
+- Designed with a local attacker in mind
 
-## Zsh Integration (Phase 2)
+## Zsh Integration
 
 Blast Radius provides a thin, composable Zsh layer.
 
@@ -110,10 +90,6 @@ The segment is designed to be **fast** and safe to call on every prompt.
 
 The Zsh layer provides a thin prompt segment for daemon visibility. Additional hooks can be added by users for custom workflows.
 
-## Next Phases (Planned)
-
-See the implementation plan for details on Pillars 1–5.
-
 ## License
 
 To be determined. Currently under active development.
@@ -122,10 +98,5 @@ To be determined. Currently under active development.
 
 **Note:** This project is in early development. Interfaces and behavior will evolve.
 
-## Current Architecture Notes
-- Single entrypoint: `blastradius`
-- All state for humans and Zsh comes from `blastradius status --json`
-- Thin Zsh layer for prompt visibility (Pillar 1 tracking)
-
-See `docs/pillars/idiomatic_pillars.md` for the current five-pillar framing.
+See `docs/pillars/idiomatic_pillars.md` for the current five-pillar framing and `docs/CURRENT_STATE.md` for the detailed architecture snapshot.
 

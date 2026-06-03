@@ -27,7 +27,7 @@ It builds the ground truth registry of known secrets by looking in the right loc
 
 **Finding and collecting secrets from where they should _not_ be.**
 
-This is the inversion of Pillar 1.
+This is the deliberate inversion of Pillar 1.
 
 Instead of looking in legitimate, controlled sources, it hunts for secrets that have escaped into dangerous, accidental locations — especially high-likelihood "residue sinks" that humans actually use when they fuck up:
 
@@ -75,9 +75,14 @@ This is the safe "run printenv (or similar) right now without burning anything?"
 
 **Catching and limiting secrets that have reached one of the most dangerous single-copy surfaces on a developer machine.**
 
-On macOS, the clipboard is an extremely high-blast-radius location. This pillar detects when known secrets land in the clipboard (via explicit primitives like `blastradius clipboard check` / `scrub`, and via an optional background monitor that reacts to copy events) and can surface immediate awareness (alerts, sounds, status) plus optional time-based limiting / redaction.
+On macOS, the clipboard is an extremely high-blast-radius location. This pillar provides:
 
-The reactive monitor (when enabled) is event-driven: on clipboard change it scans and can alert the user instantly ("known secrets just appeared"), letting them ignore (intentional copy) or act (they didn't realize). This provides fast feedback without requiring the user to remember to run checks, while still leaving intent judgment to the human.
+- Explicit primitives: `blastradius clipboard status|check|clear|nuke|scrub|redact` (always available).
+- Optional background monitor (enabled via `pillar5.monitor_enabled`): polls the clipboard and reacts to changes. On first known secret it can surface an immediate alert (notification + optional sound) via the fast path. After stable presence it performs two-tier auto cleanup (redact known secrets after `redact_timeout_seconds` (default 30s), then full clear after `full_clear_timeout_seconds` (default 60s)). The two timeouts are independent.
+- State (secret count, last change, monitor active, whether auto actions have fired) is reported in `blastradius status` and `status --json` under `pillar5`.
+- Redaction placeholder prefers `pillar5.redact_placeholder`, falling back to `pillar3.redact_placeholder`, then a hard default. All primitives work even if the monitor is disabled.
+
+The reactive path gives fast feedback ("a secret just landed") without forcing the user to remember to check, while leaving the decision (intentional copy vs. accident) to the human. The auto tiers give a safe "use window" for intentional short-term copies.
 
 **Core question it answers**: "Has a secret made it into the one place that makes it trivial to paste into the wrong window, chat, or AI prompt?"
 
@@ -91,7 +96,7 @@ The reactive monitor (when enabled) is event-driven: on clipboard change it scan
 | 2      | Illegitimate Residue Hunting | Find secrets in accidental, dangerous places                          | Where they _should not_ be        |
 | 3      | History Hygiene              | Remove secrets from command history                                   | Cleanup of past mistakes          |
 | 4      | Runtime Environment Hygiene  | Primitive: run commands + detect known secrets in output (count only) | The `env` introspection primitive |
-| 5      | Clipboard Hygiene            | Limit damage on the highest-risk copy surface                         | Single dangerous clipboard        |
+| 5      | Clipboard Hygiene            | Limit damage on the highest-risk copy surface (primitives + reactive monitor + two-tier auto) | Single dangerous clipboard        |
 
 This framing makes the system feel coherent:
 

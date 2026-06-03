@@ -2,6 +2,7 @@ package policy
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
@@ -190,5 +191,89 @@ func TestClassifier_ExpandAndAbs(t *testing.T) {
 	treat, _ := c.ShouldTreatFileAsCrumb(claimed)
 	if treat {
 		t.Error("~ expansion + P1 claim should still block crumb")
+	}
+}
+
+func TestClassifier_New_NilConfig(t *testing.T) {
+	// New(nil) must not panic and must produce a usable classifier (defensive defaulting).
+	c := New(nil)
+	if c == nil {
+		t.Fatal("New(nil) returned nil")
+	}
+	// With default cfg, a random path under no P2 surface should not be a crumb.
+	treat, reason := c.ShouldTreatFileAsCrumb("/tmp/random/file.txt")
+	if treat {
+		t.Errorf("New(nil) default should report no P2 surface for unrelated path, got treat=true (%s)", reason)
+	}
+}
+
+func TestClassifier_UnderP2Surface_AndBroad(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Pillar1.Sources["env"] = config.SourceConfig{Enabled: false} // P1 off so we see P2 decisions
+	cfg.Pillar2.Enabled = true
+	cfg.Pillar2.Dirs = []config.Pillar2Dir{
+		{Path: "/tmp/broad", Files: []string{"**/*"}},
+		{Path: "/tmp/narrow", Files: []string{"*.secret", "creds*"}},
+		{Path: "/tmp/emptyfiles", Files: []string{}}, // broad by empty
+	}
+
+	c := New(cfg)
+
+	// Broad **/* under dir
+	treat, reason := c.ShouldTreatFileAsCrumb("/tmp/broad/anything.txt")
+	if !treat || !strings.Contains(reason, "broad") {
+		t.Errorf("broad **/* should treat as crumb: treat=%v reason=%s", treat, reason)
+	}
+
+	// isBroadP2Surface direct (unexported, same package)
+	if !isBroadP2Surface([]string{"**/*"}) || !isBroadP2Surface(nil) || !isBroadP2Surface([]string{""}) || !isBroadP2Surface([]string{"**"}) {
+		t.Error("isBroadP2Surface should recognize **/*, *, **, empty, nil as broad")
+	}
+	if isBroadP2Surface([]string{"specific.txt"}) {
+		t.Error("specific file list should not be broad")
+	}
+
+	// Narrow: matches one of the files[] globs (basename)
+	treat, _ = c.ShouldTreatFileAsCrumb("/tmp/narrow/api.secret")
+	if !treat {
+		t.Error("narrow *.secret should match and treat as crumb")
+	}
+
+	// Narrow: does not match the files[] → under dir but not this surface's files → no treat
+	treat, reason = c.ShouldTreatFileAsCrumb("/tmp/narrow/normal.txt")
+	if treat {
+		t.Errorf("narrow surface should not treat non-matching file as crumb, got treat=true (%s)", reason)
+	}
+
+	// Empty files[] list means broad (everything under the dir)
+	treat, _ = c.ShouldTreatFileAsCrumb("/tmp/emptyfiles/whatever")
+	if !treat {
+		t.Error("empty files[] should be treated as broad P2 surface")
+	}
+
+	// No P2 dirs at all
+	cfg2 := config.DefaultConfig()
+	cfg2.Pillar2.Enabled = true
+	cfg2.Pillar2.Dirs = nil
+	c2 := New(cfg2)
+	treat, reason = c2.ShouldTreatFileAsCrumb("/tmp/anything")
+	if treat {
+		t.Errorf("no P2 dirs configured should yield no crumb: %s", reason)
+	}
+}
+
+func TestClassifier_ShouldTreat_NilAndEdges(t *testing.T) {
+	// nil classifier
+	var c *Classifier
+	treat, reason := c.ShouldTreatFileAsCrumb("/tmp/x")
+	if treat || !strings.Contains(reason, "no classifier") {
+		t.Errorf("nil classifier should early return false + reason, got %v %q", treat, reason)
+	}
+
+	// cfg with no sources etc. (defaults)
+	c = New(config.DefaultConfig())
+	treat, _ = c.ShouldTreatFileAsCrumb("/tmp/x")
+	if treat {
+		t.Error("default empty config should not treat random path as crumb")
 	}
 }

@@ -51,7 +51,9 @@ collect() {
 
     start=$(date +%s)
     if ! "./$testbin" -test.count=1 -test.timeout=5s -test.coverprofile="$out" >"$log" 2>&1; then
-        cat "$log"
+        echo "=== FAILURE: captured output tail for ${name} (last 200 lines) ==="
+        tail -200 "$log" || cat "$log"
+        echo "=== end of tail ==="
         rm -f "$log"
         exit 1
     fi
@@ -83,7 +85,9 @@ collect_quiet() {
 
     start=$(date +%s)
     if ! "./$testbin" -test.count=1 -test.timeout=5s -test.coverprofile="$out" >"$log" 2>&1; then
-        cat "$log"
+        echo "=== FAILURE: captured output tail for ${name} (last 200 lines) ==="
+        tail -200 "$log" || cat "$log"
+        echo "=== end of tail ==="
         rm -f "$log"
         exit 1
     fi

@@ -17,9 +17,9 @@ type ignoreRule struct {
 // IgnoreMatcher handles gitignore-style ignore patterns with support for
 // negation (!), **, anchored paths, and directory-only rules.
 //
-// This is a significantly improved implementation for Phase 2 while
-// preserving the exact public API so existing callers (scanner + residue)
-// continue to work unchanged.
+// This is the current implementation with support for negation, **, anchored
+// paths, and directory-only rules. It preserves the exact public API so
+// callers (scanner + residue) continue to work unchanged.
 type IgnoreMatcher struct {
 	root  string
 	rules []ignoreRule

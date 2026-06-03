@@ -7,6 +7,7 @@ func TestRunConfig(t *testing.T) {
 	restore := silenceOutput()
 	defer restore()
 
+	// Exercises the no-arg (show) path and the unknown-subcommand path.
 	RunConfig(nil)
 	RunConfig([]string{"unknown"})
 }
