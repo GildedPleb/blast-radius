@@ -59,7 +59,7 @@ func TestRunClipboard_CheckWithSecrets(t *testing.T) {
 	}
 
 	// Simulate daemon side: consume AUTH (best-effort) + CHECK_HASH, always reply known:true
-	// for this test (the "known via candidate extraction" story).
+	// for this test (the "known via candidate extraction" case).
 	go func() {
 		defer serverConn.Close()
 		r := bufio.NewReader(serverConn)
@@ -321,7 +321,7 @@ func TestRunClipboard_CheckWithCandidatesButAuthSkipped(t *testing.T) {
 	RunClipboard([]string{"check"})
 }
 
-// TestRunClipboard_Scrub exercises the redact/scrub subcommand (story 2 primitive)
+// TestRunClipboard_Scrub exercises the redact/scrub subcommand (the redact primitive)
 // using a real net.Pipe to drive the CHECK_HASH loop (like the check full-conn tests),
 // plus a pbcopy override that captures what would be written to the pasteboard so we
 // can assert the redaction actually happened (secrets replaced, non-secrets preserved,

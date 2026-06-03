@@ -3,14 +3,10 @@ package handlers
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 
-	"github.com/GildedPleb/blast-radius/internal/detection"
 	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/scrub"
-	"github.com/GildedPleb/blast-radius/internal/util"
 )
 
 type ScrubHistoryHandler struct{}
@@ -82,8 +78,8 @@ func (ScrubHistoryHandler) Handle(args string, d DaemonContext) (any, error) {
 	var targets []string
 	if overrideFile != "" {
 		// --file forces exactly one. If the user explicitly asked for a
-		// non-existent path we return a hard error (preserves old test
-		// expectations and "I asked for this exact file" intent).
+		// non-existent path we return a hard error (to match documented and
+		// tested behavior for explicit --file overrides naming a missing path).
 		if _, err := os.Stat(overrideFile); err != nil {
 			return map[string]any{
 				"status":  "error",
@@ -93,8 +89,8 @@ func (ScrubHistoryHandler) Handle(args string, d DaemonContext) (any, error) {
 		targets = []string{overrideFile}
 	} else {
 		// Current discovery path (LCD + rotated siblings under roots).
-		// Tests must override discoverHistoryTargetsFn (or configure HistoryRoots/HistoryFiles
-		// + getHistoryHome) to control what gets scrubbed.
+		// Tests override discoverHistoryTargetsFn (see seam below) to control
+		// targets hermetically (history_roots/history_files + $HOME via t.Setenv).
 		roots := cfg.HistoryRoots
 		extras := cfg.HistoryFiles
 		targets = discoverHistoryTargetsFn(roots, extras)
@@ -116,7 +112,7 @@ func (ScrubHistoryHandler) Handle(args string, d DaemonContext) (any, error) {
 	type fileResult struct {
 		path           string
 		originalLines  int
-		processedLines int
+		processedLines int // lines fed to this scrub pass (suffix after marker for incremental; full for --full). Used for classic single-file "lines_since_last_scrub" compat.
 		deleted        int
 		redacted       int
 		secrets        int
@@ -148,73 +144,34 @@ func (ScrubHistoryHandler) Handle(args string, d DaemonContext) (any, error) {
 		lines := strings.Split(string(data), "\n")
 		res.originalLines = len(lines)
 
-		// Decide whether to do work using the hybrid signals:
-		// 1. --full forces everything.
-		// 2. Otherwise consult the latest receipt we control (deterministic
-		//    rewrite/restore observation) + the current regfp.
-		latestReceipt := scrub.FindLatestReceipt(lines)
+		// The decision logic, range selection, ApplyBatch, and dry-run preview
+		// live in scrub so that all Pillar 3 policy (receipts, fingerprints,
+		// incremental reprocessing, discovery rules) is in one package.
+		proc := scrub.ProcessHistory(lines, allHashes, currentRegFp, scrub.Mode(mode), placeholder, full, dryRun)
 
-		doWork := full
-		if !doWork {
-			if scrub.ShouldReprocess(lines, latestReceipt, currentRegFp) {
-				doWork = true
-			}
-		}
-
-		if !doWork {
+		if proc.Skipped {
 			res.skipped = true
-			res.skippedReason = "receipt+regfp"
-			if latestReceipt != nil {
-				res.hadReceipt = true
-				res.regFpMatch = (latestReceipt.RegFp == currentRegFp)
-			}
+			res.skippedReason = proc.SkippedReason
+			res.hadReceipt = proc.HadReceipt
+			res.regFpMatch = proc.RegFpMatch
 			results = append(results, res)
 			continue
 		}
 
-		// We are going to process (at least) some portion of this file.
-		// We keep the classic "from last human marker or full" logic for the
-		// actual ApplyBatch range, but we have already decided via ShouldReprocess
-		// (receipt + regfp) that the file is "dirty".
-		lastScrubIdx := scrub.FindLastScrubInvocation(lines)
-		receiptNear := scrub.FindScrubReceiptNear(lines, lastScrubIdx)
+		kept := proc.Kept
+		deleted := proc.Deleted
+		redacted := proc.Redacted
+		secretsFound := proc.Secrets
 
-		processStart := 0
-		if lastScrubIdx >= 0 && !full {
-			if receiptNear != nil && scrub.HistoryLikelyRewrittenSince(lines, receiptNear) {
-				processStart = 0
-			} else {
-				processStart = lastScrubIdx + 1
-			}
-		}
-
-		toProcess := lines[processStart:]
-
-		// Build the known set (same as before).
-		known := make(map[[32]byte]bool, len(allHashes))
-		for _, h := range allHashes {
-			known[h] = true
-		}
-
-		det := detection.NewDetector()
-
-		keptSuffix, deleted, redacted, secretsFound := scrub.ApplyBatch(toProcess, known, det, scrub.Mode(mode), placeholder)
-
-		kept := append(append([]string(nil), lines[:processStart]...), keptSuffix...)
-
-		res.processedLines = len(toProcess)
+		res.processedLines = proc.Processed // count of lines after last marker (or full file for --full) that were fed to the scrub pass
 		res.deleted = deleted
 		res.redacted = redacted
 		res.secrets = secretsFound
-		res.hadReceipt = latestReceipt != nil
-		if latestReceipt != nil {
-			res.regFpMatch = (latestReceipt.RegFp == currentRegFp)
-		}
+		res.hadReceipt = proc.HadReceipt
+		res.regFpMatch = proc.RegFpMatch
 
 		if dryRun {
-			// Wire the previously-dead preview builder so --dry-run responses
-			// (and CLI human output) actually include example_scrubbed_lines etc.
-			res.preview = buildDryRunPreview(lines, kept, deleted, redacted, secretsFound, placeholder)
+			res.preview = proc.Preview
 		}
 
 		// Write + receipt planting for real runs on targets we decided to process.
@@ -325,7 +282,7 @@ func (ScrubHistoryHandler) Handle(args string, d DaemonContext) (any, error) {
 	if len(results) == 1 {
 		r := results[0]
 		resp["original_lines"] = r.originalLines
-		resp["lines_since_last_scrub"] = r.processedLines
+		resp["lines_since_last_scrub"] = r.processedLines // size of the range actually scrubbed this invocation (post-marker suffix or full)
 		resp["entries_deleted"] = r.deleted
 		resp["entries_redacted"] = r.redacted
 		resp["secrets_found"] = r.secrets
@@ -373,159 +330,8 @@ func (ScrubHistoryHandler) Handle(args string, d DaemonContext) (any, error) {
 	return resp, nil
 }
 
-// buildDryRunPreview returns a small, safe summary + up to 3 example scrubbed lines
-// (already containing only placeholders, never real secret material).
-func buildDryRunPreview(originalLines, kept []string, deleted, redacted, secrets int, placeholder string) map[string]any {
-	preview := map[string]any{
-		"would_delete":  deleted,
-		"would_redact":  redacted,
-		"secrets_found": secrets,
-	}
-	// Collect a few redacted examples (lines that changed and now contain the placeholder).
-	examples := []string{}
-	seen := 0
-	for i, orig := range originalLines {
-		if seen >= 3 {
-			break
-		}
-		if i < len(kept) && kept[i] != orig && strings.Contains(kept[i], placeholder) {
-			examples = append(examples, kept[i])
-			seen++
-		}
-	}
-	if len(examples) > 0 {
-		preview["example_scrubbed_lines"] = examples
-	}
-	return preview
-}
-
 // discoverHistoryTargetsFn is the overridable seam for the (only) multi-target
 // discovery. Tests that want to control exactly which artifacts are considered
 // (for hermetic testing of history_roots, auto-rotated siblings, etc.) should
-// override this.
-var discoverHistoryTargetsFn = discoverHistoryTargets
-
-// getHistoryHome is a test seam for hermetic control of the HOME value used
-// when discovering history files. Production code uses the real environment.
-var getHistoryHome = func() string { return os.Getenv("HOME") }
-
-// discoverHistoryTargets is the multi-target discovery for Pillar 3.
-// It returns a deduplicated, existing-files-only list of history artifacts to consider.
-//
-// Rules:
-//   - Always honor $HISTFILE if it exists.
-//   - For each provided root (or $HOME if none), add the LCD live candidates under it.
-//   - For every directory that contains a live candidate, also add "rotated sibling"
-//     files that match common backup/rotated patterns for the known stems.
-//   - Append all user explicit extras (history_files).
-//   - The result is sorted (lexical) and unique for determinism (readdir order is
-//     not guaranteed stable across platforms or runs).
-//
-// This is the supported discovery path (LCD live files + rotated siblings under the roots).
-func discoverHistoryTargets(roots []string, extras []string) []string {
-	home := getHistoryHome()
-	seen := map[string]bool{}
-	var out []string
-
-	add := func(p string) {
-		if p == "" || seen[p] {
-			return
-		}
-		seen[p] = true
-		if _, err := os.Stat(p); err == nil {
-			out = append(out, p)
-		}
-	}
-
-	// $HISTFILE always has priority if it exists.
-	add(os.Getenv("HISTFILE"))
-
-	// Determine the roots we will search.
-	searchRoots := roots
-	if len(searchRoots) == 0 {
-		if home != "" {
-			searchRoots = []string{home}
-		}
-	}
-
-	// Known live stems (basenames) we care about for sibling detection.
-	liveStems := []string{
-		".bash_history", ".zsh_history", ".zhistory", ".history",
-		".sh_history", ".mksh_history", "fish_history",
-	}
-
-	for _, r := range searchRoots {
-		if r == "" {
-			continue
-		}
-		// Expand ~ if present in a root (users may put "~/foo" in config).
-		// Unified with util.ExpandPath (which also handles bare "~").
-		r = util.ExpandPath(r)
-
-		for _, stem := range liveStems {
-			cand := filepath.Join(r, stem)
-			add(cand)
-		}
-
-		// Now look for rotated/backup siblings in the same directory as any
-		// of the candidates we just considered (or the root itself).
-		// We do a cheap ReadDir + name filter instead of full glob for simplicity
-		// and to avoid pulling in extra matching logic for this change.
-		entries, err := os.ReadDir(r)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			name := e.Name()
-			// Match common rotated patterns against any of our stems or generic history-ish names.
-			if looksLikeRotatedHistory(name, liveStems) {
-				add(filepath.Join(r, name))
-			}
-		}
-	}
-
-	// Explicit extras always win inclusion (even if they wouldn't be auto-discovered).
-	for _, p := range extras {
-		p = util.ExpandPath(p)
-		add(p)
-	}
-
-	// Sort for deterministic order (readdir order is not stable across platforms/runs).
-	sort.Strings(out)
-	return out
-}
-
-// looksLikeRotatedHistory returns true for names that are very likely rotated
-// or backup copies of shell history files. It is intentionally conservative.
-func looksLikeRotatedHistory(name string, stems []string) bool {
-	lower := strings.ToLower(name)
-	for _, s := range stems {
-		base := filepath.Base(s)
-		if strings.HasPrefix(lower, base) || strings.Contains(lower, strings.TrimPrefix(base, ".")) {
-			// Any name that starts with or contains a stem and has a "rotated" suffix.
-			if strings.Contains(lower, ".old") || strings.Contains(lower, ".bak") ||
-				strings.Contains(lower, ".backup") || strings.Contains(lower, ".orig") ||
-				strings.HasSuffix(lower, "~") {
-				return true
-			}
-			// Numeric rotated ( .1 .2 .3 ... ) or .1.gz style (we don't gunzip here).
-			if matched, _ := filepath.Match(base+`.[0-9]*`, name); matched {
-				return true
-			}
-			if matched, _ := filepath.Match("*"+base+`.[0-9]*`, name); matched {
-				return true
-			}
-		}
-	}
-	// Generic history-ish rotated files even if stem not perfectly matched.
-	if strings.Contains(lower, "history") || strings.Contains(lower, "zhistory") {
-		if strings.Contains(lower, ".old") || strings.Contains(lower, ".bak") ||
-			strings.Contains(lower, ".1") || strings.HasSuffix(lower, "~") {
-			return true
-		}
-	}
-	return false
-}
+// override this. It defaults to the implementation in internal/scrub.
+var discoverHistoryTargetsFn = scrub.DiscoverHistoryTargets

@@ -41,7 +41,7 @@ Everything else (duplicates, rescan, status, Zsh HUD) supports these pillars. Th
 
 Violating any of these is a bug. Tests and reviews must check them.
 
-See `internal/config/config.go`, `internal/daemon/daemon.go` (AUTH + token), `internal/cli/env.go`, `internal/policy/classifier.go`, and `config.example.yaml` for the implementations and loud comments.
+See `internal/config/config.go` (and normalize.go), `internal/daemon/{daemon,clipboard}.go` (AUTH + token + P5 monitor), `internal/cli/env.go`, `internal/policy/classifier.go`, and `config.example.yaml` for the implementations and loud comments.
 
 ## Building, Testing, Developing
 
@@ -78,7 +78,7 @@ All artifacts are cleaned by `make clean`. Never leave `.coverage-failed` or str
 ## Test Rules (Strict — Especially for Daemon)
 
 - Every test run uses `-timeout=5s` (suite level) or per-package limits.
-- **Daemon tests (internal/daemon/*_test.go and cross-package that exercise Run/HandleConnection):** NO SLEEPS, no real `time.Ticker`, no background `Run()` loops that can block, no real listeners with timeouts. Use `net.Pipe()` for handleConnection tests. Use the provided test seams/hooks (`pbpasteFunc`/`pbcopyFunc`, `osascriptFunc`, `afplayFunc`, `configLoad` overrides, `GetDaemonLogPathFnForTesting`, etc.). See the comment block in `internal/daemon/daemon_test.go:401` (and surrounding) and `daemon.go` var blocks for the contract. These rules exist so `make test-cover` can stay under the 5s wall-time invariant even under `-j`.
+- **Daemon tests (internal/daemon/*_test.go and cross-package that exercise Run/HandleConnection):** NO SLEEPS, no real `time.Ticker`, no background `Run()` loops that can block, no real listeners with timeouts. Use `net.Pipe()` for handleConnection tests. Use the provided test seams/hooks (`pbpasteFunc`/`pbcopyFunc`, `osascriptFunc`, `afplayFunc`, `configLoad` overrides, `GetDaemonLogPathFnForTesting`, etc.). See the comment block in `internal/daemon/daemon_test.go:401` (and surrounding) and the var blocks in `daemon/*.go` (core hooks in daemon.go; P5 clipboard seams in clipboard.go) for the contract. These rules exist so `make test-cover` can stay under the 5s wall-time invariant even under `-j`.
 - CLI tests use `silenceOutput()`, `resetTestOverrides()`, `configLoad` / `sendDaemonCommandFn` / `execCommand` overrides (see `internal/cli/testhelpers_test.go` and `cli_test.go`).
 - Sources (Bitwarden) use `execBw` hook.
 - Hermeticity: never touch real `~/.config/blastradius` or `~/.local/state/blastradius` in tests. Force temp paths via hooks.
@@ -117,7 +117,7 @@ If a change would weaken any of the invariants listed earlier, it requires expli
 ## Common Tasks & Patterns
 
 - **Adding a new source/collector under Pillar 1:** Implement the `sources` interface (Name/Enabled/Collect/Validate), wire it in `discovery/manager.go:NewManager`, add per-source options handling + `GetSourceIgnorePatterns`, update config.example, docs, and status surfaces as needed. Both sources participate in the same registry/rescan/duplicates/status.
-- **P2 (Crumbs) stories:** The three supported interactions (separate dirs, P1 disabled, overlapping with P1 claiming only its env_file_patterns) are implemented via Classifier + per-dir files[] model. New "stories" go through the same surfaces + docs updates.
+- **P2 (Crumbs) cases:** The three supported interactions (separate dirs, P1 disabled, overlapping with P1 claiming only its env_file_patterns) are implemented via Classifier + per-dir files[] model. New P2 configurations or edge cases go through the same surfaces + docs updates.
 - **P3 receipts:** The v2 `blastradius-scrub-receipt` lines are the durable signal. `--full` / `--reset` ignores them. See `internal/scrub/policy.go`.
 - **P5 monitor:** Polling (750ms hard-coded in alpha for simplicity; logged at start). Two independent timeouts + fast-path first-secret alert. Primitives (`check`/`scrub`/`redact`/`clear`/`nuke`) always work even if monitor disabled. macOS only for the reactive path.
 - **Zsh layer:** Intentionally thin (see `zsh/blastradius.zsh`). Prompt segment is fast + safe for every prompt. All heavy work is in the CLI/daemon. Add wrappers for new commands as needed, but keep it formatting + convenience only.

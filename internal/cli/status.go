@@ -65,7 +65,7 @@ func RunStatus(jsonOutput bool) {
 				fmt.Println("Pillar 2 (Crumbs): clean (last scan recent)")
 			}
 		}
-		// Pillar 5 (Clipboard) live state from the monitor (targeted stories 4+5)
+		// Pillar 5 (Clipboard) live state from the monitor (reactive alert + auto tiers)
 		if p5, ok := daemonObj["pillar5"].(map[string]any); ok {
 			if cb, ok := p5["clipboard"].(map[string]any); ok {
 				if cnt, ok := cb["secret_count"].(float64); ok && cnt > 0 {

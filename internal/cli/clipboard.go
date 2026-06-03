@@ -111,5 +111,5 @@ func RunClipboard(args []string) {
 	}
 }
 
-// Note: the "scrub" / "redact" subcommand implements story 2 (the redact primitive).
-// "nuke" is alias for clear (story 3 blunt). "clear" remains for the "I want it gone now" case.
+// Note: the "scrub" / "redact" subcommand implements the redact primitive.
+// "nuke" is alias for clear (blunt full clear). "clear" remains for the "I want it gone now" case.

@@ -19,7 +19,7 @@ func TestStatusHandler(t *testing.T) {
 	if m["status"] != "ok" || m["registry"] == nil {
 		t.Errorf("unexpected status response: %+v", m)
 	}
-	// Exercise Pillar5 clipboard state (from monitor, stories 4+5) in the handler response
+	// Exercise Pillar5 clipboard state (from monitor) in the handler response
 	if _, ok := m["pillar5"]; !ok {
 		t.Error("expected pillar5 key in status response from fakeContext")
 	}

@@ -94,7 +94,7 @@ func (m *Manager) RunScan() *ScanResult {
 
 	// The Classifier is the single source of truth for "P1 authority wins".
 	// It is consulted on every file before we spend time on detection.
-	// This is what makes the three user stories (and "P1 overrides P2") work.
+	// This is what makes the three supported P2 interactions (and "P1 overrides P2") work.
 	classifier := policy.New(m.cfg)
 
 	for _, surf := range surfaces {

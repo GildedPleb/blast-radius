@@ -31,7 +31,7 @@ func TestRunStatus(t *testing.T) {
 	RunStatus(false)
 	RunStatus(true)
 
-	// Exercise the Pillar 5 (clipboard) sections (story 4/5 monitor state) in human + JSON
+	// Exercise the Pillar 5 (clipboard) sections (monitor state) in human + JSON output
 	sendDaemonCommandFn = mockSendDaemonCommand(`{
 		"status":"ok",
 		"registry":{"tracked_hashes":10},

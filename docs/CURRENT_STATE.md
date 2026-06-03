@@ -22,7 +22,7 @@ Blast Radius is a local, hash-only tool for secret exposure reduction and hygien
   - `blastradius crumbs` (and status summary).
   - Only supported config shape is `pillar2.dirs[]` + per-dir `files[]` (per-surface control).
   - `internal/policy.Classifier` enforces that Pillar 1 has authority and priority over Pillar 2. P1-claimed containers are never reported as crumbs.
-  - The three core user stories work: separate directories, P1 source disabled, and overlapping directories (P1 claims only its declared patterns; P2 sees the rest).
+  - The three supported interactions work: separate directories, P1 source disabled, and overlapping directories (P1 claims only its declared patterns; P2 sees the rest).
 - **Pillar 3**: History Hygiene (`scrub-history`) — ✅ Functional.
   - Delete or redact modes, `--dry-run`, `--json`, `--file`, `--full`/`--reset`.
   - Broad discovery: `$HISTFILE`, LCD live files for common shells under `$HOME` (and `history_roots`), plus auto-discovered rotated/backup siblings in the same directories.
@@ -61,33 +61,37 @@ The system remains strictly **hash-only, minimal-metadata, local-only** with saf
 
 ```
 cmd/blastradius/
-    main.go                 # Ultra-thin entrypoint
+    main.go                 # Ultra-thin entrypoint (testable via run())
 
 internal/
-├── cli/
-│   └── cli.go              # Coordinator for all commands (start, status, stop, logs, duplicates, crumbs, scrub-history, env, clipboard, config, help, rescan, check-hash internal)
+├── cli/                    # ~15 focused files (one per command + cli.go coordinator, conn.go for IPC, clipboard.go/env.go for P4/P5 primitives, test helpers)
+│   └── ...
 ├── daemon/
-│   └── daemon.go           # Unix socket server + request handling (STATUS, DUPLICATES, CRUMBS, SCRUB_HISTORY, CHECK_HASH, RESCAN, PING, HALT, etc.) + Pillar 5 monitor
+│   ├── daemon.go           # Core: Unix socket server, capability token auth (hard invariant), handleConnection dispatch, accessors, Run/Close
+│   ├── clipboard.go        # Pillar 5 reactive monitor (fast alert + two-tier auto redact/clear) + its test seams (pbpaste etc.)
+│   ├── context.go          # DaemonContext type alias (cycle avoidance)
+│   └── handlers/           # Thin per-command handlers (most <50 LOC); scrub_history.go is the larger P3 orchestrator
+│       └── ...
 ├── registry/
 │   └── registry.go         # In-memory SecretHashRegistry (hash-only by construction)
-├── discovery/
-│   ├── manager.go          # Logical collector wiring (env + bitwarden) + rescan + initial discovery
-│   ├── scanner.go          # Env file walking + env_file_patterns matching + ignore
-│   └── ignore.go
-├── config/
-│   └── config.go           # YAML loading + normalization + pillar structs + Get* helpers
+├── discovery/              # Multi-file (manager + scanner + ignore)
+│   ├── ...
+├── config/                 # Multi-file
+│   ├── config.go           # Pillar structs, DefaultConfig, Load/Save, Get* accessors, hard-coded SocketPath (security invariant)
+│   └── normalize.go        # Post-unmarshal normalizers + EffectiveRedactPlaceholder
 ├── detection/
 │   └── detector.go         # Unified candidate extraction (entropy + patterns + assignment + structured) used by P2–P5
 ├── policy/
 │   └── classifier.go       # P1 authority enforcement over P2
-├── residue/
-│   ├── manager.go
-│   └── detector.go         # Pillar 2 (crumbs) scanning + export format detection
-├── sources/
+├── residue/                # Multi-file (manager + detector + types + safe_names)
+│   └── ...
+├── sources/                # Multi-file collectors for the logical P1 layer
 │   ├── env.go
-│   └── bitwarden.go        # Hard-coded collectors for the logical P1 layer
-├── scrub/
-│   └── policy.go           # History hygiene (receipts, reprocess decisions, modes)
+│   ├── bitwarden.go
+│   └── ...
+├── scrub/                  # P3 history hygiene (all policy + discovery + processing here)
+│   ├── policy.go           # Modes, Entry parse/apply, receipts (v2 regfp), ShouldReprocess, fingerprints
+│   └── history.go          # DiscoverHistoryTargets (LCD + rotated), ProcessHistory, LooksLikeRotatedHistory
 └── logging/
     └── logging.go          # Daemon + CLI logging (to ~/.local/state/blastradius/)
 ```
@@ -151,7 +155,7 @@ Zsh integration (source `zsh/blastradius.zsh`):
 - No editor / AI prompt integration.
 - Pillar 5 monitor is polling-based (pragmatic 750ms interval, hard-coded for alpha; true OS-level change events are future work).
 - **Pillar 3** post-v1 items (fish structured redaction for its YAML-ish format, fake secrets replacement mode research spike, surface pillar3 observability in `status --json`) are tracked in [TODO.md](../TODO.md).
-- Bitwarden collector (P1 source) is functional for common cases (logins, notes, custom fields) but does not yet handle folders, organizations, attachments, TOTP, or sophisticated error handling around `bw` states well. This is the weakest part of the "done" story for P1 sources.
+- Bitwarden collector (P1 source) is functional for common cases (logins, notes, custom fields) but does not yet handle folders, organizations, attachments, TOTP, or sophisticated error handling around `bw` states well. This is the least complete area of the P1 surface.
 - One optional powerful P2 story (lightweight git accident detection: reflog + stash + uncommitted tree + bounded recent commits) remains in TODO.
 
 All secret detection across Pillars 2–5 routes through the single `internal/detection` package (robust candidate extraction with wrappers, context-aware assignment parsing, high-entropy regex seeds, structured data walking, and entropy gating). This is the current implementation.

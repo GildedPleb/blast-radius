@@ -24,7 +24,7 @@ func (StatusHandler) Handle(_ string, d DaemonContext) (any, error) {
 		}
 		resp["pillar1"] = p1
 	}
-	// Pillar 5 clipboard live state (from the reactive monitor: stories 4+5)
+	// Pillar 5 clipboard live state (from the reactive monitor)
 	if p5 := d.Pillar5ClipboardStatus(); p5 != nil {
 		resp["pillar5"] = map[string]any{
 			"clipboard": p5,

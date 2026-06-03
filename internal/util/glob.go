@@ -7,8 +7,9 @@ import (
 )
 
 // ExpandPath expands ~ and ~/... to the user's home directory.
-// It is the single shared implementation (previously duplicated in
-// discovery, residue, and policy packages).
+// It is the canonical implementation used for ~ expansion by history root
+// discovery, explicit history_files, Pillar 1/2 pattern handling, and other
+// config-driven paths that accept user-supplied paths.
 func ExpandPath(p string) string {
 	if p == "~" || p == "~/" {
 		if h := os.Getenv("HOME"); h != "" {

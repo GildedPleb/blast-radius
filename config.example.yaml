@@ -311,7 +311,7 @@ pillar2:
   # This is not a warning. It is automatic, silent, correct behavior.
   # P1 wins. Always.
   #
-  # This enables the three supported stories:
+  # This enables the three supported interactions:
   # 1. P1 and P2 on completely separate directories → no interaction.
   # 2. P1 env source disabled → P2 can hunt everything under its dirs.
   # 3. Same directory under both: P1 claims only its listed env patterns;
@@ -434,13 +434,13 @@ pillar4:
     #   enabled: false
 
 # ==============================================================================
-# PILLAR 5 — Clipboard Hygiene (targeted stories 1-5)
+# PILLAR 5 — Clipboard Hygiene (primitives + optional reactive monitor)
 # Visibility primitive, redact/scrub primitive, blunt clear,
 # reactive alert on copy (fast on first secret), two-tier grace auto.
 #
 # On macOS the clipboard is an extremely high blast-radius location.
 # The monitor (when enabled) reacts to any copy and can:
-#   - Alert you instantly when a known secret lands (story 4, with fast-path
+#   - Alert you instantly when a known secret lands (fast first-secret path,
 #     so a giant paste with 10 secrets alerts on the first confirmation).
 #   - After stable secret presence: auto-redact at redact_timeout_seconds
 #     (default 30s, using P3 placeholder replacement), then full clear at
@@ -476,8 +476,8 @@ pillar5:
   #   its own preference.
   redact_placeholder: "[REDACTED]"
 
-  # Enable the background monitor that powers reactive alerts (story 4) and
-  # the two-tier auto actions (story 5). Set false to disable all auto behavior
+  # Enable the background monitor that powers reactive alerts and
+  # the two-tier auto actions. Set false to disable all auto behavior
   # while keeping the explicit `blastradius clipboard` primitives.
   # NOTE: changes to monitor_enabled or alerts_enabled require a daemon restart
   # (config is snapshotted at start; no runtime reload for this in alpha).

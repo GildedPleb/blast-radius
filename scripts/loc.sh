@@ -139,14 +139,14 @@ format_metric() {
     pct_str="0.00%"
   fi
 
-  printf "%5s  %5s  %7s" "$current" "$delta_str" "$pct_str"
+  printf "%5s  %5s  %8s" "$current" "$delta_str" "$pct_str"
 }
 
 print_loc_report() {
   echo "=== Blast Radius LOC (production *.go only; all _test.go excluded) ==="
   echo ""
 
-  printf "  %-12s  %-22s  %-22s  %-22s  %-22s\n" \
+  printf "  %-12s  %-23s  %-23s  %-23s  %-23s\n" \
     "PACKAGE" "FILES" "LINES" "FUNCS" "STMTS"
 
   echo "  -------------------------------------------------------------------------------------------------------------"

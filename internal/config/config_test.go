@@ -385,7 +385,7 @@ pillar1:
 	}
 	// When user supplies a partial env block, we respect the zero-value Enabled (false)
 	// unless they explicitly set enabled: true. This is the intended "user intent" semantics.
-	// (Full migration story will default env on when the new pillar1 block is completely absent.)
+	// (When no pillar1 block at all, normalization still ensures the known sources exist.)
 	if cfg.Pillar1.Sources["env"].Enabled {
 		t.Error("env Enabled should be false when user supplied partial block without explicit enabled:true")
 	}

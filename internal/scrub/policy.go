@@ -56,8 +56,8 @@ type Result struct {
 }
 
 // ApplyToLine is the single-entry policy. It uses the unified detector + registry
-// lookup (exactly as the prior inline logic) but adds format awareness and the
-// two supported modes. placeholder is only used for ModeRedact.
+// lookup for secret matching, plus format-aware parsing of (optional) timestamped
+// history entries and the two supported modes. placeholder is only used for ModeRedact.
 func ApplyToLine(raw string, known map[[32]byte]bool, det *detection.Detector, mode Mode, placeholder string) Result {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {

@@ -404,7 +404,7 @@ func TestRealReadAuthToken(t *testing.T) {
 // that can block is forbidden.
 
 // TestPillar5PerformAutoRedactRespectsPillar5Placeholder exercises the auto-redact
-// path (story 5) using the pbpaste/pbcopy seams and a cfg with Pillar5.RedactPlaceholder
+// path using the pbpaste/pbcopy seams and a cfg with Pillar5.RedactPlaceholder
 // set, to verify the placeholder is piped through to redaction (preferring pillar5 over p3).
 func TestPillar5PerformAutoRedactRespectsPillar5Placeholder(t *testing.T) {
 	planted := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567890"
@@ -469,7 +469,7 @@ func TestPillar5PerformAutoRedactRespectsPillar5Placeholder(t *testing.T) {
 // All tests in this file are designed to complete in well under 1 second.
 
 // TestPillar5MonitorSeams verifies the pbpaste/pbcopy test hooks for the monitor
-// (added per capture plan for stories 4+5 testability). Monitor itself not run
+// (added for P5 monitor seam testability). Monitor itself not run
 // here due to no-sleep rule.
 func TestPillar5MonitorSeams(t *testing.T) {
 	origPaste := pbpasteFunc
@@ -489,7 +489,7 @@ func TestPillar5MonitorSeams(t *testing.T) {
 }
 
 // TestPillar5FireAlertSeams verifies the osascript/afplay seams for
-// fireClipboardAlert (story 4). Overrides are exercised directly (no ticker
+// fireClipboardAlert (fast alert path). Overrides are exercised directly (no ticker
 // or sleep required, per project rules). Also proves non-mac test envs can
 // neuter the side effects.
 func TestPillar5FireAlertSeams(t *testing.T) {
@@ -704,8 +704,8 @@ func TestShouldLogPbpasteErr(t *testing.T) {
 	}
 }
 
-// TestPillar5PerformAutoFullClear exercises the full-clear tier (story 5)
-// using seams, and the new TOCTOU re-check before the destructive write.
+// TestPillar5PerformAutoFullClear exercises the full-clear tier
+// using seams, and the TOCTOU re-check before the destructive write.
 func TestPillar5PerformAutoFullClear(t *testing.T) {
 	content := "some secret stuff that will be cleared"
 	hsum := sha256.Sum256([]byte(content))

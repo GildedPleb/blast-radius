@@ -49,7 +49,7 @@ type Config struct {
 	// Pillar5 configures Clipboard Hygiene.
 	// See Pillar5Config for the two-tier timeouts (redact + full clear),
 	// redact_placeholder (for manual/auto redaction), and monitor/alert
-	// controls for the targeted reactive stories.
+	// controls for the reactive background monitor.
 	Pillar5 Pillar5Config `yaml:"pillar5,omitempty"`
 }
 
@@ -111,18 +111,19 @@ type Pillar4Config struct {
 	Commands []RuntimeCommand `yaml:"commands,omitempty"`
 }
 
-// Pillar5Config groups clipboard hygiene settings (Pillar 5).
-// Focused on the 5 targeted stories: visibility primitive, redact/scrub primitive,
-// blunt clear, reactive alert on copy (with fast first-secret alerting), and
-// two-tier grace-period auto (redact then full clear).
+// Pillar5Config groups clipboard hygiene settings (Pillar 5): the status/visibility
+// primitive, explicit redact/scrub + clear primitives via CLI/daemon commands,
+// and (when MonitorEnabled) the optional reactive background monitor providing
+// fast first-secret alerting plus two-tier auto (redact after timeout, then full
+// clear after a further or independent timeout).
 //
 // RedactTimeoutSeconds: after a secret is detected and the clipboard content
 // remains stable, automatically redact known secrets (P3-style placeholder
 // replacement) after this many seconds. Gives a safe use window for intentional
 // pastes (e.g. paste secret to AI) before the system cleans the values for you.
 // FullClearTimeoutSeconds: after (or independently of) the redact timeout, if
-// still stable, do a full clipboard clear. The two are independent and
-// user-configurable (see stories for details on "redact then nuke" vs flexible windows).
+// still stable, do a full clipboard clear. The two timers are independent and
+// user-configurable.
 //
 // RedactPlaceholder: the string used to replace detected secrets during
 // clipboard redaction (both explicit `scrub`/`redact` and auto-redact in monitor).
@@ -133,13 +134,13 @@ type Pillar5Config struct {
 	FullClearTimeoutSeconds int `yaml:"full_clear_timeout_seconds,omitempty"`
 
 	// RedactPlaceholder is the user's preferred placeholder for redacting
-	// secrets in clipboard content (story 2 and auto in story 5). Falls back
-	// to pillar3.redact_placeholder or the hard default if not set.
+	// secrets in clipboard content. Falls back to pillar3.redact_placeholder
+	// or the hard default if not set.
 	RedactPlaceholder string `yaml:"redact_placeholder,omitempty"`
 
 	// Monitor controls the background watcher that enables reactive alerts
-	// and the two-tier auto actions (stories 4+5). When false the primitives
-	// (1-3) still work via explicit `blastradius clipboard` commands.
+	// and the two-tier auto actions. When false the explicit primitives
+	// (check, scrub, redact, clear) still work via `blastradius clipboard` commands.
 	MonitorEnabled bool `yaml:"monitor_enabled,omitempty"`
 
 	// AlertsEnabled controls whether the monitor fires user-visible alerts
@@ -326,140 +327,14 @@ func Load() (cfg *Config, configPath string, err error) {
 	// (especially ignore_patterns) even when the user only partially configured.
 	normalizePillar1Sources(cfg)
 
-	// Pillar 5 (Clipboard Hygiene, targeted stories 1-5) — ensure two-tier timeouts
-	// and redact_placeholder have sensible defaults even on partial user config.
+	// Pillar 5 (Clipboard Hygiene) — ensure two-tier timeouts and redact_placeholder
+	// have sensible defaults even on partial user config.
 	normalizePillar5(cfg)
 
 	return cfg, configPath, nil
 }
 
-// normalizePillar1Sources ensures the Pillar1.Sources map and the two v1
-// providers ("env", "bitwarden") always exist after unmarshal.
-//
-// This function guarantees a stable shape for collectors and GetEnvOptions
-// (both "env" and "bitwarden" entries always exist after normalization).
-func normalizePillar1Sources(cfg *Config) {
-	if cfg.Pillar1.Sources == nil {
-		cfg.Pillar1.Sources = make(map[string]SourceConfig)
-	}
-
-	for _, name := range []string{"env", "bitwarden"} {
-		src, ok := cfg.Pillar1.Sources[name]
-		if !ok {
-			src = SourceConfig{Enabled: name == "env", Options: map[string]any{}}
-		}
-		if src.Options == nil {
-			src.Options = map[string]any{}
-		}
-
-		// Normalize common list fields and ensure they are never nil slices.
-		for _, key := range []string{"project_roots", "skip_dirs", "ignore_files", "ignore_patterns", "env_file_patterns"} {
-			if raw, exists := src.Options[key]; exists && raw != nil {
-				normalized := normalizeStringList(raw)
-				src.Options[key] = normalized // always set, even if empty
-			} else {
-				// Guarantee the key exists as a non-nil slice
-				src.Options[key] = []string{}
-			}
-		}
-
-		cfg.Pillar1.Sources[name] = src
-	}
-}
-
-// normalizeStringList accepts []string, []any, or a single string and returns []string.
-func normalizeStringList(v any) []string {
-	if v == nil {
-		return []string{}
-	}
-	switch x := v.(type) {
-	case []string:
-		return x
-	case []any:
-		out := make([]string, 0, len(x))
-		for _, e := range x {
-			if s, ok := e.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	case string:
-		if x == "" {
-			return []string{}
-		}
-		return []string{x}
-	default:
-		return []string{}
-	}
-}
-
-// normalizePillar3 ensures Pillar3 has safe defaults for Mode and RedactPlaceholder
-// even under partial YAML population. HistoryFiles and HistoryRoots are left
-// exactly as provided (nil or populated); the discovery layer treats nil/empty
-// as "just $HOME only" (plus explicit extras). After Load()
-// these fields may be nil in the returned config.
-func normalizePillar3(cfg *Config) {
-	if cfg == nil {
-		return
-	}
-	p := cfg.Pillar3
-	if !p.Enabled {
-		// If disabled, still ensure Mode has a value for any future "status" rendering.
-		if p.Mode == "" {
-			p.Mode = "delete"
-		}
-		cfg.Pillar3 = p
-		return
-	}
-	if p.Mode == "" || (p.Mode != "delete" && p.Mode != "redact") {
-		p.Mode = "delete"
-	}
-	if p.RedactPlaceholder == "" {
-		p.RedactPlaceholder = "[REDACTED]"
-	}
-	// HistoryFiles / HistoryRoots are deliberately *not* forced to non-nil here.
-	// The discovery logic (and docs) treat nil or empty as "use $HOME only"
-	// Callers after Load() may observe nil for these (treated as "HOME only" by discovery).
-	// (normalizePillar3 still ensures safe Mode/placeholder.)
-	cfg.Pillar3 = p
-}
-
-// normalizePillar5 ensures the two independent timeouts (redact + full clear)
-// and the redact_placeholder for targeted stories 4+5 have sensible values
-// after unmarshal of partial user config. Per user: "just a user configurable
-// setting" for "Redact after X", "clear after Y", and the placeholder for
-// redaction. Monitor/alert enableds respect explicit false from YAML; defaults
-// come from DefaultConfig() before unmarshal.
-func normalizePillar5(cfg *Config) {
-	if cfg.Pillar5.RedactTimeoutSeconds < 0 {
-		cfg.Pillar5.RedactTimeoutSeconds = 0 // 0 disables that tier
-	}
-	if cfg.Pillar5.FullClearTimeoutSeconds < 0 {
-		cfg.Pillar5.FullClearTimeoutSeconds = 0
-	}
-	if cfg.Pillar5.RedactPlaceholder == "" {
-		cfg.Pillar5.RedactPlaceholder = "[REDACTED]"
-	}
-}
-
-// EffectiveRedactPlaceholder returns the placeholder string to use when redacting
-// secrets from clipboard (or history) content. It prefers the Pillar5 value
-// (clipboard-specific hygiene preference), falls back to Pillar3, then the
-// provided hard default (typically "[REDACTED]").
-// This eliminates the duplicated "if p5 != "" { p5 } else if p3 != "" { p3 }"
-// logic that lived in both the CLI scrub path and the daemon auto-redact path.
-func EffectiveRedactPlaceholder(p5, p3, fallback string) string {
-	if p5 != "" {
-		return p5
-	}
-	if p3 != "" {
-		return p3
-	}
-	if fallback != "" {
-		return fallback
-	}
-	return "[REDACTED]"
-}
+// See normalize.go for the normalization helpers and EffectiveRedactPlaceholder.
 
 // GetSourceIgnorePatterns returns the normalized ignore patterns for a named
 // Pillar 1 source (e.g. "env" or "bitwarden"). Safe to call on any config.

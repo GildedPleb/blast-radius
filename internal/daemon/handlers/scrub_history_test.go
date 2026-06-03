@@ -8,6 +8,7 @@ import (
 
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/registry"
+	"github.com/GildedPleb/blast-radius/internal/scrub"
 )
 
 // withTempHistory creates a temporary file with the given content and returns
@@ -51,7 +52,7 @@ func TestScrubHistoryHandler_RealFindHistoryFile(t *testing.T) {
 	t.Setenv("HOME", cleanHome)
 
 	origDiscover := discoverHistoryTargetsFn
-	discoverHistoryTargetsFn = discoverHistoryTargets // use the real implementation
+	discoverHistoryTargetsFn = scrub.DiscoverHistoryTargets // use the real implementation
 	defer func() { discoverHistoryTargetsFn = origDiscover }()
 
 	h := ScrubHistoryHandler{}
@@ -469,7 +470,7 @@ func TestScrubHistoryHandler_InvalidModeIgnored(t *testing.T) {
 	}
 }
 
-// --- Tests for discoverHistoryTargets / looksLikeRotatedHistory (real fn, siblings, roots, ~, etc.)
+// --- Tests for discovery (via seam to real scrub impl), looksLike, siblings, roots, ~, etc.
 // These address thin coverage of the "major blast-radius gap" discovery surface.
 
 func TestLooksLikeRotatedHistory(t *testing.T) {
@@ -491,7 +492,7 @@ func TestLooksLikeRotatedHistory(t *testing.T) {
 		{".bash_history.swp", false},
 	}
 	for _, c := range cases {
-		if got := looksLikeRotatedHistory(c.name, stems); got != c.want {
+		if got := scrub.LooksLikeRotatedHistory(c.name, stems); got != c.want {
 			t.Errorf("looksLike(%q)=%v want %v", c.name, got, c.want)
 		}
 	}
@@ -499,7 +500,7 @@ func TestLooksLikeRotatedHistory(t *testing.T) {
 
 func TestDiscoverHistoryTargets_SiblingsAndRoots(t *testing.T) {
 	origDiscover := discoverHistoryTargetsFn
-	discoverHistoryTargetsFn = discoverHistoryTargets
+	discoverHistoryTargetsFn = scrub.DiscoverHistoryTargets
 	defer func() { discoverHistoryTargetsFn = origDiscover }()
 
 	root := t.TempDir()
@@ -559,7 +560,7 @@ func TestScrubHistoryHandler_EndToEnd_RotatedSibling(t *testing.T) {
 	t.Setenv("HISTFILE", "") // ensure we rely on rotated under home
 
 	origDiscover := discoverHistoryTargetsFn
-	discoverHistoryTargetsFn = discoverHistoryTargets
+	discoverHistoryTargetsFn = scrub.DiscoverHistoryTargets
 	defer func() { discoverHistoryTargetsFn = origDiscover }()
 
 	ctx := &fakeContext{hashes: toSecretHashes(hsh)}

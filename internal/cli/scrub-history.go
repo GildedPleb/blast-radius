@@ -95,8 +95,8 @@ func RunScrubHistory(tail []string) {
 	}
 
 	// Special-case disabled Pillar 3 (status=ok with explicit message; no counts populated).
-	// This must be handled before the generic "no entries found" fallback so human
-	// output is truthful (previously always printed the generic success line).
+	// This must be handled before the generic "no entries found" fallback so an
+	// explicit disabled message is shown rather than a misleading success line.
 	if m, ok := resp["message"].(string); ok && strings.Contains(m, "disabled") {
 		fmt.Println("Pillar 3 (history hygiene) is disabled in config; no scrubbing performed.")
 		return

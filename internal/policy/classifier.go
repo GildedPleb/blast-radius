@@ -37,7 +37,7 @@ func New(cfg *config.Config) *Classifier {
 //
 // It returns (false, reason) immediately if the path is claimed by any active
 // Pillar 1 "env" source (the P1 authority check). This implements the three
-// user stories and the "P1 overrides P2" rule.
+// supported P2 interactions and the "P1 overrides P2" rule.
 //
 // Only if the path is NOT P1-claimed does it consider whether the path falls
 // under a configured P2 surface and whether the caller should proceed with
@@ -72,7 +72,7 @@ func (c *Classifier) ShouldTreatFileAsCrumb(absPath string) (bool, string) {
 // source's env_file_patterns (defaults to [".env*"] when EnvFilePatterns is
 // empty after normalization).
 func (c *Classifier) isClaimedByP1Env(absPath string) bool {
-	// Respect the Enabled flag on the env source (story #2: if env is disabled,
+	// Respect the Enabled flag on the env source (if env is disabled,
 	// P1 makes no authority claims and P2 can hunt the surface).
 	envSrc, ok := c.cfg.Pillar1.Sources["env"]
 	if !ok || !envSrc.Enabled {
