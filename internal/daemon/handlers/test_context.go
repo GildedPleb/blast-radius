@@ -69,6 +69,16 @@ func (f *fakeContext) BeginExclusiveOp(name string) (func(), bool) {
 	return func() {}, true
 }
 
+func (f *fakeContext) Pillar5ClipboardStatus() map[string]any {
+	return map[string]any{
+		"secret_count":   0,
+		"last_change":    f.now.UTC().Format(time.RFC3339),
+		"redacted":       false,
+		"cleared":        false,
+		"monitor_active": false,
+	}
+}
+
 // SetPillar3Config is a helper for tests to inject a custom Pillar3Config.
 func (f *fakeContext) SetPillar3Config(c config.Pillar3Config) {
 	f.pillar3 = c

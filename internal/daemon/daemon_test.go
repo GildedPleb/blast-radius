@@ -1,10 +1,16 @@
 package daemon
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/registry"
@@ -333,8 +339,469 @@ func TestRealRemoveAuthToken_FileDoesNotExist(t *testing.T) {
 // We therefore ONLY use synchronous, instant tests via net.Pipe() for handleConnection.
 // Any test involving sleeps, real listeners with timeouts, or background Run() loops
 // that can block is forbidden.
+
+// TestPillar5PerformAutoRedactRespectsPillar5Placeholder exercises the auto-redact
+// path (story 5) using the pbpaste/pbcopy seams and a cfg with Pillar5.RedactPlaceholder
+// set, to verify the placeholder is piped through to redaction (preferring pillar5 over p3).
+func TestPillar5PerformAutoRedactRespectsPillar5Placeholder(t *testing.T) {
+	planted := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567890"
+	h := registry.HashValue([]byte(planted))
+	reg := registry.New()
+	reg.Add(h, "proj1")
+
+	content := "export FOO=" + planted + "\nBAR=baz"
+	hsum := sha256.Sum256([]byte(content))
+	epoch := hex.EncodeToString(hsum[:])
+
+	d := &Daemon{
+		cfg: &config.Config{
+			Pillar5: config.Pillar5Config{
+				RedactPlaceholder: "[P5-PLACEHOLDER]",
+			},
+			Pillar3: config.Pillar3Config{
+				RedactPlaceholder: "[P3-SHOULD-NOT-USE]",
+			},
+		},
+		registry: reg,
+	}
+
+	// setup dirty epoch state
+	d.clipboardMu.Lock()
+	d.clipboardLastHash = epoch
+	d.clipboardLastChange = time.Now().Add(-2 * time.Hour) // force elapsed
+	d.clipboardSecretCount = 1
+	d.clipboardRedacted = false
+	d.clipboardMu.Unlock()
+
+	// capture pbcopy'ed content
+	var gotRedacted []byte
+	origCopy := pbcopyFunc
+	pbcopyFunc = func(data []byte) error {
+		gotRedacted = data
+		return nil
+	}
+	defer func() { pbcopyFunc = origCopy }()
+
+	origPaste := pbpasteFunc
+	pbpasteFunc = func() ([]byte, error) { return []byte(content), nil }
+	defer func() { pbpasteFunc = origPaste }()
+
+	d.performAutoRedact(epoch)
+
+	if !bytes.Contains(gotRedacted, []byte("[P5-PLACEHOLDER]")) {
+		t.Errorf("performAutoRedact did not use Pillar5 placeholder; got: %s", gotRedacted)
+	}
+	if bytes.Contains(gotRedacted, []byte(planted)) {
+		t.Error("secret value was not redacted away")
+	}
+	if bytes.Contains(gotRedacted, []byte("[P3-SHOULD-NOT-USE]")) {
+		t.Error("fell back to P3 placeholder instead of P5")
+	}
+}
+
 //
 // The hooks (netListen etc.) are kept for future use with non-blocking techniques
 // if someone wants to invest in proper in-memory net.Listener fakes later.
 //
 // All tests in this file are designed to complete in well under 1 second.
+
+// TestPillar5MonitorSeams verifies the pbpaste/pbcopy test hooks for the monitor
+// (added per capture plan for stories 4+5 testability). Monitor itself not run
+// here due to no-sleep rule.
+func TestPillar5MonitorSeams(t *testing.T) {
+	origPaste := pbpasteFunc
+	defer func() { pbpasteFunc = origPaste }()
+	pbpasteFunc = func() ([]byte, error) { return []byte("test=secret"), nil }
+	data, err := pbpasteFunc()
+	if err != nil || string(data) != "test=secret" {
+		t.Error("pbpasteFunc seam not working")
+	}
+
+	origCopy := pbcopyFunc
+	defer func() { pbcopyFunc = origCopy }()
+	pbcopyFunc = func([]byte) error { return nil }
+	if err := pbcopyFunc([]byte("redacted")); err != nil {
+		t.Error("pbcopyFunc seam")
+	}
+}
+
+// TestPillar5FireAlertSeams verifies the osascript/afplay seams for
+// fireClipboardAlert (story 4). Overrides are exercised directly (no ticker
+// or sleep required, per project rules). Also proves non-mac test envs can
+// neuter the side effects.
+func TestPillar5FireAlertSeams(t *testing.T) {
+	d := &Daemon{cfg: config.DefaultConfig()}
+
+	called := 0
+	origScript := osascriptFunc
+	origPlay := afplayFunc
+	defer func() {
+		osascriptFunc = origScript
+		afplayFunc = origPlay
+	}()
+
+	osascriptFunc = func(msg string) error {
+		called++
+		if !strings.Contains(msg, "secret detected") {
+			t.Errorf("unexpected alert msg: %s", msg)
+		}
+		return nil
+	}
+	afplayFunc = func() error {
+		called++
+		return nil
+	}
+
+	d.fireClipboardAlert()
+
+	if called != 2 {
+		t.Errorf("expected both alert funcs called, got %d", called)
+	}
+
+	// Also exercise error path (both fail) still logs but does not panic.
+	osascriptFunc = func(string) error { return fmt.Errorf("no osascript") }
+	afplayFunc = func() error { return fmt.Errorf("no afplay") }
+	d.fireClipboardAlert() // should not crash; best-effort logging only
+}
+
+// TestPillar5AutoRedactThenCleanOverwriteResetsFlags exercises the state machine
+// fix for post-auto clean transitions (review bug 2). After an auto-redact sets
+// redacted=true + count=0 directly (bypassing update), a subsequent user
+// overwrite with clean non-secret content must result in a new epoch where
+// the status reports redacted=false (and last_change etc. reflect the clean epoch).
+func TestPillar5AutoRedactThenCleanOverwriteResetsFlags(t *testing.T) {
+	planted := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567890"
+	h := registry.HashValue([]byte(planted))
+	reg := registry.New()
+	reg.Add(h, "proj1")
+
+	dirtyContent := "export FOO=" + planted + "\nBAR=baz"
+	dirtyH := sha256.Sum256([]byte(dirtyContent))
+	dirtyEpoch := hex.EncodeToString(dirtyH[:])
+
+	cleanContent := "just normal text, no secrets here\n"
+	cleanH := sha256.Sum256([]byte(cleanContent))
+	cleanEpoch := hex.EncodeToString(cleanH[:])
+
+	d := &Daemon{
+		cfg: &config.Config{
+			Pillar5: config.Pillar5Config{
+				RedactPlaceholder: "[REDACTED]",
+			},
+		},
+		registry: reg,
+	}
+
+	// Force a dirty epoch that looks like it has been stable long enough.
+	d.clipboardMu.Lock()
+	d.clipboardLastHash = dirtyEpoch
+	d.clipboardLastChange = time.Now().Add(-10 * time.Minute)
+	d.clipboardSecretCount = 1
+	d.clipboardRedacted = false
+	d.clipboardCleared = false
+	d.clipboardMu.Unlock()
+
+	// Wire seams so perform sees the dirty content and "writes" without real pbcopy.
+	origPaste := pbpasteFunc
+	pbpasteFunc = func() ([]byte, error) { return []byte(dirtyContent), nil }
+	defer func() { pbpasteFunc = origPaste }()
+
+	var pbcopyCalled bool
+	origCopy := pbcopyFunc
+	pbcopyFunc = func(data []byte) error {
+		pbcopyCalled = true
+		return nil
+	}
+	defer func() { pbcopyFunc = origCopy }()
+
+	d.performAutoRedact(dirtyEpoch)
+	if !pbcopyCalled {
+		t.Error("performAutoRedact did not call pbcopy")
+	}
+
+	// After auto, the direct set should have redacted=true, count=0.
+	d.clipboardMu.Lock()
+	if !d.clipboardRedacted || d.clipboardSecretCount != 0 {
+		t.Errorf("after auto-redact: redacted=%v count=%d (want true,0)", d.clipboardRedacted, d.clipboardSecretCount)
+	}
+	d.clipboardMu.Unlock()
+
+	// Now simulate user overwriting the (redacted) board with clean content.
+	// scanAndActOnClipboard will compute cands (none), call update(cleanEpoch, 0).
+	p5 := config.Pillar5Config{RedactTimeoutSeconds: 30}
+	d.scanAndActOnClipboard([]byte(cleanContent), cleanEpoch, p5)
+
+	// The update(0) path must have reset the flags even though prevCount==0 (set by perform).
+	status := d.Pillar5ClipboardStatus()
+	if red, _ := status["redacted"].(bool); red {
+		t.Error("after clean overwrite following auto-redact: redacted flag still true (stale)")
+	}
+	if clr, _ := status["cleared"].(bool); clr {
+		t.Error("after clean overwrite: cleared unexpectedly true")
+	}
+	if cnt, _ := status["secret_count"].(int); cnt != 0 {
+		t.Errorf("after clean: secret_count=%d want 0", cnt)
+	}
+	if last, _ := status["last_change"].(string); last == "never" {
+		t.Error("last_change should be set for the clean epoch")
+	}
+}
+
+// TestPillar5PerformAutoRedactSkipsWriteOnConcurrentMutation exercises the
+// TOCTOU fix (review bug 1): if pbpaste returns the expected content for the
+// *decision* check inside performAutoRedact, but a different blob by the time
+// we reach the commit-time re-check (before pbcopy), we must skip the write
+// entirely and not set the redacted flag for the (now-stale) epoch.
+func TestPillar5PerformAutoRedactSkipsWriteOnConcurrentMutation(t *testing.T) {
+	planted := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567890"
+	h := registry.HashValue([]byte(planted))
+	reg := registry.New()
+	reg.Add(h, "proj1")
+
+	original := "DB_PASSWORD=" + planted + "\nNORMAL=foo"
+	origH := sha256.Sum256([]byte(original))
+	epoch := hex.EncodeToString(origH[:])
+
+	d := &Daemon{
+		cfg: &config.Config{
+			Pillar5: config.Pillar5Config{RedactPlaceholder: "[REDACTED]"},
+		},
+		registry: reg,
+	}
+
+	// Setup epoch state as if monitor decided an auto is due.
+	d.clipboardMu.Lock()
+	d.clipboardLastHash = epoch
+	d.clipboardLastChange = time.Now().Add(-5 * time.Minute)
+	d.clipboardSecretCount = 1
+	d.clipboardRedacted = false
+	d.clipboardMu.Unlock()
+
+	// Stateful seam: first call (decision check) returns original; later calls
+	// (the new re-check before write) return mutated content.
+	call := 0
+	origPaste := pbpasteFunc
+	pbpasteFunc = func() ([]byte, error) {
+		call++
+		if call == 1 {
+			return []byte(original), nil
+		}
+		return []byte("USER_OVERWROTE_MEANWHILE with new stuff"), nil
+	}
+	defer func() { pbpasteFunc = origPaste }()
+
+	pbcopyCalls := 0
+	origCopy := pbcopyFunc
+	pbcopyFunc = func(data []byte) error {
+		pbcopyCalls++
+		return nil
+	}
+	defer func() { pbcopyFunc = origCopy }()
+
+	d.performAutoRedact(epoch)
+
+	if pbcopyCalls != 0 {
+		t.Errorf("expected pbcopy skipped on mutation, but got %d calls", pbcopyCalls)
+	}
+
+	d.clipboardMu.Lock()
+	if d.clipboardRedacted {
+		t.Error("redacted flag was set even though write was skipped due to mutation")
+	}
+	if d.clipboardSecretCount != 1 {
+		t.Errorf("secretCount should remain 1 (no auto action committed), got %d", d.clipboardSecretCount)
+	}
+	d.clipboardMu.Unlock()
+}
+
+// TestShouldLogPbpasteErr directly exercises the extracted pure helper for
+// the rate-limited pbpaste error logging (nit 9). This gives coverage on the
+// decision logic even though the containing monitor loop is never run (per
+// project no-sleep rules).
+func TestShouldLogPbpasteErr(t *testing.T) {
+	now := time.Now()
+	// First error always logs.
+	logIt, t1 := shouldLogPbpasteErr(time.Time{}, now)
+	if !logIt || !t1.Equal(now) {
+		t.Error("first error should log and return now")
+	}
+
+	// Recent error within window: do not log, keep old ts.
+	recent := now.Add(-10 * time.Second)
+	logIt, t2 := shouldLogPbpasteErr(now, recent)
+	if logIt || !t2.Equal(now) {
+		t.Error("recent error should not log")
+	}
+
+	// Old error (last recorded long ago, current check time is now): log + update.
+	lastOld := now.Add(-40 * time.Second)
+	logIt, t3 := shouldLogPbpasteErr(lastOld, now)
+	if !logIt || !t3.Equal(now) {
+		t.Error("old error should log and update ts")
+	}
+}
+
+// TestPillar5PerformAutoFullClear exercises the full-clear tier (story 5)
+// using seams, and the new TOCTOU re-check before the destructive write.
+func TestPillar5PerformAutoFullClear(t *testing.T) {
+	content := "some secret stuff that will be cleared"
+	hsum := sha256.Sum256([]byte(content))
+	epoch := hex.EncodeToString(hsum[:])
+
+	d := &Daemon{
+		cfg: &config.Config{
+			Pillar5: config.Pillar5Config{
+				FullClearTimeoutSeconds: 10,
+			},
+		},
+	}
+
+	d.clipboardMu.Lock()
+	d.clipboardLastHash = epoch
+	d.clipboardLastChange = time.Now().Add(-20 * time.Second) // force due
+	d.clipboardSecretCount = 1
+	d.clipboardCleared = false
+	d.clipboardMu.Unlock()
+
+	origPaste := pbpasteFunc
+	pbpasteFunc = func() ([]byte, error) { return []byte(content), nil }
+	defer func() { pbpasteFunc = origPaste }()
+
+	cleared := false
+	origCopy := pbcopyFunc
+	pbcopyFunc = func(data []byte) error {
+		if data != nil && len(data) != 0 {
+			t.Error("full clear should pbcopy nil/empty")
+		}
+		cleared = true
+		return nil
+	}
+	defer func() { pbcopyFunc = origCopy }()
+
+	d.performAutoFullClear(epoch)
+
+	if !cleared {
+		t.Error("performAutoFullClear did not call pbcopy")
+	}
+
+	d.clipboardMu.Lock()
+	if !d.clipboardCleared || d.clipboardSecretCount != 0 {
+		t.Error("full clear should have set cleared + count=0")
+	}
+	d.clipboardMu.Unlock()
+}
+
+// TestPillar5ScanAndActHitsMoreBranches exercises additional paths in
+// scanAndActOnClipboard (currently low coverage) via direct calls + seams:
+// empty content, no candidates, and a secrets path (which sets lastChange +
+// clears action flags).
+func TestPillar5ScanAndActHitsMoreBranches(t *testing.T) {
+	d := &Daemon{
+		cfg:      &config.Config{},
+		registry: registry.New(),
+	}
+
+	// empty -> update(0)
+	d.scanAndActOnClipboard(nil, "hash0", config.Pillar5Config{})
+	d.clipboardMu.Lock()
+	if d.clipboardSecretCount != 0 {
+		t.Error("empty raw should yield count 0")
+	}
+	d.clipboardMu.Unlock()
+
+	// no cands
+	d.scanAndActOnClipboard([]byte("just normal text with no secrets"), "hash1", config.Pillar5Config{})
+	d.clipboardMu.Lock()
+	if d.clipboardSecretCount != 0 {
+		t.Error("no cands should yield count 0")
+	}
+	d.clipboardMu.Unlock()
+
+	// with a secret: hits firstSecretSeen, sets lastChange + red/clr=false
+	planted := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567890"
+	h := registry.HashValue([]byte(planted))
+	d.registry.Add(h, "p")
+
+	blob := "export SECRET=" + planted + "\n"
+	hsum := sha256.Sum256([]byte(blob))
+	epoch := hex.EncodeToString(hsum[:])
+
+	// ensure clean prior state
+	d.clipboardMu.Lock()
+	d.clipboardRedacted = true
+	d.clipboardCleared = true
+	d.clipboardLastChange = time.Time{}
+	d.clipboardMu.Unlock()
+
+	d.scanAndActOnClipboard([]byte(blob), epoch, config.Pillar5Config{AlertsEnabled: false})
+
+	d.clipboardMu.Lock()
+	if d.clipboardSecretCount != 1 {
+		t.Errorf("expected count 1, got %d", d.clipboardSecretCount)
+	}
+	if d.clipboardRedacted || d.clipboardCleared {
+		t.Error("secret detection should have cleared the action flags")
+	}
+	if d.clipboardLastChange.IsZero() {
+		t.Error("lastChange should have been set on first secret")
+	}
+	d.clipboardMu.Unlock()
+}
+
+// TestPillar5MaybeFireAutoAction exercises the decision logic in maybeFire
+// (currently 0% because the call site is inside the un-run monitor).
+// We set up a dirty epoch due for both tiers and verify it dispatches to
+// the perform* methods (which have their own coverage).
+func TestPillar5MaybeFireAutoAction(t *testing.T) {
+	planted := "ghp_1234567890abcdefABCDEF1234567890abcdef"
+	h := registry.HashValue([]byte(planted))
+	reg := registry.New()
+	reg.Add(h, "proj")
+
+	content := "token=" + planted
+	hsum := sha256.Sum256([]byte(content))
+	epoch := hex.EncodeToString(hsum[:])
+
+	d := &Daemon{
+		cfg: &config.Config{
+			Pillar5: config.Pillar5Config{
+				RedactTimeoutSeconds:    1,
+				FullClearTimeoutSeconds: 2,
+				RedactPlaceholder:       "[REDACTED]",
+			},
+		},
+		registry: reg,
+	}
+
+	d.clipboardMu.Lock()
+	d.clipboardLastHash = epoch
+	d.clipboardLastChange = time.Now().Add(-10 * time.Second)
+	d.clipboardSecretCount = 1
+	d.clipboardRedacted = false
+	d.clipboardCleared = false
+	d.clipboardMu.Unlock()
+
+	origPaste := pbpasteFunc
+	pbpasteFunc = func() ([]byte, error) { return []byte(content), nil }
+	defer func() { pbpasteFunc = origPaste }()
+
+	redacted := false
+	origCopy := pbcopyFunc
+	pbcopyFunc = func(data []byte) error {
+		if len(data) == 0 {
+			// full clear also possible depending on elapsed; we only assert one fired
+		} else {
+			redacted = true
+		}
+		return nil
+	}
+	defer func() { pbcopyFunc = origCopy }()
+
+	d.maybeFireAutoAction(epoch)
+
+	if !redacted {
+		t.Error("maybeFire should have triggered auto-redact")
+	}
+	// full clear may or may not depending on exact elapsed after redact side-effect,
+	// but at least one action fired; we mainly want the maybeFire branches covered.
+}

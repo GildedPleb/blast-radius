@@ -16,8 +16,26 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Pillar2.Dirs) == 0 {
 		t.Error("pillar2 defaults not populated")
 	}
-	if cfg.Pillar5.ClearSeconds == 0 {
+	if cfg.Pillar5.RedactTimeoutSeconds == 0 || cfg.Pillar5.FullClearTimeoutSeconds == 0 || cfg.Pillar5.RedactPlaceholder == "" {
 		t.Error("pillar5 defaults not populated")
+	}
+	if cfg.Pillar5.RedactPlaceholder != "[REDACTED]" {
+		t.Error("pillar5 redact_placeholder default should be [REDACTED]")
+	}
+	// Exercise normalizePillar5 (clamps negatives; sets placeholder default; called from Load after unmarshal)
+	cfg2 := &Config{Pillar5: Pillar5Config{RedactTimeoutSeconds: -5, FullClearTimeoutSeconds: -1}}
+	normalizePillar5(cfg2)
+	if cfg2.Pillar5.RedactTimeoutSeconds != 0 || cfg2.Pillar5.FullClearTimeoutSeconds != 0 {
+		t.Error("normalizePillar5 should clamp negative timeouts to 0 (disables tier)")
+	}
+	if cfg2.Pillar5.RedactPlaceholder != "[REDACTED]" {
+		t.Error("normalizePillar5 should set default redact_placeholder")
+	}
+	// Explicit value is preserved (not overwritten)
+	cfg3 := &Config{Pillar5: Pillar5Config{RedactPlaceholder: "***"}}
+	normalizePillar5(cfg3)
+	if cfg3.Pillar5.RedactPlaceholder != "***" {
+		t.Error("normalizePillar5 must preserve explicit redact_placeholder")
 	}
 	// Pillar 1 logical sources (v1: env + bitwarden)
 	if cfg.Pillar1.Sources == nil {
@@ -451,5 +469,30 @@ func TestNormalizePillar3(t *testing.T) {
 	normalizePillar3(cfg)
 	if cfg.Pillar3.RedactPlaceholder != "***" || len(cfg.Pillar3.HistoryFiles) != 1 || len(cfg.Pillar3.HistoryRoots) != 1 {
 		t.Error("valid config was mutated")
+	}
+}
+
+// TestEffectiveRedactPlaceholder covers the helper extracted to dedupe P5/P3
+// fallback logic (review nit 8). It is called from CLI scrub and daemon auto paths;
+// we test it directly here so the config package's coverage profile sees it.
+func TestEffectiveRedactPlaceholder(t *testing.T) {
+	cases := []struct {
+		name     string
+		p5, p3   string
+		fallback string
+		want     string
+	}{
+		{"p5 wins", "[P5]", "[P3]", "[DEF]", "[P5]"},
+		{"p3 fallback when p5 empty", "", "[P3]", "[DEF]", "[P3]"},
+		{"default when both empty", "", "", "[DEF]", "[DEF]"},
+		{"hard default when all empty", "", "", "", "[REDACTED]"},
+		{"p5 explicit empty string still falls to p3", "", "[P3]", "[DEF]", "[P3]"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := EffectiveRedactPlaceholder(c.p5, c.p3, c.fallback); got != c.want {
+				t.Errorf("EffectiveRedactPlaceholder(%q,%q,%q) = %q, want %q", c.p5, c.p3, c.fallback, got, c.want)
+			}
+		})
 	}
 }

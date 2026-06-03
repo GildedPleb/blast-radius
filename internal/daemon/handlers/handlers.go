@@ -38,6 +38,9 @@ type DaemonContext interface {
 	// This is a coarse-grained guard against concurrent history mutation (temp file
 	// name collisions, partial writes, truncated histories, etc.).
 	BeginExclusiveOp(name string) (release func(), ok bool)
+
+	// Pillar5ClipboardStatus (see context.go for docs).
+	Pillar5ClipboardStatus() map[string]any
 }
 
 // CommandHandler is the interface implemented by every daemon command.

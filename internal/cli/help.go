@@ -35,7 +35,7 @@ func PrintHelp() {
 	fmt.Println("  scrub-history  Scrub shell history of known secret values (Pillar 3)")
 	fmt.Println("                 --mode=delete|redact  --dry-run  --json  --file=PATH")
 	fmt.Println("  env [--json] [name]  Run Pillar 4 primitive (default: printenv; --json for prompt/machine readers)")
-	fmt.Println("  clipboard      Pillar 5 clipboard status / clear (macOS)")
+	fmt.Println("  clipboard      Pillar 5: status|check|clear|nuke|scrub|redact (macOS primitives + monitor-backed alerts/auto per 5 stories)")
 	fmt.Println("  crumbs         Pillar 2: locate forgotten vault exports & high-entropy dumps in high-risk dirs")
 	fmt.Println("  config         Show configuration")
 	fmt.Println("  help           Show this help message")

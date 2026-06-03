@@ -83,5 +83,6 @@ const richDaemonResponse = `{
 		"last_scan":"2026-03-01T11:55:00Z",
 		"collector_results":{"env":142,"bitwarden":19}
 	},
-	"pillar2":{"count":2}
+	"pillar2":{"count":2},
+	"pillar5":{"clipboard":{"secret_count":0,"last_change":"2026-03-01T11:55:00Z","redacted":false,"cleared":false,"monitor_active":true}}
 }`

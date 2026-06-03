@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"net"
 	"os/exec"
@@ -98,6 +99,25 @@ func TestRunClipboard_PbpasteFails(t *testing.T) {
 
 	RunClipboard([]string{"check"})
 	RunClipboard([]string{"status"})
+}
+
+// TestRunClipboard_Scrub_PbpasteFails hits the pbpaste error branch for the
+// scrub/redact subcommand (exercises the logging we added for consistency
+// with the check path in bug 4).
+func TestRunClipboard_Scrub_PbpasteFails(t *testing.T) {
+	defer resetTestOverrides(t)
+	restore := silenceOutput()
+	defer restore()
+
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		if name == "pbpaste" {
+			return exec.Command("false") // will fail .Output()
+		}
+		return exec.Command("true")
+	}
+
+	RunClipboard([]string{"scrub"})
+	RunClipboard([]string{"redact"})
 }
 
 // TestRunClipboard_CheckDaemonNotRunning hits the case where pbpaste succeeds
@@ -229,4 +249,96 @@ func TestRunClipboard_CheckWithCandidatesButAuthSkipped(t *testing.T) {
 	}()
 
 	RunClipboard([]string{"check"})
+}
+
+// TestRunClipboard_Scrub exercises the redact/scrub subcommand (story 2 primitive)
+// using a real net.Pipe to drive the CHECK_HASH loop (like the check full-conn tests),
+// plus a pbcopy override that captures what would be written to the pasteboard so we
+// can assert the redaction actually happened (secrets replaced, non-secrets preserved,
+// correct JSON report, placeholder from config).
+func TestRunClipboard_Scrub(t *testing.T) {
+	defer resetTestOverrides(t)
+	restore := silenceOutput()
+	defer restore()
+
+	planted1 := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567890"
+	planted2 := "ghp_1234567890abcdefABCDEF1234567890abcdef"
+	nonSecret := "NORMAL=line"
+
+	// Use a real pipe so the scrub path does the real AUTH + CHECK_HASH writes/reads
+	clientConn, serverConn := net.Pipe()
+	netDialTimeout = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		return clientConn, nil
+	}
+
+	// Simulate daemon: consume AUTH + two CHECK_HASH, reply known:true for both
+	go func() {
+		defer serverConn.Close()
+		reader := bufio.NewReader(serverConn)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "AUTH ") {
+				continue
+			}
+			if strings.HasPrefix(line, "CHECK_HASH ") {
+				_, _ = fmt.Fprintf(serverConn, "%s\n", `{"status":"ok","known":true}`)
+			}
+		}
+	}()
+
+	// Capture what the scrub path writes to pbcopy (the redacted blob)
+	var capturedStdin bytes.Buffer
+
+	// Single definition of the realistic pbpaste provider (no dupe with earlier dead code).
+	// This reduces copy-paste risk with other clipboard tests.
+	pbpasteCmd := func() *exec.Cmd {
+		return exec.Command("sh", "-c", fmt.Sprintf("printf 'DB_PASSWORD=%s\nAPI_TOKEN=%s\n%s\n'", planted1, planted2, nonSecret))
+	}
+
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		if name == "pbpaste" {
+			return pbpasteCmd()
+		}
+		if name == "pbcopy" {
+			// Return a cmd whose Stdout we attach to our buffer. The caller will
+			// set cmd.Stdin = the redacted content, then Run(). "sh -c cat" will
+			// copy that Stdin to our captured buffer. Harmless and works with the
+			// exact call pattern in the scrub code.
+			cmd := exec.Command("sh", "-c", "cat")
+			cmd.Stdout = &capturedStdin
+			return cmd
+		}
+		return exec.Command("true")
+	}
+
+	// Provide a custom placeholder via configLoad (now under Pillar5 for clipboard)
+	origConfigLoad := configLoad
+	configLoad = func() (*config.Config, string, error) {
+		c := &config.Config{}
+		c.Pillar5.RedactPlaceholder = "[REDACTED-TEST]"
+		return c, "/tmp/fake.yaml", nil
+	}
+	defer func() { configLoad = origConfigLoad }()
+
+	// Run it
+	RunClipboard([]string{"scrub"})
+
+	// Assert: the written content had secrets replaced (but non-secret kept), and used our placeholder
+	written := capturedStdin.String()
+	if !strings.Contains(written, "[REDACTED-TEST]") {
+		t.Errorf("scrub did not redact with expected placeholder; got: %q", written)
+	}
+	if strings.Contains(written, planted1) || strings.Contains(written, planted2) {
+		t.Errorf("scrub left secret values in output: %q", written)
+	}
+	if !strings.Contains(written, nonSecret) {
+		t.Errorf("scrub should have preserved non-secret content: %q", written)
+	}
+
+	// Also run "redact" alias (no extra asserts needed, path is same)
+	RunClipboard([]string{"redact"})
 }

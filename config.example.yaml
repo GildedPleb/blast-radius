@@ -435,21 +435,59 @@ pillar4:
     #   enabled: false
 
 # ==============================================================================
-# PILLAR 5 — Clipboard Hygiene
-# "Catching and limiting secrets that have reached one of the most
-#  dangerous single-copy surfaces on a developer machine."
+# PILLAR 5 — Clipboard Hygiene (targeted stories 1-5)
+# Visibility primitive, redact/scrub primitive, blunt clear,
+# reactive alert on copy (fast on first secret), two-tier grace auto.
 #
 # On macOS the clipboard is an extremely high blast-radius location.
-# This pillar lets you know when a known secret lands in it and can
-# (in the future) auto-clear it.
+# The monitor (when enabled) reacts to any copy and can:
+#   - Alert you instantly when a known secret lands (story 4, with fast-path
+#     so a giant paste with 10 secrets alerts on the first confirmation).
+#   - After stable secret presence: auto-redact at redact_timeout_seconds
+#     (default 30s, using P3 placeholder replacement), then full clear at
+#     full_clear_timeout_seconds (default 60s).
 #
-# Today: the timer is declared; the actual auto-clear timer is not yet
-# wired up in the clipboard command (status/check/clear work today).
+# This gives an intentional use window: copy a secret, paste it where you
+# need it quickly (e.g. to an AI prompt), and the system will clean up for
+# you after the redact timeout without you having to manually scrub.
+# Both timeouts are independent and user-customizable.
+#
+# Primitives (check/scrub/clear) always work via explicit commands even if
+# the background monitor is disabled.
 # ==============================================================================
 
 pillar5:
-  clear_seconds: 30   # seconds after which a detected secret in the clipboard
-                      # should be cleared (future — not yet enforced)
+  # Two-tier auto after a secret is detected and clipboard content is stable.
+  # redact_timeout_seconds: auto-redact known secrets in the clipboard content
+  #   (replaces secret values with placeholder, keeps the rest of what you copied).
+  redact_timeout_seconds: 30
+
+  # full_clear_timeout_seconds: if still stable (independently of or after the
+  #   redact timeout), do a full clipboard clear (nuke). The two timeouts are
+  #   independent; see pillar5_user_stories.md for "use window" semantics and
+  #   configuring flexible vs strict "redact-then-nuke" behavior.
+  full_clear_timeout_seconds: 60
+
+  # redact_placeholder: the string to use when redacting detected secrets from
+  #   clipboard content (both via explicit `blastradius clipboard scrub|redact`
+  #   and the auto-redact in the monitor). Defaults to "[REDACTED]". This is
+  #   independent of pillar3.redact_placeholder so clipboard hygiene can have
+  #   its own preference.
+  redact_placeholder: "[REDACTED]"
+
+  # Enable the background monitor that powers reactive alerts (story 4) and
+  # the two-tier auto actions (story 5). Set false to disable all auto behavior
+  # while keeping the explicit `blastradius clipboard` primitives.
+  # NOTE: changes to monitor_enabled or alerts_enabled require a daemon restart
+  # (config is snapshotted at start; no runtime reload for this in alpha).
+  # The internal poll interval is a cheap 750ms (hard-coded for alpha; logged
+  # at daemon startup under "Pillar5 monitor started (interval=...)").
+  monitor_enabled: true
+
+  # Whether the monitor should surface alerts (notification + optional sound)
+  # the moment a secret is detected. The monitor still tracks state for `status`
+  # even if this is false.
+  alerts_enabled: true
 
 # ------------------------------------------------------------------------------
 # That's it. Everything else is either a hard-coded security invariant

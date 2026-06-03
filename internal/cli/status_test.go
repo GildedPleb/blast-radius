@@ -30,6 +30,16 @@ func TestRunStatus(t *testing.T) {
 	}`)
 	RunStatus(false)
 	RunStatus(true)
+
+	// Exercise the Pillar 5 (clipboard) sections (story 4/5 monitor state) in human + JSON
+	sendDaemonCommandFn = mockSendDaemonCommand(`{
+		"status":"ok",
+		"registry":{"tracked_hashes":10},
+		"time":"2026-03-01T12:00:00Z",
+		"pillar5":{"clipboard":{"secret_count":2,"last_change":"2026-03-01T11:59:00Z","redacted":false,"cleared":false,"monitor_active":true}}
+	}`)
+	RunStatus(false)
+	RunStatus(true)
 }
 
 // TestRunStatus_UnifiedJSONShape verifies that the refactored --json output

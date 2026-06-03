@@ -45,7 +45,10 @@ type Config struct {
 	// the `enabled` field used by future wiring.
 	Pillar4 Pillar4Config `yaml:"pillar4,omitempty"`
 
-	// Pillar5 configures Clipboard Hygiene (macOS auto-clear timer today).
+	// Pillar5 configures Clipboard Hygiene.
+	// See Pillar5Config for the two-tier timeouts (redact + full clear),
+	// redact_placeholder (for manual/auto redaction), and monitor/alert
+	// controls for the targeted reactive stories.
 	Pillar5 Pillar5Config `yaml:"pillar5,omitempty"`
 }
 
@@ -108,8 +111,40 @@ type Pillar4Config struct {
 }
 
 // Pillar5Config groups clipboard hygiene settings (Pillar 5).
+// Focused on the 5 targeted stories: visibility primitive, redact/scrub primitive,
+// blunt clear, reactive alert on copy (with fast first-secret alerting), and
+// two-tier grace-period auto (redact then full clear).
+//
+// RedactTimeoutSeconds: after a secret is detected and the clipboard content
+// remains stable, automatically redact known secrets (P3-style placeholder
+// replacement) after this many seconds. Gives a safe use window for intentional
+// pastes (e.g. paste secret to AI) before the system cleans the values for you.
+// FullClearTimeoutSeconds: after (or independently of) the redact timeout, if
+// still stable, do a full clipboard clear. The two are independent and
+// user-configurable (see stories for details on "redact then nuke" vs flexible windows).
+//
+// RedactPlaceholder: the string used to replace detected secrets during
+// clipboard redaction (both explicit `scrub`/`redact` and auto-redact in monitor).
+// Defaults to "[REDACTED]". Can be set independently of pillar3 for clipboard
+// hygiene preferences.
 type Pillar5Config struct {
-	ClearSeconds int `yaml:"clear_seconds,omitempty"`
+	RedactTimeoutSeconds    int `yaml:"redact_timeout_seconds,omitempty"`
+	FullClearTimeoutSeconds int `yaml:"full_clear_timeout_seconds,omitempty"`
+
+	// RedactPlaceholder is the user's preferred placeholder for redacting
+	// secrets in clipboard content (story 2 and auto in story 5). Falls back
+	// to pillar3.redact_placeholder or the hard default if not set.
+	RedactPlaceholder string `yaml:"redact_placeholder,omitempty"`
+
+	// Monitor controls the background watcher that enables reactive alerts
+	// and the two-tier auto actions (stories 4+5). When false the primitives
+	// (1-3) still work via explicit `blastradius clipboard` commands.
+	MonitorEnabled bool `yaml:"monitor_enabled,omitempty"`
+
+	// AlertsEnabled controls whether the monitor fires user-visible alerts
+	// (notification / sound) on secret detection. The monitor still updates
+	// status even if alerts are off.
+	AlertsEnabled bool `yaml:"alerts_enabled,omitempty"`
 }
 
 // Pillar3Config holds settings for Pillar 3 (History Hygiene).
@@ -240,7 +275,11 @@ func DefaultConfig() *Config {
 			},
 		},
 		Pillar5: Pillar5Config{
-			ClearSeconds: 30,
+			RedactTimeoutSeconds:    30,
+			FullClearTimeoutSeconds: 60,
+			RedactPlaceholder:       "[REDACTED]",
+			MonitorEnabled:          true,
+			AlertsEnabled:           true,
 		},
 	}
 }
@@ -284,6 +323,10 @@ func Load() (cfg *Config, configPath string, err error) {
 	// have entries. This gives collectors a stable place to look for options
 	// (especially ignore_patterns) even when the user only partially configured.
 	normalizePillar1Sources(cfg)
+
+	// Pillar 5 (Clipboard Hygiene, targeted stories 1-5) — ensure two-tier timeouts
+	// and redact_placeholder have sensible defaults even on partial user config.
+	normalizePillar5(cfg)
 
 	return cfg, configPath, nil
 }
@@ -378,6 +421,43 @@ func normalizePillar3(cfg *Config) {
 	// for backward compat. Callers after Load() may observe nil for these.
 	// (normalizePillar3 still ensures safe Mode/placeholder.)
 	cfg.Pillar3 = p
+}
+
+// normalizePillar5 ensures the two independent timeouts (redact + full clear)
+// and the redact_placeholder for targeted stories 4+5 have sensible values
+// after unmarshal of partial user config. Per user: "just a user configurable
+// setting" for "Redact after X", "clear after Y", and the placeholder for
+// redaction. Monitor/alert enableds respect explicit false from YAML; defaults
+// come from DefaultConfig() before unmarshal.
+func normalizePillar5(cfg *Config) {
+	if cfg.Pillar5.RedactTimeoutSeconds < 0 {
+		cfg.Pillar5.RedactTimeoutSeconds = 0 // 0 disables that tier
+	}
+	if cfg.Pillar5.FullClearTimeoutSeconds < 0 {
+		cfg.Pillar5.FullClearTimeoutSeconds = 0
+	}
+	if cfg.Pillar5.RedactPlaceholder == "" {
+		cfg.Pillar5.RedactPlaceholder = "[REDACTED]"
+	}
+}
+
+// EffectiveRedactPlaceholder returns the placeholder string to use when redacting
+// secrets from clipboard (or history) content. It prefers the Pillar5 value
+// (clipboard-specific hygiene preference), falls back to Pillar3, then the
+// provided hard default (typically "[REDACTED]").
+// This eliminates the duplicated "if p5 != "" { p5 } else if p3 != "" { p3 }"
+// logic that lived in both the CLI scrub path and the daemon auto-redact path.
+func EffectiveRedactPlaceholder(p5, p3, fallback string) string {
+	if p5 != "" {
+		return p5
+	}
+	if p3 != "" {
+		return p3
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return "[REDACTED]"
 }
 
 // GetSourceIgnorePatterns returns the normalized ignore patterns for a named

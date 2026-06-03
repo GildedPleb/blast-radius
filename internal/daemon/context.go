@@ -42,4 +42,10 @@ type DaemonContext interface {
 	// This is a coarse-grained guard against concurrent history mutation (temp file
 	// name collisions, partial writes, truncated histories, etc.).
 	BeginExclusiveOp(name string) (release func(), ok bool)
+
+	// Pillar5ClipboardStatus returns live state from the Pillar 5 monitor
+	// (stories 4+5): whether a secret is currently on the clipboard, the count
+	// from the last full scan, time of last relevant change, and auto-action flags.
+	// Populated under the "pillar5" key in STATUS (and "clipboard" subkey).
+	Pillar5ClipboardStatus() map[string]any
 }

@@ -65,6 +65,22 @@ func RunStatus(jsonOutput bool) {
 				fmt.Println("Pillar 2 (Crumbs): clean (last scan recent)")
 			}
 		}
+		// Pillar 5 (Clipboard) live state from the monitor (targeted stories 4+5)
+		if p5, ok := daemonObj["pillar5"].(map[string]any); ok {
+			if cb, ok := p5["clipboard"].(map[string]any); ok {
+				if cnt, ok := cb["secret_count"].(float64); ok && cnt > 0 {
+					fmt.Printf("Pillar 5 (Clipboard): %d known secret(s) on clipboard — run 'blastradius clipboard scrub' to clean\n", int(cnt))
+				} else {
+					// Gate on having seen at least one change (last_change != "never") so we don't
+					// spam "clean (monitor active)" in the very initial state before any clipboard
+					// event has been observed by the monitor.
+					lastChange, _ := cb["last_change"].(string)
+					if active, _ := cb["monitor_active"].(bool); active && lastChange != "never" {
+						fmt.Println("Pillar 5 (Clipboard): clean (monitor active)")
+					}
+				}
+			}
+		}
 	}
 
 	fmt.Println("===================")

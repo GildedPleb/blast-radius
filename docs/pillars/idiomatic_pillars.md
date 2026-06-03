@@ -75,7 +75,9 @@ This is the safe "run printenv (or similar) right now without burning anything?"
 
 **Catching and limiting secrets that have reached one of the most dangerous single-copy surfaces on a developer machine.**
 
-On macOS, the clipboard is an extremely high-blast-radius location. This pillar detects when known secrets land in the clipboard and can automatically clear them after a configurable time.
+On macOS, the clipboard is an extremely high-blast-radius location. This pillar detects when known secrets land in the clipboard (via explicit primitives like `blastradius clipboard check` / `scrub`, and via an optional background monitor that reacts to copy events) and can surface immediate awareness (alerts, sounds, status) plus optional time-based limiting / redaction.
+
+The reactive monitor (when enabled) is event-driven: on clipboard change it scans and can alert the user instantly ("known secrets just appeared"), letting them ignore (intentional copy) or act (they didn't realize). This provides fast feedback without requiring the user to remember to run checks, while still leaving intent judgment to the human.
 
 **Core question it answers**: "Has a secret made it into the one place that makes it trivial to paste into the wrong window, chat, or AI prompt?"
 

@@ -83,7 +83,9 @@ func RunEnvCheck(name string) {
 	// Use the same sibling .auth file as the high-level sendDaemonCommand path.
 	if tokenBytes, readErr := os.ReadFile(socketPath + ".auth"); readErr == nil {
 		authLine := "AUTH " + strings.TrimSpace(string(tokenBytes)) + "\n"
-		conn.Write([]byte(authLine))
+		if _, werr := conn.Write([]byte(authLine)); werr != nil {
+			logging.Printf("RunEnvCheck: AUTH write error: %v (count may be incomplete)", werr)
+		}
 	}
 	// If we can't read the token we still try the CHECK_HASH lines; the daemon
 	// will reject them with the standard auth error. Existing callers treat
