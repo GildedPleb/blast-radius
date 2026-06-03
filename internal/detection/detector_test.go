@@ -378,7 +378,7 @@ func TestDetector_extractValueSide(t *testing.T) {
 		{"token=ghp_abcdefghijklmnopqrstuvwxyz123456", "ghp_abcdefghijklmnopqrstuvwxyz123456"},
 		{"noequals", "noequals"}, // should be unchanged
 		{"KEY=val=with=equals1234567890", "val=with=equals1234567890"},
-		{"=onlyequals", "onlyequals"}, // after stripping leading = via normalization
+		{"=onlyequals", "onlyequals"},                                        // after stripping leading = via normalization
 		{"  SPACED =  valwithspaces1234567890  ", "valwithspaces1234567890"}, // exercises trim + side
 	}
 
