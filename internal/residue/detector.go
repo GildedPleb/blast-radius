@@ -131,6 +131,22 @@ func DetectOnePassword1pif(data []byte) (int, bool) {
 // Returns a finding only if it crosses internal thresholds (suspicious name OR format match OR >= min entropy hits).
 // All secret candidate hashing uses the provided registry (hash-only, never stores plaintext).
 func ScanFile(path string, reg *registry.Registry) (*ResidueFinding, error) {
+	// Explicitly skip symlinks (do not follow or process their targets). This mirrors
+	// the walk-time skips in P1/P2 and prevents slurping sensitive files via links
+	// placed in P2 surfaces (or passed via --file etc.). Lstat reports the link itself.
+	if linfo, lerr := os.Lstat(path); lerr == nil && linfo.Mode()&os.ModeSymlink != 0 {
+		return nil, nil
+	}
+
+	// TOCTOU note: between the Lstat symlink check (and the walk's de.Type() check
+	// in manager) and the Stat/Open/ReadFile below, a local actor with write access
+	// to the surface could swap the path for a symlink. Subsequent reads would then
+	// follow. The window is narrow; declared P2 surfaces + Classifier (P1 authority)
+	// + ignore patterns are the primary containment. We accept this (alpha, local
+	// attacker model) rather than complicating with O_NOFOLLOW (portability) or
+	// extra fstat-after-open checks. P1 has an analogous (walk decision vs. later
+	// Open in collectHashesFromFile) window. Documented in CURRENT_STATE.md and
+	// config.example.yaml.
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err

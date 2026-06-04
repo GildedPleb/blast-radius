@@ -46,7 +46,7 @@ func TestRunClipboard_CheckWithSecrets(t *testing.T) {
 	// Simulate pbpaste returning content with a known secret inside a realistic wrapper
 	planted := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567890"
 	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "pbpaste" {
+		if name == "pbpaste" || strings.HasSuffix(name, "/pbpaste") {
 			return exec.Command("sh", "-c", fmt.Sprintf("printf 'export AWS_SECRET=%s\nnormal text'", planted))
 		}
 		return exec.Command("true")
@@ -108,7 +108,7 @@ func TestRunClipboard_CheckNoCandidates(t *testing.T) {
 	defer restore()
 
 	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "pbpaste" {
+		if name == "pbpaste" || strings.HasSuffix(name, "/pbpaste") {
 			return exec.Command("sh", "-c", `printf "just normal text here\nno secrets"`)
 		}
 		return exec.Command("true")
@@ -124,7 +124,7 @@ func TestRunClipboard_PbpasteFails(t *testing.T) {
 	defer restore()
 
 	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "pbpaste" {
+		if name == "pbpaste" || strings.HasSuffix(name, "/pbpaste") {
 			return exec.Command("false") // will fail .Output()
 		}
 		return exec.Command("true")
@@ -143,7 +143,7 @@ func TestRunClipboard_Scrub_PbpasteFails(t *testing.T) {
 	defer restore()
 
 	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "pbpaste" {
+		if name == "pbpaste" || strings.HasSuffix(name, "/pbpaste") {
 			return exec.Command("false") // will fail .Output()
 		}
 		return exec.Command("true")
@@ -167,10 +167,10 @@ func TestRunClipboard_Scrub_PbcopyFails(t *testing.T) {
 	}
 
 	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "pbpaste" {
+		if name == "pbpaste" || strings.HasSuffix(name, "/pbpaste") {
 			return exec.Command("sh", "-c", `printf "DB_PASS=sekret1234567890\n"`)
 		}
-		if name == "pbcopy" {
+		if name == "pbcopy" || strings.HasSuffix(name, "/pbcopy") {
 			return exec.Command("false") // fail the redact write
 		}
 		return exec.Command("true")
@@ -198,7 +198,7 @@ func TestRunClipboard_CheckDaemonNotRunning(t *testing.T) {
 	defer restore()
 
 	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "pbpaste" {
+		if name == "pbpaste" || strings.HasSuffix(name, "/pbpaste") {
 			return exec.Command("sh", "-c", `printf "AWS_SECRET=AKIAFAKEEXAMPLE1234567890\n"`)
 		}
 		return exec.Command("true")
@@ -218,7 +218,7 @@ func TestRunClipboard_Clear(t *testing.T) {
 	defer restore()
 
 	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "pbcopy" {
+		if name == "pbcopy" || strings.HasSuffix(name, "/pbcopy") {
 			return exec.Command("true")
 		}
 		return exec.Command("true")
@@ -247,7 +247,7 @@ func TestRunClipboard_CheckFullConnPath(t *testing.T) {
 
 	// pbpaste returns two plausible secrets
 	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "pbpaste" {
+		if name == "pbpaste" || strings.HasSuffix(name, "/pbpaste") {
 			return exec.Command("sh", "-c", `printf "DB_PASSWORD=supersecret123\nAPI_KEY=anothersecret456\nNORMAL=line\n"`)
 		}
 		return exec.Command("true")
@@ -294,7 +294,7 @@ func TestRunClipboard_CheckWithCandidatesButAuthSkipped(t *testing.T) {
 	defer restore()
 
 	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "pbpaste" {
+		if name == "pbpaste" || strings.HasSuffix(name, "/pbpaste") {
 			return exec.Command("sh", "-c", `printf "DB_PASS=sekret\n"`)
 		}
 		return exec.Command("true")
@@ -370,10 +370,10 @@ func TestRunClipboard_Scrub(t *testing.T) {
 	}
 
 	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "pbpaste" {
+		if name == "pbpaste" || strings.HasSuffix(name, "/pbpaste") {
 			return pbpasteCmd()
 		}
-		if name == "pbcopy" {
+		if name == "pbcopy" || strings.HasSuffix(name, "/pbcopy") {
 			// Return a cmd whose Stdout we attach to our buffer. The caller will
 			// set cmd.Stdin = the redacted content, then Run(). "sh -c cat" will
 			// copy that Stdin to our captured buffer. Harmless and works with the

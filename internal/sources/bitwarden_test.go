@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
@@ -90,9 +91,10 @@ func TestBitwardenCollector_Validate(t *testing.T) {
 		origPath := os.Getenv("PATH")
 		t.Setenv("PATH", tmp+":"+origPath)
 
+		planted := "BW_STATUS_LEAKED_TOKEN_1234567890ABCDEF"
 		execBw = func(args ...string) ([]byte, error) {
 			if args[0] == "status" {
-				return []byte(""), errors.New("simulated bw status comms failure")
+				return []byte(`{"status":"unlocked","user":"` + planted + `"}`), errors.New("simulated bw status comms failure")
 			}
 			return nil, nil
 		}
@@ -109,6 +111,9 @@ func TestBitwardenCollector_Validate(t *testing.T) {
 		err := c.Validate()
 		if err == nil {
 			t.Error("expected comms error from status call")
+		}
+		if err != nil && strings.Contains(err.Error(), planted) {
+			t.Errorf("regression: sensitive data from bw status output leaked into Validate error: %v", err)
 		}
 	})
 
@@ -196,8 +201,13 @@ func TestBitwardenCollector_Collect_Error(t *testing.T) {
 	orig := execBw
 	defer func() { execBw = orig }()
 
+	// Simulate a failing bw that returns output containing a secret value (as real
+	// CombinedOutput does on non-zero exit). The collector must *never* put that
+	// raw output (or the secret) into the error returned to callers / rescan results / logs.
+	plantedSecret := "BW_SECRET_ABCDEF1234567890HIGHENTROPYVALUE"
 	execBw = func(args ...string) ([]byte, error) {
-		return nil, errors.New("boom")
+		output := []byte(`{"items":[{"login":{"password":"` + plantedSecret + `"}}]}`)
+		return output, errors.New("boom")
 	}
 
 	cfg := &config.Config{
@@ -212,6 +222,12 @@ func TestBitwardenCollector_Collect_Error(t *testing.T) {
 	_, err := c.Collect()
 	if err == nil {
 		t.Error("expected error from Collect when bw fails")
+	}
+	if err != nil && strings.Contains(err.Error(), plantedSecret) {
+		t.Errorf("regression: secret value from bw failure output leaked into Collect error: %v", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "output:") {
+		t.Errorf("regression: raw bw output leaked into Collect error (should be sanitized): %v", err)
 	}
 }
 

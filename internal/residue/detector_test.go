@@ -476,3 +476,40 @@ func TestScanFile_Errors(t *testing.T) {
 		t.Error("expected err from Open on 0000 file")
 	}
 }
+
+// TestScanFile_SkipsSymlinks covers the early Lstat guard in ScanFile (the P2
+// counterpart to the walk-time skips). This is the direct (non-walk) path,
+// e.g. a --file override or explicit call pointing at a symlink. The manager
+// walk already skips before calling ScanFile, but we want the guard exercised
+// for direct use too.
+func TestScanFile_SkipsSymlinks(t *testing.T) {
+	reg := registry.New()
+
+	dir := t.TempDir()
+
+	// A real file that would otherwise produce a finding (high entropy + name).
+	realFile := filepath.Join(dir, "real.json")
+	if err := os.WriteFile(realFile, []byte(`{"encrypted":false,"items":[{"login":{"password":"AKIAIOSFODNN7EXAMPLESECRETKEY1234567"}}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Dangling symlink (suspicious name even).
+	dangle := filepath.Join(dir, "bitwarden_export.json")
+	if err := os.Symlink("/no/such/target/for/test", dangle); err != nil {
+		t.Fatal(err)
+	}
+	f, err := ScanFile(dangle, reg)
+	if err != nil || f != nil {
+		t.Errorf("dangling symlink to ScanFile should return nil, nil (early skip); got f=%v err=%v", f, err)
+	}
+
+	// Symlink to a real secret-containing file: must also be skipped (do not follow).
+	link := filepath.Join(dir, "link_to_real.json")
+	if err := os.Symlink(realFile, link); err != nil {
+		t.Fatal(err)
+	}
+	f, err = ScanFile(link, reg)
+	if err != nil || f != nil {
+		t.Errorf("symlink to real secret file must be skipped by Lstat guard; got f=%v err=%v", f, err)
+	}
+}

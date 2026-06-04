@@ -83,6 +83,29 @@ func (s *Scanner) visitEnvFiles(root string, onFile func(path string) error) err
 			return nil // skip problematic paths
 		}
 
+		if info.Mode()&os.ModeSymlink != 0 {
+			// Never follow symlinks during P1 discovery. This prevents:
+			// - escaping the declared project_roots via symlink components
+			// - reading sensitive files that happen to be linked inside a scanned tree
+			// (e.g. a .env* symlink pointing outside the root or at a high-value target).
+			// P2 does the same (see residue/manager.go and detector.go). Declared roots +
+			// Rel+.. guards in Classifier + env_file_patterns authority remain the primary
+			// containment; symlink skip is belt-and-suspenders.
+			//
+			// Note on semantics: info comes from filepath.Walk (Lstat under the hood).
+			// For a symlink, info.Mode() has ModeSymlink and info.IsDir() is always false
+			// (the link itself is not a dir). Walk never descends into symlinked directories
+			// regardless, so we simply return nil to skip the entry (no onFile/collect).
+			// An explicit SkipDir inside this block would be unreachable.
+			//
+			// TOCTOU note: the walk-time decision (this Lstat info) and later open in
+			// collectHashesFromFile have a narrow race window where a local writer could
+			// replace the entry with a symlink. Primary containment is the declared roots +
+			// patterns + Classifier. See matching note in residue/detector.go. Documented
+			// in CURRENT_STATE.md + config.example.yaml.
+			return nil
+		}
+
 		if info.IsDir() {
 			base := filepath.Base(path)
 			if skipDirs[base] {

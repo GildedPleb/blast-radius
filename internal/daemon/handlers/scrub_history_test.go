@@ -440,6 +440,46 @@ func TestScrubHistoryHandler_OverrideFileReadError(t *testing.T) {
 	}
 }
 
+func TestScrubHistoryHandler_OverrideFileWithSpaces(t *testing.T) {
+	// Regression test for space-containing --file override paths (and names that
+	// end with what used to be magic flag suffixes).
+	// The handler receives the raw "args" tail from the protocol (which preserves
+	// spaces after SplitN on the line). Using Fields + HasPrefix would truncate
+	// at the first space in the value, causing the wrong file (or a truncated
+	// name) to be passed to os.Stat/Read/Write.
+	ctx := &fakeContext{hashes: nil}
+
+	h := ScrubHistoryHandler{}
+	spaced := "file=/tmp/dir with space/.bash_history"
+	resp, err := h.Handle(spaced, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resp.(map[string]any)
+	msg := m["message"].(string)
+	if !strings.Contains(msg, "with space") {
+		t.Errorf("spaced path was truncated/mangled in --file override before reaching fs ops; message=%q", msg)
+	}
+	// Also accept the two-token form if someone constructs args that way.
+	resp2, _ := h.Handle("file=/another spaced/hist", ctx)
+	m2 := resp2.(map[string]any)
+	if !strings.Contains(m2["message"].(string), "another spaced") {
+		t.Error("two-token spaced file= value mangled")
+	}
+
+	// Regression: a path whose *name* legitimately ends with one of the former
+	// "magic" flag suffixes (e.g. "my history full") must not be truncated by
+	// any tail processing. We use the form our CLI builder emits (file= last,
+	// flags before) and assert the error message (stat fail path) still contains
+	// the full original name. This documents the ambiguity for raw callers.
+	suffixName := "file=/tmp/dir with space/my history full"
+	resp3, _ := h.Handle(suffixName, ctx)
+	m3 := resp3.(map[string]any)
+	if !strings.Contains(m3["message"].(string), "my history full") {
+		t.Errorf("suffix-ending file= path was truncated; message=%q", m3["message"])
+	}
+}
+
 func TestScrubHistoryHandler_InvalidModeIgnored(t *testing.T) {
 	secret := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567"
 	h := registry.HashValue([]byte(secret))

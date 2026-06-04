@@ -8,13 +8,23 @@ import (
 	"strings"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/registry"
+	"github.com/GildedPleb/blast-radius/internal/util"
 )
 
 // execBw is the hook used to invoke the Bitwarden CLI.
 // It is overridable in tests so we never require a real `bw` binary.
+// Production default resolves "bw" via LookPath to an absolute path (reduces PATH
+// hijacking surface for this external collector) before exec. Tests override the
+// entire func and are unaffected.
 var execBw = func(args ...string) ([]byte, error) {
-	return exec.Command("bw", args...).CombinedOutput()
+	// Resolve via shared helper (defense-in-depth LookPath to absolute for the
+	// hard-coded P1 collector). Falls back to bare name (exec will error anyway).
+	// Resolve on every call (cheap); Validate already asserted presence for the
+	// enabled path.
+	p := util.ResolveCommand("bw")
+	return exec.Command(p, args...).CombinedOutput()
 }
 
 // BitwardenCollector implements Collector for the Bitwarden vault using the
@@ -57,8 +67,10 @@ func (b *BitwardenCollector) Validate() error {
 		return errors.New("bitwarden source is not enabled")
 	}
 
-	// Step 1: Does the bw binary exist?
-	if _, err := exec.LookPath("bw"); err != nil {
+	// Step 1: Does the bw binary exist? Use the shared resolver so a successful
+	// LookPath yields an absolute path (defense-in-depth) and we have a single
+	// implementation. Resolve returns the bare name on failure.
+	if util.ResolveCommand("bw") == "bw" {
 		return errors.New("bitwarden CLI ('bw') not found in PATH. Please install it and ensure it is available")
 	}
 
@@ -66,12 +78,18 @@ func (b *BitwardenCollector) Validate() error {
 	// We use a lightweight status check. Real collection will do more work.
 	output, err := execBw("status")
 	if err != nil {
-		return errors.New("failed to communicate with Bitwarden CLI: " + err.Error() + " (output: " + string(output) + ")")
+		logging.Printf("bitwarden Validate: bw status failed: %v (output len=%d; details in log only)", err, len(output))
+		return errors.New("failed to communicate with Bitwarden CLI (see daemon log for details)")
 	}
 
 	// Check that we got a usable status. A very lightweight check for now.
 	// We accept "unlocked" or "locked" as usable states. Anything else (e.g. unauthenticated)
 	// means the user needs to authenticate.
+	//
+	// status output is small non-sensitive metadata only (auth state + identity; no
+	// vault items, passwords, or secret material). We materialize it here solely for
+	// the substring check. Contrast with Collect which must never leak raw "list items"
+	// output (containing secrets) into errors or logs.
 	statusStr := string(output)
 	if !strings.Contains(statusStr, `"status":"unlocked"`) && !strings.Contains(statusStr, `"status":"locked"`) {
 		return errors.New("Bitwarden CLI is not unlocked. Run 'bw unlock' (or set BW_SESSION) and try again.")
@@ -85,7 +103,8 @@ func (b *BitwardenCollector) Validate() error {
 func (b *BitwardenCollector) Collect() ([]registry.SecretHash, error) {
 	output, err := execBw("list", "items")
 	if err != nil {
-		return nil, fmt.Errorf("bw list items failed: %w (output: %s)", err, string(output))
+		logging.Printf("bitwarden Collect: bw list items failed: %v (output len=%d; details in log only)", err, len(output))
+		return nil, fmt.Errorf("bitwarden collect failed: %w (see daemon log for details)", err)
 	}
 
 	var items []map[string]any

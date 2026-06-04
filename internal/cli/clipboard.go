@@ -7,6 +7,7 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/detection"
 	"github.com/GildedPleb/blast-radius/internal/logging"
+	"github.com/GildedPleb/blast-radius/internal/util"
 )
 
 // RunClipboard handles Pillar 5 clipboard operations (macOS primitives + monitor-backed behaviors)
@@ -19,7 +20,7 @@ func RunClipboard(args []string) {
 	switch args[0] {
 	case "status", "check":
 		logging.Println("RunClipboard: checking clipboard")
-		out, err := execCommand("pbpaste").Output()
+		out, err := execCommand(util.ResolveCommand("pbpaste")).Output()
 		if err != nil {
 			logging.Println("RunClipboard: pbpaste failed")
 			fmt.Println(`{"status":"error","message":"pbpaste failed (macOS only)"}`)
@@ -49,7 +50,7 @@ func RunClipboard(args []string) {
 		}
 	case "clear", "nuke":
 		logging.Println("RunClipboard: clearing clipboard")
-		if err := execCommand("pbcopy").Run(); err != nil {
+		if err := execCommand(util.ResolveCommand("pbcopy")).Run(); err != nil {
 			logging.Printf("RunClipboard: pbcopy failed for clear/nuke: %v", err)
 			fmt.Println(`{"status":"error","message":"pbcopy failed"}`)
 			return
@@ -58,7 +59,7 @@ func RunClipboard(args []string) {
 	case "scrub", "redact":
 		// Redact only the secrets, preserve the rest of the content.
 		logging.Println("RunClipboard: scrubbing clipboard (redact secrets only)")
-		out, err := execCommand("pbpaste").Output()
+		out, err := execCommand(util.ResolveCommand("pbpaste")).Output()
 		if err != nil {
 			logging.Println("RunClipboard: pbpaste failed")
 			fmt.Println(`{"status":"error","message":"pbpaste failed (macOS only)"}`)
@@ -97,7 +98,7 @@ func RunClipboard(args []string) {
 			scrubbed = strings.ReplaceAll(scrubbed, sec, placeholder)
 		}
 
-		cmd := execCommand("pbcopy")
+		cmd := execCommand(util.ResolveCommand("pbcopy"))
 		cmd.Stdin = strings.NewReader(scrubbed)
 		if err := cmd.Run(); err != nil {
 			logging.Printf("RunClipboard: pbcopy failed for scrub/redact: %v", err)

@@ -8,6 +8,7 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/config"
 	"github.com/GildedPleb/blast-radius/internal/detection"
 	"github.com/GildedPleb/blast-radius/internal/logging"
+	"github.com/GildedPleb/blast-radius/internal/util"
 )
 
 // RunEnvCheck is the Pillar 4 primitive function call.
@@ -48,12 +49,28 @@ func RunEnvCheck(name string) {
 
 	// Hard security invariant: commands are always executed via direct exec (no shell).
 	// This eliminates an entire class of injection and arbitrary execution risks from config.
+	// strings.Fields is naive (no quote support); complex args require a wrapper script you control.
+	// We still protect against shell injection because we never pass the string to a shell.
+	// The metachar check is a heuristic warning only (the set is not exhaustive for every
+	// shell/context; newlines, quotes, globs, ~, etc. are also treated as literal argv elements).
+	if strings.ContainsAny(cmd.Cmd, ";|&`$(){}[]<>") {
+		logging.Printf("RunEnvCheck: pillar4 cmd %q contains shell-like metacharacters; they become literal argv tokens (per docs: point at a wrapper script for pipes/logic)", cmd.Cmd)
+	}
 	parts := strings.Fields(cmd.Cmd)
 	if len(parts) == 0 {
 		fmt.Printf(`{"status":"error","message":"empty command (pillar4 primitive)"}` + "\n")
 		return
 	}
-	output, runErr := execCommand(parts[0], parts[1:]...).CombinedOutput()
+	// Resolve bare names (no / or ./ prefix) via LookPath when possible. This reduces
+	// PATH hijack / cwd resolution risk for the P4 primitive while preserving user
+	// intent for explicit relative/absolute paths in pillar4.commands. Complex cases
+	// (spaces in args, pipes, env setup) are documented to use a wrapper script.
+	// We use the shared util.ResolveCommand helper (deduped with P1/P5 tool resolution).
+	prog := parts[0]
+	if !strings.Contains(prog, "/") && !strings.HasPrefix(prog, ".") {
+		prog = util.ResolveCommand(prog)
+	}
+	output, runErr := execCommand(prog, parts[1:]...).CombinedOutput()
 
 	// Always search the output content (the core job of the Pillar 4 primitive).
 	// Even on nonzero exit the command may have emitted secret material

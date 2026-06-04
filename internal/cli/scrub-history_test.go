@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRunScrubHistory(t *testing.T) {
 	defer resetTestOverrides(t)
@@ -60,6 +63,19 @@ func TestRunScrubHistory(t *testing.T) {
 	// --file= override (exercises the arg building path)
 	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","lines_removed":0}`)
 	RunScrubHistory([]string{"--file=/custom/history", "--mode=delete"})
+
+	// spaced path in --file (two-token form and = form). This would have regressed
+	// before the parser fixes (Fields + HasPrefix on the tail would mangle the value
+	// when building the daemon command string, and the handler would re-split).
+	var sent string
+	sendDaemonCommandFn = func(cmd string) (string, error) {
+		sent = cmd
+		return `{"status":"ok","lines_removed":0}`, nil
+	}
+	RunScrubHistory([]string{"--file=/tmp/dir with spaces/my history", "--dry-run"})
+	if !strings.Contains(sent, "with spaces") {
+		t.Errorf("spaced path lost in --file daemon command construction; got %q", sent)
+	}
 
 	// multi-target redact (exercises aggregate "redacted" fallback so human output
 	// does not lie with the "no sensitive entries" message for multi redact runs)

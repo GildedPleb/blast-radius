@@ -187,6 +187,16 @@ pillar1:
 # - Detectors are fixed and *always* run when enabled (no user knob to
 #   turn off detection for dangerous artifacts).
 # - Only the hashes of interesting strings ever leave the scan.
+# - Directory walks (P1 and P2) and file scans explicitly skip symlinks and do
+#   not follow them (avoids escaping declared surfaces or processing arbitrary
+#   sensitive material linked into high-risk dirs). Use real files or adjust
+#   your ignore / skip lists.
+# - There is a narrow TOCTOU between the symlink Lstat checks (walk time or
+#   explicit in ScanFile) and subsequent os.Open/os.ReadFile. A local actor
+#   with write access inside a declared surface could theoretically swap in a
+#   symlink in the window. Primary containment is declared roots/surfaces +
+#   Classifier (P1 authority) + ignores. We document rather than over-complicate
+#   with platform-specific O_NOFOLLOW or post-open fstat (alpha trade-off).
 # ==============================================================================
 
 pillar2:
@@ -415,6 +425,12 @@ pillar3:
 # If you need pipes, redirection, complex logic, or environment setup:
 #   1. Write a tiny wrapper script you control (e.g. ~/bin/scan-env)
 #   2. Put the absolute (or PATH-resolvable) name of *that script* here.
+#
+# Bare command names are resolved via PATH at execution time (with best-effort
+# absolute resolution for defense-in-depth). Relative paths (./foo, ../bar) are
+# executed as written (using the caller's cwd). Symlinks are not followed by the
+# discovery or residue scanners (P1/P2) — declared roots + per-surface patterns
+# + Classifier are authoritative.
 #
 # `enabled: true` marks commands for future prompt/automation use.
 # ==============================================================================

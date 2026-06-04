@@ -15,7 +15,7 @@ Blast Radius is a local, hash-only tool for secret exposure reduction and hygien
 - **Pillar 1**: Legitimate Secret Discovery — ✅ Core complete + `env_file_patterns` authority model.
   - Recursive scanning of `.env*` (or user-declared patterns) under configured `project_roots`.
   - Per-source `ignore_patterns` + global skip/ignore machinery.
-  - Logical collector layer: `env` source + hard-coded `bitwarden` source (via official `bw` CLI when enabled).
+  - Logical collector layer: `env` source + hard-coded `bitwarden` source (via official `bw` CLI when enabled; errors never include raw command output containing vault material — only counts/safe messages surface; "bw" resolved via LookPath).
   - Both sources feed the same in-memory registry, participate in `rescan`, `duplicates`, and `status`.
   - `env_file_patterns` (positive include list under `pillar1.sources.env.options`) is the declaration of P1 authority. Pillar 2 must respect it.
 - **Pillar 2**: Illegitimate Secret Residue ("Crumbs") — ✅ Functional.
@@ -29,7 +29,7 @@ Blast Radius is a local, hash-only tool for secret exposure reduction and hygien
   - v2 receipt lines (`# blastradius-scrub-receipt:v2:...:regfp=...`) for durable, deterministic incrementality and external mutation detection. Re-inspects when the registry grows or receipts are stale.
 - **Pillar 4**: Runtime Environment Hygiene (the `env` primitive) — ✅ Functional.
   - `blastradius env [name]` (defaults to the `default-env` command = `printenv`).
-  - Runs the configured command via direct `exec` (hard invariant — no shell), searches output with the unified detector against the P1 registry, surfaces only a `secrets_found` count (plus logs to daemon), never leaks values.
+  - Runs the configured command via direct `exec` (hard invariant — no shell), searches output with the unified detector against the P1 registry, surfaces only a `secrets_found` count (plus logs to daemon), never leaks values. Bare names resolved via LookPath (best-effort absolute) for P4 + internal tools; symlinks not followed by scanners. Narrow TOCTOU between walk-time symlink decisions and later opens in collection is documented (primary containment is declared roots + env_file_patterns + Classifier).
   - `--json` supported for prompt/machine use. `enabled` field exists for future automation wiring (the primitive itself is the whole of Pillar 4).
 - **Pillar 5**: Clipboard Hygiene — ✅ Functional (macOS for reactive parts).
   - Primitives: `status`/`check`, `clear`/`nuke`, `scrub`/`redact`.
@@ -51,7 +51,7 @@ The system remains strictly **hash-only, minimal-metadata, local-only** with saf
 | History Hygiene (P3)        | ✅        | `scrub-history` (delete/redact, `--dry-run`/`--json`/`--file`/`--full`), broad LCD + rotated/backup discovery under home + `history_roots`, v2 regfp receipts for incremental + mutation detection, atomic temp+0600+rename writes. |
 | Runtime Hygiene (P4)        | ✅        | `blastradius env [name]` primitive: direct exec (hard invariant), unified detection against P1 registry, `secrets_found` count only (never values), logs to daemon, `--json`, `pillar4.commands` + `enabled`. |
 | Clipboard Hygiene (P5)      | ✅        | Primitives (`check`/`scrub`/`redact`/`clear`/`nuke`), optional macOS polling monitor (fast first-secret alert + two-tier auto with independent `redact_timeout_seconds` / `full_clear_timeout_seconds`), state in `status`, placeholder preference (P5 > P3 > default). |
-| Illegitimate Residue (P2)   | ✅        | `crumbs` command + JSON, `residue` (detector + manager), per-dir `dirs[]` + `files[]` model, daemon handler + status summary, `policy.Classifier` enforcing P1 authority (P1-claimed files never crumbs). |
+| Illegitimate Residue (P2)   | ✅        | `crumbs` command + JSON, `residue` (detector + manager), per-dir `dirs[]` + `files[]` model, daemon handler + status summary, `policy.Classifier` enforcing P1 authority (P1-claimed files never crumbs). Walks + ScanFile skip symlinks (no follow). Narrow TOCTOU between Lstat symlink checks and later reads is documented (primary containment is surfaces + Classifier). |
 
 ---
 
@@ -119,9 +119,9 @@ internal/
 | 6   | Persisted config is non-sensitive                                                                                                      | ✅     |
 | 7   | Safe degradation on failure                                                                                                            | ✅     |
 | 8   | Respects ignore patterns                                                                                                               | ✅     |
-| 9   | Pillar 4 / `pillar4.commands` always use direct `exec` only (no shell) — hard security invariant                                       | ✅     |
+| 9   | Pillar 4 / `pillar4.commands` always use direct `exec` only (no shell) — hard security invariant; bare names resolved via LookPath (best-effort abs) | ✅     |
 
-The socket path and direct-exec rule are hard invariants (not user-configurable) to reduce attack surface. Old top-level discovery keys and `shell:` / `auto_on_prompt` keys under commands are not accepted (and are silently ignored by the YAML unmarshaler if present in user config). The supported shape is the pillar-organized structure in `config.example.yaml`.
+The socket path and direct-exec rule are hard invariants (not user-configurable) to reduce attack surface. Additional runtime hardening: bare external commands (bw, pbpaste, pbcopy, osascript, afplay, and P4 bare names) are resolved via LookPath to absolute paths where possible; P1/P2 walks and residue file scans explicitly skip symlinks (no follow). Narrow TOCTOU windows between those Lstat checks and subsequent opens/reads are accepted and documented (local attacker model; declared surfaces + Classifier are primary). Old top-level discovery keys and `shell:` / `auto_on_prompt` keys under commands are not accepted (and are silently ignored by the YAML unmarshaler if present in user config). The supported shape is the pillar-organized structure in `config.example.yaml`.
 
 ---
 

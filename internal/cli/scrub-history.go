@@ -16,14 +16,19 @@ func RunScrubHistory(tail []string) {
 	full := false
 
 	// Very small flag parser (no external deps; matches style of other commands).
-	for _, t := range tail {
+	// Supports --file PATH (two-token form, allows spaces when user quotes the PATH to shell)
+	// as well as --file=PATH. The builder always emits the normalized "file=VALUE" form
+	// (last) to the daemon protocol so the handler can take the tail verbatim.
+	// file= is the only value that reasonably contains spaces.
+	for i := 0; i < len(tail); i++ {
+		t := tail[i]
 		switch {
 		case t == "--json":
 			jsonOutput = true
 		case strings.HasPrefix(t, "--mode="):
 			mode = strings.TrimPrefix(t, "--mode=")
 		case t == "--mode" || t == "-m":
-			// next arg consumed in simple loop? for now require = form; keep simple.
+			// value form not supported for --mode; use --mode=delete|redact
 		case t == "--dry-run" || t == "-n":
 			dryRun = true
 		case t == "--full" || t == "--reset":
@@ -31,11 +36,13 @@ func RunScrubHistory(tail []string) {
 		case strings.HasPrefix(t, "--file="):
 			filePath = strings.TrimPrefix(t, "--file=")
 		case t == "--file" || t == "-f":
-			// value form not supported in this minimal parser; use --file=PATH
+			if i+1 < len(tail) {
+				filePath = tail[i+1]
+				i++ // consume value token
+			}
 		}
 	}
 
-	// Build daemon arg string (handler parses key=val and bare flags).
 	var argParts []string
 	if mode != "" {
 		argParts = append(argParts, "mode="+mode)
@@ -43,11 +50,11 @@ func RunScrubHistory(tail []string) {
 	if dryRun {
 		argParts = append(argParts, "dry-run")
 	}
-	if filePath != "" {
-		argParts = append(argParts, "file="+filePath)
-	}
 	if full {
 		argParts = append(argParts, "full")
+	}
+	if filePath != "" {
+		argParts = append(argParts, "file="+filePath)
 	}
 	daemonCmd := "SCRUB_HISTORY"
 	if len(argParts) > 0 {

@@ -14,6 +14,7 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/detection"
 	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/registry"
+	"github.com/GildedPleb/blast-radius/internal/util"
 )
 
 // clipboard.go contains the Pillar 5 reactive monitor (fast first-secret alert
@@ -29,14 +30,21 @@ import (
 var (
 	// pbpasteFunc / pbcopyFunc provide test seams for the Pillar 5 monitor's
 	// clipboard surface access. Mirrors execCommand in cli package.
-	// Production uses real pbpaste/pbcopy; tests can inject fakes for content,
-	// errors, and to spy on writes without touching real pasteboard.
-	pbpasteFunc = func() ([]byte, error) { return exec.Command("pbpaste").Output() }
-	pbcopyFunc  = func(data []byte) error {
+	// Production uses real pbpaste/pbcopy (resolved via util.ResolveCommand for
+	// PATH defense); tests can inject fakes for content, errors, and to spy on
+	// writes without touching real pasteboard.
+	pbpasteFunc = func() ([]byte, error) {
+		// Resolve via util (defense against PATH hijack). Falls back to bare name.
+		p := util.ResolveCommand("pbpaste")
+		return exec.Command(p).Output()
+	}
+	pbcopyFunc = func(data []byte) error {
 		if data == nil {
 			data = []byte{}
 		}
-		cmd := exec.Command("pbcopy")
+		// Resolve via util (defense against PATH hijack). Falls back to bare name.
+		prog := util.ResolveCommand("pbcopy")
+		cmd := exec.Command(prog)
 		cmd.Stdin = bytes.NewReader(data)
 		return cmd.Run()
 	}
@@ -47,11 +55,16 @@ var (
 	// running the background ticker (per project no-sleep rules in daemon_test.go).
 	// Also allows non-mac/headless test envs to avoid side effects.
 	osascriptFunc = func(msg string) error {
-		return exec.Command("osascript", "-e",
+		// Resolve via util (defense against PATH hijack). Falls back to bare name.
+		prog := util.ResolveCommand("osascript")
+		return exec.Command(prog, "-e",
 			fmt.Sprintf(`display notification %q with title "Blast Radius"`, msg)).Run()
 	}
 	afplayFunc = func() error {
-		return exec.Command("afplay", "/System/Library/Sounds/Ping.aiff").Run()
+		// afplay binary resolved via util (defense against PATH hijack); sound file
+		// is already an absolute system path.
+		prog := util.ResolveCommand("afplay")
+		return exec.Command(prog, "/System/Library/Sounds/Ping.aiff").Run()
 	}
 
 	// clipboardMonitorInterval is the internal poll rate for the reactive

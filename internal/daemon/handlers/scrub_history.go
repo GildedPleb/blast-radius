@@ -67,19 +67,40 @@ func (ScrubHistoryHandler) Handle(args string, d DaemonContext) (any, error) {
 				}
 				continue
 			}
-			if strings.HasPrefix(tok, "file=") || strings.HasPrefix(tok, "--file=") {
-				overrideFile = strings.TrimPrefix(strings.TrimPrefix(tok, "--file="), "file=")
-				continue
-			}
+			// Note: file= value handling is done *after* this loop using the raw args string
+			// (post-SplitN remainder) so that embedded spaces in the path are preserved.
+			// The Fields loop would have split "file=/p/with space" into multiple toks.
+		}
+
+		// Space-preserving extraction for --file / file= (value can contain spaces when
+		// user quotes the path to the shell and we use the two-token or = form).
+		// We put file= last in the CLI builder (see cli/scrub-history.go), so everything
+		// after the first "file=" marker in the raw args tail (post SplitN in daemon
+		// protocol) is the value. Flags (full/dry-run/...) are parsed independently in
+		// the Fields loop above regardless of position, so we take the tail as-is.
+		// No suffix trimming of the value: that would corrupt legitimate history file
+		// paths that happen to end with " full", " --reset", etc. (rare but possible).
+		// Non-canonical direct callers that put bare flags *after* a file= token in
+		// the args string get best-effort (the value may include the flag text; the
+		// flag itself was still recognized by Fields). See test for space + suffix cases.
+		if idx := strings.Index(args, "file="); idx != -1 {
+			val := args[idx+5:]
+			overrideFile = strings.TrimSpace(val)
+		} else if idx := strings.Index(args, "--file="); idx != -1 {
+			val := args[idx+7:]
+			overrideFile = strings.TrimSpace(val)
 		}
 	}
 
 	// Determine the set of targets.
 	var targets []string
 	if overrideFile != "" {
-		// --file forces exactly one. If the user explicitly asked for a
-		// non-existent path we return a hard error (to match documented and
-		// tested behavior for explicit --file overrides naming a missing path).
+		// --file forces exactly one (supports paths containing spaces via the
+		// two-token --file PATH form from CLI or quoted --file=... form in raw
+		// daemon args). The value is taken verbatim from the tail after the marker
+		// (flags parsed separately). If the user explicitly asked for a non-existent
+		// path we return a hard error (to match documented and tested behavior for
+		// explicit --file overrides naming a missing path).
 		if _, err := os.Stat(overrideFile); err != nil {
 			return map[string]any{
 				"status":  "error",

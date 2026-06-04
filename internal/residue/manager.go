@@ -108,6 +108,19 @@ func (m *Manager) RunScan() *ScanResult {
 				res.Errors = append(res.Errors, path+": "+err.Error())
 				return nil
 			}
+			if de.Type()&os.ModeSymlink != 0 {
+				// Never follow symlinks during P2 residue scans (symmetric with P1 scanner).
+				// Avoids reading arbitrary sensitive material via links in high-risk dirs
+				// (~/Downloads etc. with broad **/* patterns) or escaping the declared surfaces.
+				// Classifier (P1 authority) + per-surface files[] + Rel guards are primary;
+				// symlink skip is additional hardening. DirEntry.Type() reports the link itself
+				// (not the target); de.IsDir() is false for symlinks, so no descent occurs.
+				//
+				// Note on semantics: an explicit `if de.IsDir() { SkipDir }` inside this block
+				// would be unreachable (WalkDir + Lstat semantics). We simply return nil to skip
+				// the symlink entry before it reaches ShouldTreatFileAsCrumb / ScanFile.
+				return nil
+			}
 			if de.IsDir() {
 				base := filepath.Base(path)
 				if skipDirs[base] {

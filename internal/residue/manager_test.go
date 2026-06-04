@@ -105,6 +105,41 @@ func TestResidueManager_HeavyPaths(t *testing.T) {
 	// We don't assert on exact finding count to keep the test stable and fast.
 }
 
+// TestResidueManager_SkipsSymlinks is a regression test for symlink handling in P2.
+// Symlinks must be skipped (not followed) so that a link inside a configured
+// high-risk dir (e.g. ~/Downloads) cannot cause us to read and process arbitrary
+// sensitive files outside the declared surface.
+func TestResidueManager_SkipsSymlinks(t *testing.T) {
+	dir := t.TempDir()
+
+	// A real secret file (high entropy + name heuristic will trigger).
+	realSecret := filepath.Join(dir, "real_creds.json")
+	_ = os.WriteFile(realSecret, []byte(`{"login":{"password":"superlonghighentropysecretvalueforlinktest1234567890"}}`), 0600)
+
+	// A symlink with a suspicious name pointing at something that should never be read
+	// by the scanner for this test (we use a non-existent target to make it obvious
+	// if the code tried to open it; in practice even a real target outside would be skipped).
+	link := filepath.Join(dir, "passwords_export.json")
+	_ = os.Symlink("/this/does/not/exist/and/should/not/be/read/secret", link)
+
+	cfg := config.DefaultConfig()
+	cfg.Pillar2.Enabled = true
+	cfg.Pillar2.Dirs = []config.Pillar2Dir{{Path: dir, Files: []string{"**/*"}}}
+
+	m := NewManager(cfg, registry.New())
+	res := m.RunScan()
+	if res == nil {
+		t.Fatal("expected scan result")
+	}
+
+	// The symlink should not have produced a finding (we skipped before ScanFile).
+	for _, f := range res.Findings {
+		if strings.Contains(f.Basename, "passwords_export") || strings.Contains(f.Location, "passwords_export") {
+			t.Errorf("symlink was followed/processed as a crumb; findings include %v", f)
+		}
+	}
+}
+
 // TestResidueManager_TargetsEmptyAndWalkErr uses the test hook to point home at a temp
 // (so len(targets)==0 branch populates non-existent Downloads etc). This exercises
 // the walk-err path and len==0 without ever walking real or large dirs (fast).

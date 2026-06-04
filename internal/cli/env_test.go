@@ -140,8 +140,8 @@ func TestRunEnvCheck_DirectExec(t *testing.T) {
 
 	RunEnvCheck("direct-echo")
 
-	if !strings.HasPrefix(calledWith, "echo ") {
-		t.Errorf("expected direct exec of 'echo ...', got %q (shell injection risk)", calledWith)
+	if !strings.Contains(calledWith, "echo") {
+		t.Errorf("expected direct exec containing 'echo' (resolved or bare), got %q (shell injection risk)", calledWith)
 	}
 	if strings.Contains(calledWith, "sh -c") {
 		t.Error("shell was incorrectly used for the Pillar 4 env primitive")

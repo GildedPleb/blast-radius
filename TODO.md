@@ -9,6 +9,19 @@
 - logger audit: get all logs fucking golden!
 - monolith audit
 - Bitwarden collector is still early. The Collect() implementation is functional but basic. It doesn't yet handle folders, organizations, attachments, TOTP secrets well, or have sophisticated error handling around bw states. This is the least complete area of P1.
+- Versioning/compat gate for hard-coded external collectors (P1 bitwarden `bw` first): perform a version check (via `bw --version` or equivalent, after LookPath) inside Validate (and defensively before Collect work) so known-unsupported / too-old / known-bad versions produce a clean actionable error ("bitwarden: bw version X is not supported; upgrade...") instead of silent under-collection, parse failures, or weird state. 
+  Recommendations (current thinking):
+  - Gate primarily in Validate() (perfect fit for the "prereq / IO check" seam in the Collector interface); normal Rescan path already calls Validate before Collect.
+  - Policy: permissive by default (a min version where current extraction shapes stabilized + small hard-coded denylist of known-bad exact versions with comments why). Allow future/unknown versions (log the detected version) to avoid tying blastradius release cadence to bw's frequent date-based releases. Expand the set when we learn of breaks.
+  - Parser: tolerant, no extra deps (strip "Bitwarden CLI ", "v", take YYYY.M.P or X.Y.Z; compare as ints).
+  - Observability: log detected version on success; stash on collector for potential future exposure in collector_results / status JSON.
+  - Tests: trivial via existing execBw seam (add cases for old/bad/good version strings; keep all hermetic, no sleeps).
+  - Docs: loud note + example in config.example.yaml under bitwarden; update CURRENT_STATE.md, pillars framing if needed, README security if relevant; mention in the "sophisticated bw state" TODO item.
+  - Error messages: actionable, point to install/upgrade commands; never any vault material (version output is safe).
+  - "All interactions": covered because Validate is the gate in supported paths; direct Collect calls (mostly tests) can also call an internal ensureVersionOK().
+  Punted for now (low priority vs finishing P1 basics + other audits); when picked up, treat as part of maturing the least-complete P1 area. Does not affect P4 (user commands) or P5 (stable builtins).
+
+
 - [P2] (optional but powerful) Lightweight git accident detection tied to configured project roots: reflog + stash + uncommitted working tree/index. Plus optional bounded recent-commit checks (gitleaks/trufflehog style). Opt-in.
 
 - Pillar 3 (future): Fake secrets replacement mode (research spike). Public prefixes (ghp\_, AKIA, sk- etc.), charset/length preservation via detection regex seeds, determinism (seeded rand), confirm no registry/P1 changes needed.

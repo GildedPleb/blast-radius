@@ -55,6 +55,9 @@ See the "Coverage model" section near the top of [Makefile](Makefile) for the (n
 - **Hard security invariants**:
   - The IPC socket path is **not user-configurable** and always lives at `~/.local/state/blastradius/blastradius.sock` (0700 dir + 0600 socket + capability token auth).
   - Pillar 4 (`env`) primitive commands (and any commands under `pillar4.commands`) are **always executed via direct `exec` with no shell** (`sh -c` is never used). For complex logic, point at a wrapper script you control.
+- Additional runtime hardening (current):
+  - Bare names for internal tools (`bw`, pbpaste/pbcopy/osascript/afplay) and user P4 bare commands are resolved via LookPath (best-effort absolute) to reduce PATH hijacking surface. Explicit relative paths for P4 are executed as written (caller cwd).
+  - P1 directory walks and P2 walks + file scans explicitly skip symlinks (never follow). Narrow TOCTOU between Lstat decisions and later reads is documented; declared surfaces + Classifier (P1 authority) are primary containment.
 - Safe degradation on failure
 - Designed with a local attacker in mind
 
