@@ -53,6 +53,19 @@ var (
 	// use it to force a per-test temp log location so we never touch the real
 	// user's ~/.local/state/blastradius directory. This is essential for hermeticity.
 	GetDaemonLogPathFnForTesting *func() string = &getDaemonLogPathFn
+
+	// afterRunSetupForTesting is called (if non-nil) immediately after the
+	// "daemon started and listening" log, after token write, before any goroutines
+	// (discovery, monitor) or signal setup or the accept loop. Tests use it with
+	// controllableListener + net.Pipe to synchronously drive Run's success path
+	// + shutdown without blocking or real sockets. See daemon_test.go.
+	afterRunSetupForTesting func(*Daemon)
+
+	// randRead and loggingInit are seams for the two early failure paths inside
+	// Run() that are otherwise hard to hit hermetically (rand failure after listen,
+	// logging init). Prod behavior unchanged.
+	randRead    = rand.Read
+	loggingInit = logging.Init
 )
 
 // P5 (clipboard monitor) test seams and the monitor implementation live in
@@ -80,12 +93,13 @@ type Daemon struct {
 	// Clipboard hygiene state for Pillar 5 (reactive monitor + primitives).
 	// The monitor goroutine updates this; STATUS and explicit commands read it.
 	// Protected by clipboardMu.
-	clipboardMu          sync.Mutex
-	clipboardLastHash    string    // hex sha256 of the raw clipboard bytes for the current epoch
-	clipboardLastChange  time.Time // when we last saw a change that produced secrets
-	clipboardSecretCount int       // exact count from last full scan (0 means clean)
-	clipboardRedacted    bool      // whether auto-redact has been performed for this epoch
-	clipboardCleared     bool      // whether full clear has been performed for this epoch
+	clipboardMu         sync.Mutex
+	clipboardLastHash   string    // hex sha256 of the raw clipboard bytes for the current epoch
+	clipboardLastChange time.Time // when we last saw a change that produced secrets
+
+	clipboardSecretCount int  // exact count from last full scan (0 means clean)
+	clipboardRedacted    bool // whether auto-redact has been performed for this epoch
+	clipboardCleared     bool // whether full clear has been performed for this epoch
 
 	// lastPbpasteErrLog supports rate-limited logging of transient pbpaste
 	// failures inside the monitor (see runClipboardMonitor). Not protected
@@ -222,7 +236,7 @@ func (d *Daemon) Pillar5ClipboardStatus() map[string]any {
 func (d *Daemon) Run() error {
 	// Setup file logging via logging package
 	logPath := getDaemonLogPathFn()
-	if err := logging.Init(logPath); err != nil {
+	if err := loggingInit(logPath); err != nil {
 		return fmt.Errorf("failed to initialize logging: %w", err)
 	}
 
@@ -263,7 +277,7 @@ func (d *Daemon) Run() error {
 	// SECURITY: write a fresh capability token next to the socket (hard invariant).
 	// Clients must present it as the first message on every connection.
 	token := make([]byte, 32)
-	if _, err := rand.Read(token); err != nil {
+	if _, err := randRead(token); err != nil {
 		ln.Close()
 		return fmt.Errorf("failed to generate auth token: %w", err)
 	}
@@ -275,13 +289,27 @@ func (d *Daemon) Run() error {
 
 	log.Printf("Blast Radius daemon started and listening on %s (0600 + token auth)", socketPath)
 
-	// Run initial discovery on startup — runs in background
-	go d.discovery.RunInitialDiscovery()
+	// afterRunSetupForTesting lets tests inject a conn or force immediate shutdown
+	// right after successful startup setup (listen+chmod+token) but before the
+	// background goroutines and accept loop. This is what lets us cover the
+	// bulk of Run() success + shutdown paths inside the strict no-sleep/net.Pipe
+	// test rules. See TestDaemon_Run_Success.
+	if afterRunSetupForTesting != nil {
+		afterRunSetupForTesting(d)
+	}
+
+	// Run initial discovery on startup — runs in background.
+	// Guarded so that a zero &Daemon{} (used in NilGuards for accessor coverage)
+	// does not panic; real usage always goes through New() which wires discovery.
+	if d.discovery != nil {
+		go d.discovery.RunInitialDiscovery()
+	}
 
 	// Pillar 5 reactive monitor: clipboard change detection, fast first-secret
 	// alerting, two-tier auto (redact then full clear). Only starts if
 	// monitor_enabled in config. Safe no-op otherwise.
-	if d.cfg.Pillar5.MonitorEnabled {
+	// Guarded for the same nil-safety reason as discovery (see NilGuards).
+	if d.cfg != nil && d.cfg.Pillar5.MonitorEnabled {
 		go d.runClipboardMonitor()
 	}
 
@@ -304,7 +332,7 @@ func (d *Daemon) Run() error {
 		conn, err := ln.Accept()
 		if err != nil {
 			// Listener closed during shutdown
-			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
+			if isClosedListenerError(err) {
 				break
 			}
 			logging.Printf("Accept error: %v", err)
@@ -396,6 +424,11 @@ func getDaemonLogPath() string {
 
 const authTokenSuffix = ".auth"
 
+// closedListenerErrMsg is the exact string inside the net.OpError returned by
+// a closed unix listener (see Run accept loop and controllableListener in tests).
+// Centralized here so the brittle string match is in one place.
+const closedListenerErrMsg = "use of closed network connection"
+
 // realWriteAuthToken writes the hex token next to the socket with 0600.
 func realWriteAuthToken(socketPath, hexToken string) error {
 	authPath := socketPath + authTokenSuffix
@@ -430,6 +463,17 @@ func realAuthenticateConnection(firstLine, expectedToken string) bool {
 	}
 	provided := strings.TrimSpace(firstLine[5:])
 	return provided == expectedToken && expectedToken != ""
+}
+
+// isClosedListenerError centralizes the check for the graceful-shutdown
+// error from a closed unix listener (used in Run's accept loop to break
+// cleanly rather than log "Accept error" + continue). The string is
+// defined via closedListenerErrMsg so tests can construct matching errs.
+func isClosedListenerError(err error) bool {
+	if opErr, ok := err.(*net.OpError); ok {
+		return opErr.Err.Error() == closedListenerErrMsg
+	}
+	return false
 }
 
 // See clipboard.go for the P5 reactive monitor implementation.

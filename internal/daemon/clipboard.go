@@ -76,6 +76,29 @@ var (
 	clipboardMonitorInterval = 750 * time.Millisecond
 )
 
+// monitorTicker is a test seam interface so runClipboardMonitor can be driven
+// by a fake that delivers ticks synchronously via a pre-buffered chan, without
+// ever creating a real *time.Ticker in tests (obeys the strict "no real time.Ticker"
+// rule for daemon tests). realMonitorTicker wraps the prod one.
+type monitorTicker interface {
+	Chan() <-chan time.Time
+	Stop()
+}
+
+type realMonitorTicker struct{ *time.Ticker }
+
+func (r *realMonitorTicker) Chan() <-chan time.Time { return r.C }
+func (r *realMonitorTicker) Stop()                  { r.Ticker.Stop() }
+
+var newMonitorTicker = func(d time.Duration) monitorTicker {
+	t := time.NewTicker(d)
+	return &realMonitorTicker{t}
+}
+
+// runtimeGOOS is a seam so tests can force the non-darwin early return in
+// runClipboardMonitor without depending on the test host OS.
+var runtimeGOOS = runtime.GOOS
+
 // shouldLogPbpasteErr encapsulates the rate-limiting decision for transient
 // pbpaste errors inside runClipboardMonitor. It is a pure function so it can
 // be unit tested directly without starting the monitor goroutine or tickers
@@ -97,14 +120,15 @@ func (d *Daemon) runClipboardMonitor() {
 	if d.cfg == nil {
 		return
 	}
-	if runtime.GOOS != "darwin" {
+	if runtimeGOOS != "darwin" {
 		logging.Println("Pillar5 monitor: pbpaste/pbcopy clipboard monitoring is macOS-only; disabling monitor (primitives still available via explicit commands)")
 		return
 	}
 	p5 := d.cfg.Pillar5
 	interval := clipboardMonitorInterval
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	tkr := newMonitorTicker(interval)
+	defer tkr.Stop()
+	tickC := tkr.Chan()
 
 	logging.Printf("Pillar5 monitor started (interval=%v, redact_timeout=%ds, full_clear_timeout=%ds)", interval, p5.RedactTimeoutSeconds, p5.FullClearTimeoutSeconds)
 
@@ -113,7 +137,7 @@ func (d *Daemon) runClipboardMonitor() {
 		case <-d.shutdown:
 			logging.Println("Pillar5 monitor shutting down")
 			return
-		case <-ticker.C:
+		case <-tickC:
 			// Read current clipboard (best effort, direct like the CLI primitives).
 			// Uses pbpasteFunc seam for testability.
 			out, err := pbpasteFunc()
