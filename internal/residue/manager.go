@@ -15,12 +15,6 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/util"
 )
 
-// test hook to control UserHomeDir for fast coverage of len(targets)==0 without walking real home.
-var userHomeDir = os.UserHomeDir
-
-// test hook for filepath.Abs (used in effectiveP2Surfaces) to cover the error-continue path.
-var filepathAbs = filepath.Abs
-
 // Manager owns the residue (crumbs) scanning logic and last result cache.
 // Scans are on-demand only.
 //
@@ -103,7 +97,7 @@ func (m *Manager) RunScan() *ScanResult {
 		// per-root ignore matcher (reuses discovery logic exactly)
 		ign := discovery.NewIgnoreMatcher(abs, ignoreFiles)
 
-		walkErr := filepath.WalkDir(abs, func(path string, de os.DirEntry, err error) error {
+		walkErr := walkDir(abs, func(path string, de os.DirEntry, err error) error {
 			if err != nil {
 				res.Errors = append(res.Errors, path+": "+err.Error())
 				return nil

@@ -172,7 +172,7 @@ func ScanFile(path string, reg *registry.Registry) (*ResidueFinding, error) {
 		return nil, nil
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func ScanFile(path string, reg *registry.Registry) (*ResidueFinding, error) {
 		}
 	}
 	if format == "" && strings.HasSuffix(strings.ToLower(base), ".1pif") {
-		if h, is := DetectOnePassword1pif(data); is || h > 0 {
+		if h, is := detectOnePassword1pif(data); is || h > 0 {
 			format = FormatOnePassword
 			entropyHits = h
 		}
@@ -219,9 +219,11 @@ func ScanFile(path string, reg *registry.Registry) (*ResidueFinding, error) {
 	}
 
 	// If we have a format from name heuristic but no entropy yet, still count generic entropy
-	if format == "" && suspiciousName {
-		entropyHits = detection.ExtractHighEntropyStrings(data, 12, 4.0)
-		format = nameFormat
+	if format == "" {
+		if suspicious, nf := getSuspiciousNameResult(base); suspicious {
+			entropyHits = detection.ExtractHighEntropyStrings(data, 12, 4.0)
+			format = nf
+		}
 	}
 
 	if format == "" {
@@ -233,15 +235,7 @@ func ScanFile(path string, reg *registry.Registry) (*ResidueFinding, error) {
 	_, known = detection.NewDetector().ExtractAndCountKnown(data, reg)
 
 	// Decision gate: keep only if we have signal
-	keep := false
-	if known > 0 {
-		keep = true
-	} else if format == FormatBitwardenJSON || format == FormatBitwardenCSV || format == FormatDashlane || format == FormatOnePassword {
-		keep = true
-	} else if entropyHits >= minHighEntropyHitsForGeneric || suspiciousName {
-		keep = true
-	}
-
+	keep := decideKeep(known, format, entropyHits, suspiciousName)
 	if !keep {
 		return nil, nil
 	}
