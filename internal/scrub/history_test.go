@@ -252,3 +252,176 @@ func TestBuildDryRunPreview(t *testing.T) {
 		t.Errorf("example_scrubbed_lines = %v", preview["example_scrubbed_lines"])
 	}
 }
+
+func TestDiscoverHistoryTargets_EdgeCases(t *testing.T) {
+	t.Setenv("HISTFILE", "") // hermetic: prevent host $HISTFILE from interfering
+
+	root := t.TempDir()
+
+	live := filepath.Join(root, ".bash_history")
+	if err := os.WriteFile(live, []byte("x\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rot := filepath.Join(root, ".bash_history.1")
+	if err := os.WriteFile(rot, []byte("old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Subdirectory whose name would match LooksLikeRotatedHistory if it were a file.
+	// This exercises the `if e.IsDir() { continue }` path.
+	subdir := filepath.Join(root, "some.history.old.dir")
+	if err := os.Mkdir(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Non-existent root exercises the `if err != nil { continue }` (ReadDir) path.
+	nonexist := filepath.Join(root, "no-such-dir-xyz123")
+
+	// Empty string in roots exercises the `if r == "" { continue }` path.
+	got := DiscoverHistoryTargets([]string{"", root, nonexist}, nil)
+
+	// Expect only the two real history files (live + rotated sibling), sorted.
+	want := []string{live, rot}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %s, want %s", i, got[i], want[i])
+		}
+	}
+
+	// Explicitly assert we did not pull in the directory or the bad root.
+	for _, g := range got {
+		if g == subdir || strings.Contains(g, "no-such-dir") {
+			t.Errorf("unexpectedly included non-file: %s", g)
+		}
+	}
+}
+
+func TestLooksLikeRotatedHistory2(t *testing.T) {
+	stems := []string{".bash_history", ".zsh_history"}
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{".bash_history", false},
+		{".bash_history.1", true},
+		{".bash_history.old", true},
+		{".bash_history.bak", true},
+		{".bash_history~", true},
+		{".zsh_history.2.gz", true},
+		{"zsh_history.backup", true},
+		{"my.history.old", true},
+		{"foo.bak", false}, // no history stem
+		{"other.log", false},
+		{".bash_history.swp", false},
+
+		// New cases to cover the second filepath.Match (the one with leading `*`)
+		{"foo.bash_history.1", true},      // stem appears after a prefix
+		{"backup.zsh_history.2.gz", true}, // prefix + stem + numeric rotated + .gz
+	}
+	for _, c := range cases {
+		if got := LooksLikeRotatedHistory(c.name, stems); got != c.want {
+			t.Errorf("LooksLikeRotatedHistory(%q)=%v want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestProcessHistory_EmptyLines(t *testing.T) {
+	for _, lines := range [][]string{nil, {}} {
+		res := ProcessHistory(lines, nil, "anyfp", ModeDelete, "[REDACTED]", false, false)
+
+		if len(res.Kept) != 0 ||
+			res.Deleted != 0 ||
+			res.Redacted != 0 ||
+			res.Secrets != 0 ||
+			res.Processed != 0 ||
+			res.Skipped ||
+			res.Preview != nil {
+			t.Errorf("ProcessHistory(%#v) returned non-zero result: %+v", lines, res)
+		}
+	}
+}
+
+func TestProcessHistory_IncrementalRangeSelection(t *testing.T) {
+	secret := "sk-1234567890abcdef1234567890abcdef"
+	h := registry.HashValue([]byte(secret))
+
+	scrubInvocation := ": 1712345678:0;blastradius scrub-history"
+
+	// ─────────────────────────────────────────────────────────────
+	// Case 1: Rewritten since last scrub marker → processStart = 0
+	// ─────────────────────────────────────────────────────────────
+	contentAtScrub1 := []string{
+		"echo hello",
+		scrubInvocation,
+	}
+	lc1, tail1 := ComputeHistoryFingerprint(contentAtScrub1)
+	receipt1 := FormatScrubReceiptV2(lc1, tail1, "fp-rewritten")
+
+	// New secret appeared *after* the marker
+	rewrittenLines := []string{
+		"echo hello",
+		scrubInvocation,
+		"export TOKEN=" + secret,
+		receipt1,
+	}
+
+	res := ProcessHistory(rewrittenLines, []registry.SecretHash{h}, "fp-rewritten", ModeRedact, "[REDACTED]", false, false)
+	if res.Skipped || res.Redacted == 0 {
+		t.Fatalf("rewritten case failed: %+v", res)
+	}
+
+	// ─────────────────────────────────────────────────────────────
+	// Case 2: NOT rewritten since last scrub marker
+	//         → should take the else branch: processStart = lastScrubIdx + 1
+	// ─────────────────────────────────────────────────────────────
+	contentAtScrub2 := []string{
+		"echo hello",
+		"export FOO=bar",
+		scrubInvocation, // marker is the last "real" line at scrub time
+	}
+	lc2, tail2 := ComputeHistoryFingerprint(contentAtScrub2)
+	receipt2 := FormatScrubReceiptV2(lc2, tail2, "fp-clean")
+
+	// File is unchanged since then (only the receipt was appended after the marker)
+	cleanLines := append(append([]string(nil), contentAtScrub2...), receipt2)
+
+	res2 := ProcessHistory(cleanLines, nil, "fp-clean", ModeDelete, "[REDACTED]", false, false)
+	if res2.Skipped {
+		t.Fatal("clean case: expected to process (to write fresh receipt)")
+	}
+}
+
+func TestBuildDryRunPreview_LimitsExamplesToThree(t *testing.T) {
+	placeholder := "[REDACTED]"
+
+	// 5 original lines, 4 of which get redacted
+	orig := []string{
+		"line0",
+		"secret1",
+		"secret2",
+		"secret3",
+		"secret4",
+		"line5",
+	}
+	kept := []string{
+		"line0",
+		placeholder,
+		placeholder,
+		placeholder,
+		placeholder,
+		"line5",
+	}
+
+	preview := buildDryRunPreview(orig, kept, 0, 4, 4, placeholder)
+
+	ex, ok := preview["example_scrubbed_lines"].([]string)
+	if !ok {
+		t.Fatal("expected example_scrubbed_lines in preview")
+	}
+	if len(ex) != 3 {
+		t.Errorf("expected exactly 3 example lines (got %d)", len(ex))
+	}
+}

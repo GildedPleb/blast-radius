@@ -1,6 +1,8 @@
 package scrub
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -392,5 +394,179 @@ func TestStripReceipts_Internal(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(stripped, "\n"), "blastradius-scrub-receipt") {
 		t.Error("receipt markers must be stripped")
+	}
+}
+
+// NEW TESTS FOR MISSING COVERAGE (append to policy_test.go)
+
+func TestApplyToLine_EmptyLine(t *testing.T) {
+	known := map[[32]byte]bool{}
+	det := detection.NewDetector()
+
+	// empty raw
+	r := ApplyToLine("", known, det, ModeDelete, "[REDACTED]")
+	if r.Action != "kept" || r.Final != "" {
+		t.Errorf("empty line should be kept as-is, got action=%s final=%q", r.Action, r.Final)
+	}
+
+	// whitespace only (TrimSpace makes it hit the early return)
+	r2 := ApplyToLine("   \t\n  ", known, det, ModeRedact, "[REDACTED]")
+	if r2.Action != "kept" || r2.Final != "   \t\n  " {
+		t.Errorf("whitespace-only line should be kept with original raw, got %+v", r2)
+	}
+}
+
+func TestApplyToLine_EmptyCommand_ZshPrefixOnly(t *testing.T) {
+	known := map[[32]byte]bool{}
+	det := detection.NewDetector()
+
+	// pure zsh extended prefix with no command after ";"  --> Command == "", hits the if scanSrc == ""
+	line := ": 1699999999:5;"
+	r := ApplyToLine(line, known, det, ModeRedact, "[REDACTED]")
+	if r.Action != "kept" {
+		t.Errorf("zsh prefix-only line should be kept, got action=%s", r.Action)
+	}
+	if r.Final != line {
+		t.Errorf("final should equal original for kept prefix-only")
+	}
+}
+
+func TestComputeHistoryFingerprint_LargeTail(t *testing.T) {
+	// >64 lines to hit the tailStart = len-64 branch
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%03d with some command here", i)
+	}
+
+	lc, tailHash := ComputeHistoryFingerprint(lines)
+	if lc != 100 {
+		t.Fatalf("lineCount = %d, want 100", lc)
+	}
+	if tailHash == "" {
+		t.Error("tailHash should be non-empty")
+	}
+
+	// Verify correctness: tail should be lines[36:]
+	tailLines := lines[36:]
+	expectedTailStr := strings.Join(tailLines, "\n")
+	h := sha256.Sum256([]byte(expectedTailStr))
+	expected := fmt.Sprintf("%x", h[:8])
+	if tailHash != expected {
+		t.Errorf("tailHash mismatch for large input: got %s want %s", tailHash, expected)
+	}
+}
+
+func TestHistoryLikelyRewrittenSince_NilReceipt(t *testing.T) {
+	// Direct test of nil branch
+	lines := []string{"foo", "bar"}
+	if !HistoryLikelyRewrittenSince(lines, nil) {
+		t.Error("nil receipt must return true (likely rewritten)")
+	}
+}
+
+func TestHistoryLikelyRewrittenSince_EmptyTailHash(t *testing.T) {
+	// Cover the if receipt.TailHash != "" branch being false (skip compare)
+	lines := []string{"cmd1", "cmd2"}
+	lc, _ := ComputeHistoryFingerprint(lines)
+	receipt := &ScrubReceipt{Version: 2, LineCount: lc, TailHash: "", RegFp: "fp"}
+	if HistoryLikelyRewrittenSince(lines, receipt) {
+		t.Error("receipt with empty TailHash should return false (no tail compare)")
+	}
+}
+
+// TestApplyBatch_DeleteMode exercises the "deleted" case in the switch (previously uncovered in batch).
+func TestApplyBatch_DeleteMode(t *testing.T) {
+	s1 := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567"
+	h1 := registry.HashValue([]byte(s1))
+	known := map[[32]byte]bool{h1: true}
+	det := detection.NewDetector()
+
+	lines := []string{
+		"export AWS_SECRET=" + s1,
+		"echo clean line",
+		"another clean",
+	}
+
+	kept, deleted, redacted, secrets := ApplyBatch(lines, known, det, ModeDelete, "[REDACTED]")
+
+	if deleted != 1 {
+		t.Errorf("deleted=%d, want 1", deleted)
+	}
+	if redacted != 0 {
+		t.Errorf("redacted=%d, want 0", redacted)
+	}
+	if secrets != 1 {
+		t.Errorf("secrets=%d, want 1", secrets)
+	}
+	if len(kept) != 2 {
+		t.Errorf("kept=%d, want 2 (the clean lines)", len(kept))
+	}
+	// In delete mode we drop the bad line entirely (no placeholder kept)
+	for _, k := range kept {
+		if strings.Contains(k, s1) || strings.Contains(k, "AWS_SECRET") {
+			t.Errorf("deleted secret line should not appear in kept: %s", k)
+		}
+	}
+}
+
+func TestFindLatestReceipt_None(t *testing.T) {
+	// Covers the no-receipt path (full scan to return nil)
+	lines := []string{
+		"ls -l",
+		"export FOO=bar",
+		"curl https://example.com",
+		"echo done",
+	}
+	if FindLatestReceipt(lines) != nil {
+		t.Error("expected nil when no blastradius-scrub-receipt line present anywhere")
+	}
+
+	// Also empty input
+	if FindLatestReceipt([]string{}) != nil {
+		t.Error("expected nil for empty lines")
+	}
+}
+
+// === EXACT COVERAGE FOR THE TWO REMAINING LINES ===
+
+// Covers: HistoryLikelyRewrittenSince line "if currentCount < receipt.LineCount-5 { return true }"
+func TestHistoryLikelyRewrittenSince_SignificantCountDrop(t *testing.T) {
+	// Receipt claims the file had 30 lines at last scrub time
+	receipt := &ScrubReceipt{
+		Version:   2,
+		LineCount: 30,
+		TailHash:  "deadbeef",
+		RegFp:     "regfp123",
+	}
+
+	// Current file only has 10 lines → dropped by more than 5
+	current := make([]string, 10)
+	for i := range current {
+		current[i] = fmt.Sprintf("some command %d", i)
+	}
+
+	if !HistoryLikelyRewrittenSince(current, receipt) {
+		t.Error("must return true when currentCount (10) < receipt.LineCount-5 (25)")
+	}
+}
+
+// Covers: ShouldReprocess line "if HistoryLikelyRewrittenSince(lines, receipt) { return true }"
+func TestShouldReprocess_WhenHistorySaysRewritten(t *testing.T) {
+	// A stable, matching receipt (RegFp matches currentRegFp and content fingerprint would match)
+	originalLines := []string{"ls -l", "echo hello", "cd /tmp"}
+	lc, th := ComputeHistoryFingerprint(originalLines)
+	goodReceipt := &ScrubReceipt{
+		Version:   2,
+		LineCount: lc,
+		TailHash:  th,
+		RegFp:     "matchingfp1234",
+	}
+	currentRegFp := "matchingfp1234"
+
+	// Now the file has clearly changed (extra line with different content → different tail)
+	rewrittenLines := append([]string{"export AWS_SECRET=AKIAREWRITTEN0123456789ABCDEF"}, originalLines...)
+
+	if !ShouldReprocess(rewrittenLines, goodReceipt, currentRegFp) {
+		t.Error("ShouldReprocess must return true when HistoryLikelyRewrittenSince detects a rewrite, even though RegFp matches")
 	}
 }
