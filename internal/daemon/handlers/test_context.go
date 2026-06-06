@@ -11,21 +11,25 @@ import (
 
 // fakeContext is a minimal implementation of DaemonContext for handler tests.
 type fakeContext struct {
-	snapshot     any
-	dups         map[registry.SecretHash][]registry.ProjectID
-	displayNames map[registry.ProjectID]string
-	knownHashes  map[string]bool
-	hashes       []registry.SecretHash
-	now          time.Time
-	shutdown     bool
-	crumbs       map[string]any
-	crumbsResult *residue.ScanResult // used for Pillar 2 (crumbs) handler tests
+	snapshot       any
+	dups           map[registry.SecretHash][]registry.ProjectID
+	displayNames   map[registry.ProjectID]string
+	knownHashes    map[string]bool
+	hashes         []registry.SecretHash
+	now            time.Time
+	shutdown       bool
+	crumbs         map[string]any
+	crumbsResult   *residue.ScanResult // used for Pillar 2 (crumbs) handler tests
+	crumbsForceNil bool
 
 	// pillar3 allows tests to inject a specific Pillar3Config (for testing
 	// disabled, custom placeholder, HistoryFiles, etc.).
 	// Use SetPillar3Config in tests to set a non-default value.
 	pillar3       config.Pillar3Config
 	hasPillar3Cfg bool
+
+	lastPillar1Rescan *discovery.RescanResult
+	pillar1RescanErr  error
 }
 
 func (f *fakeContext) RegistrySnapshot() any { return f.snapshot }
@@ -44,18 +48,33 @@ func (f *fakeContext) TriggerShutdown() { f.shutdown = true }
 
 func (f *fakeContext) CrumbsSummary() map[string]any { return f.crumbs }
 func (f *fakeContext) RunCrumbsScan() *residue.ScanResult {
+	if f.crumbsForceNil {
+		return nil
+	}
 	if f.crumbsResult != nil {
 		return f.crumbsResult
 	}
 	return &residue.ScanResult{Timestamp: time.Now().UTC()}
 }
 
-func (f *fakeContext) TriggerPillar1Rescan() error { return nil }
+func (f *fakeContext) TriggerPillar1Rescan() error { return f.pillar1RescanErr }
 func (f *fakeContext) Pillar1ScanStatus() map[string]any {
 	return map[string]any{"status": "ok", "last_scan": f.now.UTC().Format(time.RFC3339)}
 }
 func (f *fakeContext) LastPillar1Rescan() *discovery.RescanResult {
-	return nil // tests can override if needed
+	return f.lastPillar1Rescan
+}
+
+func (f *fakeContext) SetPillar1RescanError(err error) {
+	f.pillar1RescanErr = err
+}
+
+func (f *fakeContext) SetLastPillar1Rescan(r *discovery.RescanResult) {
+	f.lastPillar1Rescan = r
+}
+
+func (f *fakeContext) SetCrumbsResultNil() {
+	f.crumbsForceNil = true
 }
 
 // Pillar3Config returns the injected config if set via SetPillar3Config, otherwise a safe default.
