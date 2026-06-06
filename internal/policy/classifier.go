@@ -8,6 +8,10 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/util"
 )
 
+// filepathAbs is overridable in tests so we can force the error path
+// in isClaimedByP1Env without deleting cwd or using subprocesses.
+var filepathAbs = filepath.Abs
+
 // Classifier is the internal authority engine for Pillar 1 vs Pillar 2 coordination.
 // Its primary responsibility is to enforce the hard rule:
 //
@@ -94,7 +98,7 @@ func (c *Classifier) isClaimedByP1Env(absPath string) bool {
 
 	for _, root := range envOpts.ProjectRoots {
 		expandedRoot := util.ExpandPath(root)
-		absRoot, err := filepath.Abs(expandedRoot)
+		absRoot, err := filepathAbs(expandedRoot) // was: filepath.Abs(...)
 		if err != nil {
 			continue
 		}
@@ -127,7 +131,7 @@ func (c *Classifier) underP2Surface(absPath string) string {
 			continue
 		}
 		expanded := util.ExpandPath(d.Path)
-		absDir, err := filepath.Abs(expanded)
+		absDir, err := filepathAbs(expanded)
 		if err != nil {
 			continue
 		}
