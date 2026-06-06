@@ -718,7 +718,7 @@ func toSecretHashes(raw ...[32]byte) []registry.SecretHash {
 	return out
 }
 
-func TestScrubHistoryHandler_Busy(t *testing.T) {
+func TestScrubHistoryHandler_Busy1(t *testing.T) {
 	ctx := &fakeContext{}
 	ctx.SetBusy(true)
 
@@ -737,7 +737,7 @@ func TestScrubHistoryHandler_Busy(t *testing.T) {
 	}
 }
 
-func TestScrubHistoryHandler_OverrideFileHappyPath(t *testing.T) {
+func TestScrubHistoryHandler_OverrideFileHappyPath1(t *testing.T) {
 	// Covers the success path after os.Stat(overrideFile) succeeds.
 	// This hits: targets = []string{overrideFile} and the single-target fast path.
 	secret := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567"

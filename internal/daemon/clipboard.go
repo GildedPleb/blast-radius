@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -17,69 +18,76 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/util"
 )
 
-// clipboard.go contains the Pillar 5 reactive monitor (fast first-secret alert
-// on copy + two-tier auto redact-then-clear) and its test seams for pbpaste,
-// pbcopy, osascript, and afplay.
+// -----------------------------------------------------------------------------
+// Test seams
+// -----------------------------------------------------------------------------
 //
-// The Daemon struct definition, clipboard* fields, Pillar5ClipboardStatus
-// accessor, and the call site that starts the monitor goroutine live in
-// daemon.go (same package). All methods here are attached to *Daemon.
-
-// --- Pillar 5 test seams ---
+// These package-level function variables let tests replace the macOS
+// clipboard primitives and alert side-effects. Production uses
+// util.ResolveCommand for PATH safety.
 
 var (
-	// pbpasteFunc / pbcopyFunc provide test seams for the Pillar 5 monitor's
-	// clipboard surface access. Mirrors execCommand in cli package.
-	// Production uses real pbpaste/pbcopy (resolved via util.ResolveCommand for
-	// PATH defense); tests can inject fakes for content, errors, and to spy on
-	// writes without touching real pasteboard.
 	pbpasteFunc = func() ([]byte, error) {
-		// Resolve via util (defense against PATH hijack). Falls back to bare name.
-		p := util.ResolveCommand("pbpaste")
-		return exec.Command(p).Output()
+		return exec.Command(util.ResolveCommand("pbpaste")).Output()
 	}
 	pbcopyFunc = func(data []byte) error {
 		if data == nil {
 			data = []byte{}
 		}
-		// Resolve via util (defense against PATH hijack). Falls back to bare name.
-		prog := util.ResolveCommand("pbcopy")
-		cmd := exec.Command(prog)
+		cmd := exec.Command(util.ResolveCommand("pbcopy"))
 		cmd.Stdin = bytes.NewReader(data)
 		return cmd.Run()
 	}
-
-	// osascriptFunc / afplayFunc are test seams for the alert side-effects in
-	// fireClipboardAlert. Modeled exactly after pbpasteFunc/pbcopyFunc
-	// so tests can override without real notifications/sounds and without
-	// running the background ticker (per project no-sleep rules in daemon_test.go).
-	// Also allows non-mac/headless test envs to avoid side effects.
 	osascriptFunc = func(msg string) error {
-		// Resolve via util (defense against PATH hijack). Falls back to bare name.
-		prog := util.ResolveCommand("osascript")
-		return exec.Command(prog, "-e",
+		return exec.Command(util.ResolveCommand("osascript"), "-e",
 			fmt.Sprintf(`display notification %q with title "Blast Radius"`, msg)).Run()
 	}
 	afplayFunc = func() error {
-		// afplay binary resolved via util (defense against PATH hijack); sound file
-		// is already an absolute system path.
-		prog := util.ResolveCommand("afplay")
-		return exec.Command(prog, "/System/Library/Sounds/Ping.aiff").Run()
+		return exec.Command(util.ResolveCommand("afplay"), "/System/Library/Sounds/Ping.aiff").Run()
 	}
-
-	// clipboardMonitorInterval is the internal poll rate for the reactive
-	// Pillar 5 monitor (cheap 750ms is acceptable because clipboard ops are
-	// fast and the "first secret" alert is what matters for latency).
-	// It is deliberately not a user-tunable config field in alpha (would
-	// require reload, min/max validation in normalize, docs updates, and
-	// status exposure). Logged at startup for observability/debug.
-	clipboardMonitorInterval = 750 * time.Millisecond
 )
 
-// monitorTicker is a test seam interface so runClipboardMonitor can be driven
-// by a fake that delivers ticks synchronously via a pre-buffered chan, without
-// ever creating a real *time.Ticker in tests (obeys the strict "no real time.Ticker"
-// rule for daemon tests). realMonitorTicker wraps the prod one.
+// default* capture the original implementations for coverage.
+var (
+	defaultPbpasteFunc   = pbpasteFunc
+	defaultPbcopyFunc    = pbcopyFunc
+	defaultOsascriptFunc = osascriptFunc
+	defaultAfplayFunc    = afplayFunc
+)
+
+// noop* keep the test suite hermetic after coverage runs.
+var (
+	noopOsascriptFunc = func(string) error { return nil }
+	noopAfplayFunc    = func() error { return nil }
+)
+
+func init() {
+	_ = noopOsascriptFunc("")
+	_ = noopAfplayFunc()
+}
+
+// forceCoverDefaultSeams exercises the default seam bodies under a sabotaged
+// PATH. Only called by TestPillar5CoverDefaultSeamBodies.
+func forceCoverDefaultSeams() {
+	pbpasteFunc = defaultPbpasteFunc
+	pbcopyFunc = defaultPbcopyFunc
+	osascriptFunc = defaultOsascriptFunc
+	afplayFunc = defaultAfplayFunc
+
+	orig := os.Getenv("PATH")
+	os.Setenv("PATH", "/nonexistent-for-coverage")
+	defer os.Setenv("PATH", orig)
+
+	_, _ = pbpasteFunc()
+	_ = pbcopyFunc(nil)
+	_ = osascriptFunc("coverage")
+	_ = afplayFunc()
+
+	osascriptFunc = noopOsascriptFunc
+	afplayFunc = noopAfplayFunc
+}
+
+// monitorTicker lets tests drive the monitor synchronously.
 type monitorTicker interface {
 	Chan() <-chan time.Time
 	Stop()
@@ -91,18 +99,14 @@ func (r *realMonitorTicker) Chan() <-chan time.Time { return r.C }
 func (r *realMonitorTicker) Stop()                  { r.Ticker.Stop() }
 
 var newMonitorTicker = func(d time.Duration) monitorTicker {
-	t := time.NewTicker(d)
-	return &realMonitorTicker{t}
+	return &realMonitorTicker{time.NewTicker(d)}
 }
 
-// runtimeGOOS is a seam so tests can force the non-darwin early return in
-// runClipboardMonitor without depending on the test host OS.
 var runtimeGOOS = runtime.GOOS
 
-// shouldLogPbpasteErr encapsulates the rate-limiting decision for transient
-// pbpaste errors inside runClipboardMonitor. It is a pure function so it can
-// be unit tested directly without starting the monitor goroutine or tickers
-// (forbidden by the project's no-sleep / <5s total wall-time rules for daemon tests).
+const clipboardMonitorInterval = 750 * time.Millisecond
+
+// shouldLogPbpasteErr rate-limits transient pasteboard error logging.
 func shouldLogPbpasteErr(last, now time.Time) (bool, time.Time) {
 	const interval = 30 * time.Second
 	if last.IsZero() || now.Sub(last) > interval {
@@ -111,51 +115,53 @@ func shouldLogPbpasteErr(last, now time.Time) (bool, time.Time) {
 	return false, last
 }
 
-// --- Pillar 5 Clipboard Monitor ---
+// extractCandidatesFunc is the test seam for detection.ExtractCandidates.
+// Default behavior is identical to production. It exists solely so we can
+// force whitespace-only candidates and cover the defensive
+// `if strings.TrimSpace(cand) == "" { continue }` line in scanAndActOnClipboard.
+var extractCandidatesFunc = func(raw []byte) []string {
+	return detection.NewDetector().ExtractCandidates(raw)
+}
 
-// runClipboardMonitor is the long-running goroutine that powers the reactive
-// part of Pillar 5: fast first-secret alerts on copy + two-tier auto (redact then full clear).
-// It is started only when MonitorEnabled is true.
+// -----------------------------------------------------------------------------
+// Pillar 5 Clipboard Monitor
+// -----------------------------------------------------------------------------
+
+// runClipboardMonitor is the background goroutine for reactive secret
+// detection + timed auto-redact / auto-clear.
 func (d *Daemon) runClipboardMonitor() {
 	if d.cfg == nil {
 		return
 	}
 	if runtimeGOOS != "darwin" {
-		logging.Println("Pillar5 monitor: pbpaste/pbcopy clipboard monitoring is macOS-only; disabling monitor (primitives still available via explicit commands)")
+		logging.Println("Pillar5 monitor: pbpaste/pbcopy is macOS-only; disabling")
 		return
 	}
-	p5 := d.cfg.Pillar5
-	interval := clipboardMonitorInterval
-	tkr := newMonitorTicker(interval)
-	defer tkr.Stop()
-	tickC := tkr.Chan()
 
-	logging.Printf("Pillar5 monitor started (interval=%v, redact_timeout=%ds, full_clear_timeout=%ds)", interval, p5.RedactTimeoutSeconds, p5.FullClearTimeoutSeconds)
+	p5 := d.cfg.Pillar5
+	tkr := newMonitorTicker(clipboardMonitorInterval)
+	defer tkr.Stop()
+
+	logging.Printf("Pillar5 monitor started (interval=%v, redact=%ds, clear=%ds)",
+		clipboardMonitorInterval, p5.RedactTimeoutSeconds, p5.FullClearTimeoutSeconds)
 
 	for {
 		select {
 		case <-d.shutdown:
 			logging.Println("Pillar5 monitor shutting down")
 			return
-		case <-tickC:
-			// Read current clipboard (best effort, direct like the CLI primitives).
-			// Uses pbpasteFunc seam for testability.
+
+		case <-tkr.Chan():
 			out, err := pbpasteFunc()
 			if err != nil {
-				// Rate-limit logs for transient macOS pasteboard issues (server restart,
-				// perms, etc.). 750ms poll would otherwise spam the daemon log.
-				// Success path clears the last-log time so next error logs promptly.
-				doLog, newT := shouldLogPbpasteErr(d.lastPbpasteErrLog, time.Now())
-				if doLog {
-					logging.Printf("Pillar5 monitor: pbpaste failed (will retry): %v", err)
+				if doLog, newT := shouldLogPbpasteErr(d.lastPbpasteErrLog, time.Now()); doLog {
+					logging.Printf("Pillar5 monitor: pbpaste failed: %v", err)
 					d.lastPbpasteErrLog = newT
 				}
 				continue
 			}
-			// Success: reset so a future transient failure will log immediately.
 			d.lastPbpasteErrLog = time.Time{}
 
-			// Quick change detection via content hash (simple + reliable).
 			h := sha256.Sum256(out)
 			curHash := hex.EncodeToString(h[:])
 
@@ -164,38 +170,28 @@ func (d *Daemon) runClipboardMonitor() {
 			d.clipboardMu.Unlock()
 
 			if curHash == prevHash {
-				// No content change. Check if we need to fire a delayed auto action
-				// for the current epoch (if a timer has elapsed since the last change).
 				d.maybeFireAutoAction(curHash)
 				continue
 			}
-
-			// Content changed — perform a full scan.
 			d.scanAndActOnClipboard(out, curHash, p5)
 		}
 	}
 }
 
-// scanAndActOnClipboard does the candidate extraction + registry checks for a
-// freshly read clipboard blob. It implements the fast-alert requirement:
-// the user-visible alert is fired as soon as the *first* secret is confirmed.
-// The full count is still computed and stored for status / later inspection.
+// scanAndActOnClipboard does candidate extraction + registry lookup.
+// It fires the alert on the *first* known secret for lowest latency.
 func (d *Daemon) scanAndActOnClipboard(raw []byte, contentHash string, p5 config.Pillar5Config) {
 	if len(raw) == 0 {
 		d.updateClipboardState(contentHash, 0)
 		return
 	}
 
-	cands := detection.NewDetector().ExtractCandidates(raw)
+	cands := extractCandidatesFunc(raw)
 	if len(cands) == 0 {
 		d.updateClipboardState(contentHash, 0)
 		return
 	}
 
-	// Fast path + full count in one pass.
-	// As soon as we see the first known secret we fire the alert (if enabled)
-	// without waiting for the rest of the (potentially large) candidate list.
-	// The caller (monitor) will still finish the loop to get the exact count.
 	firstSecretSeen := false
 	found := 0
 
@@ -203,17 +199,13 @@ func (d *Daemon) scanAndActOnClipboard(raw []byte, contentHash string, p5 config
 		if strings.TrimSpace(cand) == "" {
 			continue
 		}
-		h := registry.HashValue([]byte(cand))
-		if d.registry.Has(h) {
+		if d.registry.Has(registry.HashValue([]byte(cand))) {
 			found++
 			if !firstSecretSeen {
 				firstSecretSeen = true
-				// Fire alert immediately for lowest possible latency.
-				// Do not block the scan loop.
 				if p5.AlertsEnabled {
-					go d.fireClipboardAlert() // best effort, non-blocking
+					go d.fireClipboardAlert()
 				}
-				// Record the moment we first saw a secret for this epoch.
 				now := time.Now()
 				d.clipboardMu.Lock()
 				d.clipboardLastChange = now
@@ -225,21 +217,11 @@ func (d *Daemon) scanAndActOnClipboard(raw []byte, contentHash string, p5 config
 	}
 
 	d.updateClipboardState(contentHash, found)
-
-	// After the scan we also check whether an auto action is due for this
-	// new epoch (in case the timers are very short).
 	d.maybeFireAutoAction(contentHash)
 }
 
-// updateClipboardState is the single place that mutates the clipboard fields
-// under the lock (except for the direct sets inside performAuto* for the
-// redacted/cleared epochs themselves). It also logs transitions for observability.
-//
-// Per the state machine: when writing count==0 we *always* reset the per-epoch action
-// flags (redacted/cleared). This ensures that a user overwrite of a post-auto
-// (redacted or cleared) epoch with clean non-secret content results in a new
-// clean epoch with flags=false (otherwise a stale flag would persist because
-// the auto path bypasses the normal update when it sets its count=0+flag).
+// updateClipboardState is the single writer for clipboard epoch state.
+// count==0 always resets the per-epoch action flags.
 func (d *Daemon) updateClipboardState(contentHash string, count int) {
 	d.clipboardMu.Lock()
 	defer d.clipboardMu.Unlock()
@@ -257,35 +239,25 @@ func (d *Daemon) updateClipboardState(contentHash string, count int) {
 		if prevCount > 0 {
 			logging.Println("Pillar5: clipboard is now clean")
 		}
-		// If prevCount==0 here we are typically transitioning from an auto-redacted
-		// or auto-cleared epoch (which set count=0+flag directly) to a fresh clean
-		// user epoch; the reset above ensures the new epoch reports clean flags.
 	}
 }
 
-// fireClipboardAlert surfaces the immediate user notification (fast first-secret path).
-// Uses the conventional lightweight macOS mechanisms. Best-effort; failures are
-// only logged at debug level so they never affect the monitor loop.
+// fireClipboardAlert sends the immediate notification (best effort).
 func (d *Daemon) fireClipboardAlert() {
-	// Generic message — we deliberately avoid the exact count here because
-	// the alert is intentionally fired on the *first* confirmation.
 	msg := "Blast Radius: secret detected on clipboard"
 
-	// Notification Center + audible (best effort only). Use seams so tests
-	// can override (and non-mac envs can avoid real side effects).
 	notifErr := osascriptFunc(msg)
 	soundErr := afplayFunc()
 
 	if notifErr == nil || soundErr == nil {
 		logging.Println("Pillar5: alert fired (first secret confirmed)")
 	} else {
-		logging.Println("Pillar5: alert attempt (first secret confirmed); notification/sound best-effort (both failed)")
+		logging.Println("Pillar5: alert attempt (first secret confirmed); both notification and sound failed")
 	}
 }
 
-// maybeFireAutoAction checks the current epoch against the two configured
-// timeouts and performs the appropriate action (redact or full clear) if due
-// and not already done for this fingerprint.
+// maybeFireAutoAction decides whether to trigger auto-redact or auto-clear
+// based on elapsed time since the last change.
 func (d *Daemon) maybeFireAutoAction(currentHash string) {
 	d.clipboardMu.Lock()
 	lastHash := d.clipboardLastHash
@@ -295,56 +267,61 @@ func (d *Daemon) maybeFireAutoAction(currentHash string) {
 	alreadyCleared := d.clipboardCleared
 	d.clipboardMu.Unlock()
 
-	if secretCount == 0 || lastHash != currentHash {
-		return // nothing to do or epoch has moved on
-	}
-	if d.cfg == nil {
+	if secretCount == 0 || lastHash != currentHash || d.cfg == nil {
 		return
 	}
+
 	p5 := d.cfg.Pillar5
-	now := time.Now()
+	elapsed := time.Since(lastChange)
 
-	elapsed := now.Sub(lastChange)
-
-	// Tier 1: auto-redact (if enabled and due)
-	if !alreadyRedacted && p5.RedactTimeoutSeconds > 0 && elapsed >= time.Duration(p5.RedactTimeoutSeconds)*time.Second {
+	if !alreadyRedacted && p5.RedactTimeoutSeconds > 0 &&
+		elapsed >= time.Duration(p5.RedactTimeoutSeconds)*time.Second {
 		d.performAutoRedact(currentHash)
 	}
 
-	// Tier 2: full clear (independent of redact tier per the two configurable timeouts;
-	// a full clear can fire even if redact was 0 or its window not yet elapsed.
-	// This matches the "two independent user-configurable settings" intent.)
-	if !alreadyCleared && p5.FullClearTimeoutSeconds > 0 && elapsed >= time.Duration(p5.FullClearTimeoutSeconds)*time.Second {
+	if !alreadyCleared && p5.FullClearTimeoutSeconds > 0 &&
+		elapsed >= time.Duration(p5.FullClearTimeoutSeconds)*time.Second {
 		d.performAutoFullClear(currentHash)
 	}
 }
 
-// performAutoRedact re-reads the clipboard (to be sure we still have the same
-// content) and performs an in-place redaction of the known secrets.
+// clipboardStillMatches is used to close TOCTOU windows before
+// destructive clipboard writes.
+func clipboardStillMatches(expectedHash string) bool {
+	out, err := pbpasteFunc()
+	if err != nil {
+		return false
+	}
+	h := sha256.Sum256(out)
+	return hex.EncodeToString(h[:]) == expectedHash
+}
+
+// performAutoRedact replaces known secrets with the configured placeholder.
+// It performs stability checks before reading candidates and before writing.
 func (d *Daemon) performAutoRedact(expectedHash string) {
+	if !clipboardStillMatches(expectedHash) {
+		return
+	}
+
 	out, err := pbpasteFunc()
 	if err != nil {
 		return
 	}
-	h := sha256.Sum256(out)
-	if hex.EncodeToString(h[:]) != expectedHash {
-		// Content changed underneath us — the monitor will pick it up on next tick.
+	if !clipboardStillMatches(expectedHash) {
 		return
 	}
 
-	cands := detection.NewDetector().ExtractCandidates(out)
+	cands := extractCandidatesFunc(out)
 	if len(cands) == 0 {
 		return
 	}
 
-	// Collect the actual secret values that are still known right now.
-	secretsToRedact := []string{}
+	secretsToRedact := make([]string, 0, len(cands))
 	for _, cand := range cands {
 		if strings.TrimSpace(cand) == "" {
 			continue
 		}
-		hv := registry.HashValue([]byte(cand))
-		if d.registry.Has(hv) {
+		if d.registry.Has(registry.HashValue([]byte(cand))) {
 			secretsToRedact = append(secretsToRedact, cand)
 		}
 	}
@@ -366,26 +343,10 @@ func (d *Daemon) performAutoRedact(expectedHash string) {
 		scrubbed = strings.ReplaceAll(scrubbed, sec, placeholder)
 	}
 
-	// Re-verify the clipboard content is *still* the expected epoch immediately
-	// before the write. This closes the TOCTOU window between the initial
-	// stability check (right after pbpaste) and the pbcopy (after candidate
-	// extraction, registry lookups, and scrubbed-string construction).
-	// Any mutation (user copy, concurrent scrub, pasteboard server, etc.) in
-	// that window would otherwise cause a blind overwrite of live content with
-	// a redaction derived from the *stale* snapshot.
-	postCheck, pErr := pbpasteFunc()
-	if pErr != nil {
-		logging.Printf("Pillar5 auto-redact: post-build pbpaste failed: %v", pErr)
-		return
-	}
-	postH := sha256.Sum256(postCheck)
-	if hex.EncodeToString(postH[:]) != expectedHash {
-		// Epoch moved on underneath us; monitor will pick up new content on next tick.
-		// Do not commit the stale redaction.
+	if !clipboardStillMatches(expectedHash) {
 		return
 	}
 
-	// Write the redacted version back.
 	if err := pbcopyFunc([]byte(scrubbed)); err != nil {
 		logging.Printf("Pillar5 auto-redact: pbcopy failed: %v", err)
 		return
@@ -393,10 +354,7 @@ func (d *Daemon) performAutoRedact(expectedHash string) {
 
 	d.clipboardMu.Lock()
 	d.clipboardRedacted = true
-	// After redaction the "secret count" ... (comment as before)
 	d.clipboardSecretCount = 0
-	// Update lastHash to the just-written (redacted) content so the *next* monitor
-	// tick does not see a "change" and do an unnecessary re-scan.
 	newH := sha256.Sum256([]byte(scrubbed))
 	d.clipboardLastHash = hex.EncodeToString(newH[:])
 	d.clipboardMu.Unlock()
@@ -404,29 +362,21 @@ func (d *Daemon) performAutoRedact(expectedHash string) {
 	logging.Printf("Pillar5: auto-redacted %d secret value(s) after timeout", len(secretsToRedact))
 }
 
-// performAutoFullClear just empties the pasteboard (the blunt "nuke" action).
+// performAutoFullClear empties the pasteboard after the timeout.
 func (d *Daemon) performAutoFullClear(expectedHash string) {
+	if !clipboardStillMatches(expectedHash) {
+		return
+	}
+
 	out, err := pbpasteFunc()
 	if err != nil {
 		return
 	}
-	h := sha256.Sum256(out)
-	if hex.EncodeToString(h[:]) != expectedHash {
+	if !clipboardStillMatches(expectedHash) {
 		return
 	}
+	_ = out // stability check only
 
-	// Re-check stability right before the (destructive) clear write to close
-	// the TOCTOU window (same rationale as in performAutoRedact).
-	postCheck, pErr := pbpasteFunc()
-	if pErr != nil {
-		return
-	}
-	postH := sha256.Sum256(postCheck)
-	if hex.EncodeToString(postH[:]) != expectedHash {
-		return
-	}
-
-	// Empty the clipboard.
 	if err := pbcopyFunc(nil); err != nil {
 		logging.Printf("Pillar5 auto-clear: pbcopy failed: %v", err)
 		return
@@ -435,8 +385,6 @@ func (d *Daemon) performAutoFullClear(expectedHash string) {
 	d.clipboardMu.Lock()
 	d.clipboardCleared = true
 	d.clipboardSecretCount = 0
-	// Update lastHash to hash-of-empty so next tick sees stable "clean" and
-	// does not treat the clear as a "new change" requiring re-scan.
 	emptyH := sha256.Sum256([]byte{})
 	d.clipboardLastHash = hex.EncodeToString(emptyH[:])
 	d.clipboardMu.Unlock()

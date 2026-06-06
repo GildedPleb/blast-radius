@@ -102,8 +102,6 @@ func (f *fakeContext) BeginExclusiveOp(name string) (func(), bool) {
 	return noopRelease, true
 }
 
-func (f *fakeContext) SetBusy(b bool) { f.busy = b }
-
 func (f *fakeContext) Pillar5ClipboardStatus() map[string]any {
 	return map[string]any{
 		"secret_count":   0,
