@@ -28,6 +28,8 @@ type fakeContext struct {
 	pillar3       config.Pillar3Config
 	hasPillar3Cfg bool
 
+	busy bool // when true, BeginExclusiveOp returns ok=false to simulate concurrent long-running op
+
 	lastPillar1Rescan *discovery.RescanResult
 	pillar1RescanErr  error
 }
@@ -90,8 +92,13 @@ func (f *fakeContext) Pillar3Config() config.Pillar3Config {
 	}
 }
 
-// BeginExclusiveOp for tests: always succeed (handler tests are single-threaded).
+// BeginExclusiveOp returns a no-op release func and ok=true unless SetBusy(true)
+// was called on this context (used to exercise the "daemon busy" error path in
+// long-running handlers like scrub).
 func (f *fakeContext) BeginExclusiveOp(name string) (func(), bool) {
+	if f.busy {
+		return func() {}, false
+	}
 	return func() {}, true
 }
 
@@ -109,4 +116,10 @@ func (f *fakeContext) Pillar5ClipboardStatus() map[string]any {
 func (f *fakeContext) SetPillar3Config(c config.Pillar3Config) {
 	f.pillar3 = c
 	f.hasPillar3Cfg = true
+}
+
+// SetBusy forces the next BeginExclusiveOp call to return ok=false. Call with false
+// to reset. This lets handler tests cover the concurrent-op / daemon-busy error branch.
+func (f *fakeContext) SetBusy(b bool) {
+	f.busy = b
 }

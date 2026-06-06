@@ -370,6 +370,26 @@ func TestScrubHistoryHandler_Disabled(t *testing.T) {
 	}
 }
 
+func TestScrubHistoryHandler_Busy(t *testing.T) {
+	// Covers the !ok branch of BeginExclusiveOp in Handle (daemon busy error path).
+	ctx := &fakeContext{}
+	ctx.SetBusy(true)
+
+	h := ScrubHistoryHandler{}
+	resp, err := h.Handle("", ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resp.(map[string]any)
+	if m["status"] != "error" {
+		t.Errorf("expected error status, got %v", m["status"])
+	}
+	msg := m["message"].(string)
+	if !strings.Contains(msg, "daemon busy") {
+		t.Errorf("expected \"daemon busy\" message, got %q", msg)
+	}
+}
+
 func TestScrubHistoryHandler_HistoryFilesFromConfig(t *testing.T) {
 	secret := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567"
 	h := registry.HashValue([]byte(secret))
