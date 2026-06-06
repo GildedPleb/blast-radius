@@ -390,6 +390,59 @@ func TestScrubHistoryHandler_Busy(t *testing.T) {
 	}
 }
 
+func TestScrubHistoryHandler_OverrideFileHappyPath(t *testing.T) {
+	// Covers the success path after os.Stat(overrideFile) when a valid file= override is supplied.
+	// This exercises targets = []string{overrideFile} and the single-target fast path.
+	secret := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567"
+	h := registry.HashValue([]byte(secret))
+
+	content := "# header\ncurl -H 'Authorization: Bearer " + secret + "' https://ex\nls\n"
+	histPath := withTempHistory(t, content)
+
+	// Spy to prove that file= override bypasses discovery entirely.
+	origDiscover := discoverHistoryTargetsFn
+	discoverCalled := false
+	discoverHistoryTargetsFn = func([]string, []string) []string {
+		discoverCalled = true
+		return nil
+	}
+	defer func() { discoverHistoryTargetsFn = origDiscover }()
+
+	ctx := &fakeContext{hashes: toSecretHashes(h)}
+
+	hdl := ScrubHistoryHandler{}
+	resp, err := hdl.Handle("file="+histPath, ctx) // non -- form that parser supports
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resp.(map[string]any)
+	if m["status"] != "ok" {
+		t.Fatalf("expected ok, got %v (message=%v)", m["status"], m["message"])
+	}
+	if discoverCalled {
+		t.Error("discovery seam should not be called when file= override is supplied")
+	}
+	if m["file"] != histPath {
+		t.Errorf("resp[file] = %v, want %s", m["file"], histPath)
+	}
+	var removed float64
+	switch v := m["lines_removed"].(type) {
+	case float64:
+		removed = v
+	case int:
+		removed = float64(v)
+	}
+	if removed != 1 {
+		t.Errorf("expected 1 line removed via override, got %v", removed)
+	}
+
+	// Verify secret was actually scrubbed from the overridden file
+	after, _ := os.ReadFile(histPath)
+	if strings.Contains(string(after), secret) {
+		t.Errorf("secret still present after override scrub:\n%s", after)
+	}
+}
+
 func TestScrubHistoryHandler_HistoryFilesFromConfig(t *testing.T) {
 	secret := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567"
 	h := registry.HashValue([]byte(secret))
