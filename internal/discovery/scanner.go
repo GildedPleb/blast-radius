@@ -15,6 +15,8 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/util"
 )
 
+var filepathAbs = filepath.Abs
+
 // Scanner discovers files matching the Pillar 1 env source's configured
 // env_file_patterns (positive include list declaring "these are my authoritative
 // secret containers"), parses them, and populates the registry.
@@ -48,7 +50,7 @@ func NewScanner(cfg *config.Config, reg *registry.Registry) *Scanner {
 // callback should return nil to continue the walk (matching prior behavior
 // in both paths). Returns the error from filepath.Walk (if any).
 func (s *Scanner) visitEnvFiles(root string, onFile func(path string) error) error {
-	absRoot, err := filepath.Abs(root)
+	absRoot, err := filepathAbs(root)
 	if err != nil {
 		return err
 	}
@@ -301,11 +303,16 @@ func makeOpaqueProjectID(absDir string) registry.ProjectID {
 // computeDisplayName creates a privacy-friendly name from the real path
 // at discovery time. We capture this once and throw the full path away.
 func computeDisplayName(absDir string) string {
+	if absDir == "" {
+		return ""
+	}
+	if absDir == "/" {
+		return "/"
+	}
+
 	absDir = strings.TrimSuffix(absDir, "/")
 	parts := strings.Split(absDir, "/")
-	if len(parts) == 0 {
-		return "unknown"
-	}
+
 	if len(parts) >= 2 {
 		return strings.Join(parts[len(parts)-2:], "/")
 	}

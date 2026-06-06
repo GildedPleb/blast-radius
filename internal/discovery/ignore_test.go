@@ -9,9 +9,9 @@ import (
 func TestIgnoreMatcher(t *testing.T) {
 	dir := t.TempDir()
 	gitignore := filepath.Join(dir, ".gitignore")
-	os.WriteFile(gitignore, []byte("node_modules\n*.log\n"), 0644)
+	os.WriteFile(gitignore, []byte("# comment line\nnode_modules\n\n*.log\n# trailing comment\n"), 0644)
 
-	m := NewIgnoreMatcher(dir, []string{".gitignore"})
+	m := NewIgnoreMatcher(dir, []string{".gitignore", ".nonexistentignore"})
 	if !m.ShouldIgnore(filepath.Join(dir, "node_modules")) {
 		t.Error("should ignore node_modules")
 	}
@@ -184,5 +184,57 @@ func TestIgnoreMatcher_FallbackSimpleMatch(t *testing.T) {
 	}
 	if m.ShouldIgnore("keep.txt") {
 		t.Error("unrelated relative name should not be ignored")
+	}
+}
+
+func TestIgnoreMatcher_EmptyRoot(t *testing.T) {
+	m := &IgnoreMatcher{root: ""}
+	if m.ShouldIgnore("/foo/bar") {
+		t.Error("ShouldIgnore should return false when root is empty")
+	}
+	if m.ShouldIgnore("relative.txt") {
+		t.Error("ShouldIgnore should return false when root is empty (relative path)")
+	}
+}
+
+func TestIgnoreMatcher_UnanchoredPathPattern(t *testing.T) {
+	dir := t.TempDir()
+	gitignore := filepath.Join(dir, ".gitignore")
+	os.WriteFile(gitignore, []byte("foo/bar\n"), 0644) // unanchored, contains "/"
+
+	m := NewIgnoreMatcher(dir, []string{".gitignore"})
+
+	// Deep directory whose relative path ends exactly with the pattern
+	deepDir := filepath.Join(dir, "src", "packages", "foo", "bar")
+	_ = os.MkdirAll(deepDir, 0755)
+
+	if !m.ShouldIgnore(deepDir) {
+		t.Error("unanchored 'foo/bar' should match deep foo/bar via suffix loop in matchesRule")
+	}
+}
+
+func TestMatchWithWildcards_EmptyPattern(t *testing.T) {
+	if matchWithWildcards("", "anything") {
+		t.Error("empty pattern should return false")
+	}
+	if matchWithWildcards("", "") {
+		t.Error("empty pattern should return false even against empty name")
+	}
+}
+
+func TestIgnoreMatcher_TrailingStarInDoubleStar(t *testing.T) {
+	dir := t.TempDir()
+	gitignore := filepath.Join(dir, ".gitignore")
+	// The literal segment after splitting on ** is "/*" → ends with *
+	os.WriteFile(gitignore, []byte("**/*\n"), 0644)
+
+	m := NewIgnoreMatcher(dir, []string{".gitignore"})
+
+	deep := filepath.Join(dir, "a", "b", "c", "file.txt")
+	_ = os.MkdirAll(filepath.Dir(deep), 0755)
+	_ = os.WriteFile(deep, []byte("x"), 0644)
+
+	if !m.ShouldIgnore(deep) {
+		t.Error("**/* should hit the trailing * early return in matchAt")
 	}
 }

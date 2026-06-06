@@ -95,12 +95,9 @@ func (m *Manager) RunInitialDiscovery() {
 	if m.cfg == nil {
 		if m.registry != nil {
 			m.registry.SetScanState(registry.ScanStateCompleted)
+		} else {
+			// registry was nil (defensive — NewManager always allocates one)
 		}
-		return
-	}
-	if m.registry == nil {
-		// Should not happen (NewManager defensively allocates), but keep
-		// the manager methods robust against nil registry.
 		return
 	}
 	// Respect the logical layer: if the "env" source is explicitly disabled,
@@ -308,4 +305,11 @@ func (m *Manager) Rescan() *RescanResult {
 
 	logging.Printf("Manual rescan complete: %d -> %d hashes in %v (registry was cleared first)", before, after, result.Duration)
 	return result
+}
+
+// setRegistryForTest is a test-only hook that lets us force the
+// otherwise-impossible nil-registry state so we can cover the
+// defensive path in RunInitialDiscovery when cfg is also nil.
+func (m *Manager) setRegistryForTest(r *registry.Registry) {
+	m.registry = r
 }

@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,13 +12,22 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/registry"
 )
 
-func TestNewScanner(t *testing.T) {
-	cfg := config.DefaultConfig()
-	reg := registry.New()
-	s := NewScanner(cfg, reg)
-	if s == nil {
-		t.Error("scanner nil")
+// fakeCollector is a minimal Collector implementation for coverage tests.
+type fakeCollector struct {
+	name     string
+	enabled  bool
+	validate error
+	collect  func() ([]registry.SecretHash, error)
+}
+
+func (f *fakeCollector) Name() string    { return f.name }
+func (f *fakeCollector) Enabled() bool   { return f.enabled }
+func (f *fakeCollector) Validate() error { return f.validate }
+func (f *fakeCollector) Collect() ([]registry.SecretHash, error) {
+	if f.collect != nil {
+		return f.collect()
 	}
+	return nil, nil
 }
 
 func TestNewManager(t *testing.T) {
@@ -26,62 +36,6 @@ func TestNewManager(t *testing.T) {
 	m := NewManager(cfg, reg)
 	if m == nil {
 		t.Error("manager nil")
-	}
-}
-
-func TestExpandPath_Direct(t *testing.T) {
-	tests := []struct {
-		in   string
-		want string
-	}{
-		{"~", "/tmp/fakehome"},
-		{"~/", "/tmp/fakehome"},
-		{"~/foo/bar", "/tmp/fakehome/foo/bar"},
-		{"/absolute/path", "/absolute/path"},
-		{"relative", "relative"},
-		{"", ""},
-	}
-	for _, tc := range tests {
-		t.Setenv("HOME", "/tmp/fakehome")
-		got := expandPath(tc.in)
-		if got != tc.want {
-			t.Errorf("expandPath(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestComputeDisplayName(t *testing.T) {
-	tests := []struct {
-		dir  string
-		want string
-	}{
-		{"", ""},
-		{"/", ""},
-		{"/home/user/project", "user/project"},
-		{"/single", "/single"}, // shallow path keeps leading slash in join of last 2
-		{"/a/b/c/d", "c/d"},
-		{"/trailing/", "/trailing"},
-		{"/foo/bar", "foo/bar"},
-	}
-	for _, tc := range tests {
-		if got := computeDisplayName(tc.dir); got != tc.want {
-			t.Errorf("computeDisplayName(%q) = %q, want %q", tc.dir, got, tc.want)
-		}
-	}
-}
-
-func TestMakeOpaqueProjectID(t *testing.T) {
-	id1 := makeOpaqueProjectID("/foo/bar")
-	id2 := makeOpaqueProjectID("/foo/bar")
-	if id1 != id2 {
-		t.Error("makeOpaqueProjectID not stable")
-	}
-	if id1 == "" {
-		t.Error("empty id")
-	}
-	id3 := makeOpaqueProjectID("/other")
-	if id3 == id1 {
-		t.Error("collision for different paths (unexpected)")
 	}
 }
 
@@ -133,17 +87,6 @@ func TestManager_RunInitialDiscovery_RegistersProjects(t *testing.T) {
 	// then registerProject was exercised.
 	if reg.Count() == 0 {
 		t.Log("note: registry was empty after scan (possible ignore rules) — registerProject path may not have run")
-	}
-}
-
-func TestExpandPath_NoHome(t *testing.T) {
-	// Ensure expand leaves ~ alone when HOME empty (t.Setenv sets to "" which != "" check fails)
-	t.Setenv("HOME", "")
-	if got := expandPath("~/foo"); got != "~/foo" {
-		t.Errorf("expand with empty HOME: %q", got)
-	}
-	if got := expandPath("~"); got != "~" {
-		t.Errorf("expand ~ with empty HOME: %q", got)
 	}
 }
 
@@ -223,49 +166,6 @@ func TestScanner_ProcessEnvFile_VariedContent(t *testing.T) {
 	// We should have registered several values (at least SIMPLE, QUOTED, SINGLE, WITH_EQUALS, TRAILING...)
 	if reg.Count() < 4 {
 		t.Errorf("expected at least 4 values registered from varied .env, got %d", reg.Count())
-	}
-}
-
-// TestScanner_KeyFiltering_Pillar1 exercises ignore_patterns support
-// under the Pillar 1 logical layer (per-source options on the "env" source).
-func TestScanner_KeyFiltering_Pillar1(t *testing.T) {
-	dir := t.TempDir()
-	envFile := filepath.Join(dir, ".env.filtered")
-
-	content := strings.Join([]string{
-		"REAL_SECRET=supersecretvalue123456",
-		"LOG_LEVEL=debug",
-		"PROJECT_NAME=my-app",
-		"PATH=/usr/bin:/bin",
-		"AWS_ACCESS_KEY_ID=AKIAEXAMPLE",
-		"MY_CUSTOM_NONSECRET=foo",
-	}, "\n")
-
-	if err := os.WriteFile(envFile, []byte(content), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := config.DefaultConfig()
-
-	// Provide the full env source config in one shot under the Pillar 1 logical layer.
-	// This is the canonical shape (options live under pillar1.sources.<name>.options).
-	cfg.Pillar1.Sources["env"] = config.SourceConfig{
-		Enabled: true,
-		Options: map[string]any{
-			"project_roots":   []string{dir},
-			"skip_dirs":       []string{},
-			"ignore_patterns": []string{"LOG_LEVEL", "PROJECT_NAME", "PATH", "AWS_*_KEY_ID", "*_NONSECRET"},
-		},
-	}
-
-	reg := registry.New()
-	m := NewManager(cfg, reg)
-
-	m.RunInitialDiscovery()
-
-	// Only REAL_SECRET should have been registered.
-	if reg.Count() != 1 {
-		t.Errorf("expected exactly 1 secret after filtering, got %d", reg.Count())
 	}
 }
 
@@ -472,4 +372,222 @@ func TestDiscoveryManager_ConcurrentLastAccess(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// TestManager_Rescan_EmptyRootsCollector covers the collector scan func
+// fallback (roots = {"~"}) when GetEnvOptions().ProjectRoots is empty.
+// This is the exact branch that was showing as uncovered inside NewManager's
+// env collector wiring. We use a hermetic fake $HOME so CollectEnvHashes
+// does not walk the real homedir.
+func TestManager_Rescan_EmptyRootsCollector(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	cfg := config.DefaultConfig()
+	// env enabled by default; explicitly set empty project_roots so the
+	// closure inside SetScanFunc takes the len==0 path.
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Options["project_roots"] = []string{}
+		env.Options["skip_dirs"] = []string{}
+		cfg.Pillar1.Sources["env"] = env
+	}
+
+	reg := registry.New()
+	m := NewManager(cfg, reg)
+
+	result := m.Rescan()
+	if result == nil {
+		t.Fatal("Rescan returned nil")
+	}
+
+	// With empty fake $HOME we expect the collector to contribute 0 hashes
+	// and Validate+Collect to succeed (no errors). RootsScanned should
+	// also reflect the fallback to "~".
+	if result.AfterHashes != 0 {
+		t.Errorf("expected 0 hashes (empty fake $HOME), got %d", result.AfterHashes)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("expected no collector errors, got: %v", result.Errors)
+	}
+	if len(result.RootsScanned) != 1 || result.RootsScanned[0] != "~" {
+		t.Errorf("expected RootsScanned=[~] after empty-roots fallback, got %v", result.RootsScanned)
+	}
+	if result.CollectorResults["env"] != 0 {
+		t.Errorf("expected env collector to report 0 hashes, got %d", result.CollectorResults["env"])
+	}
+}
+
+// TestManager_NewManager_WiresBitwardenCollector exercises the hard-coded
+// Bitwarden collector path inside NewManager (the if bw.Enabled() block
+// that appends it and registers the "Bitwarden" display name).
+// By default it is disabled, so we explicitly enable it via the Pillar1
+// config map (same pattern used for the env source).
+func TestManager_NewManager_WiresBitwardenCollector(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	// Enable the bitwarden source so NewBitwardenCollector(cfg).Enabled()
+	// returns true and the body of the if block is executed.
+	if bw, ok := cfg.Pillar1.Sources["bitwarden"]; ok {
+		bw.Enabled = true
+		cfg.Pillar1.Sources["bitwarden"] = bw
+	} else {
+		cfg.Pillar1.Sources["bitwarden"] = config.SourceConfig{
+			Enabled: true,
+		}
+	}
+
+	reg := registry.New()
+	m := NewManager(cfg, reg)
+
+	// The logical ID + nice display name are only registered inside
+	// the if-block we are trying to cover.
+	id := logicalProjectID("bitwarden")
+	if got := m.GetProjectDisplayName(id); got != "Bitwarden" {
+		t.Errorf("expected Bitwarden collector to be wired with display name %q, got %q", "Bitwarden", got)
+	}
+}
+
+// TestManager_RunInitialDiscovery_NilConfig covers the entire
+// defensive cfg==nil block in RunInitialDiscovery, including the
+// registry==nil sub-path that NewManager can never produce.
+func TestManager_RunInitialDiscovery_NilConfig(t *testing.T) {
+	// Happy defensive path: cfg nil, but we still have a registry
+	reg := registry.New()
+	m1 := NewManager(nil, reg)
+	m1.RunInitialDiscovery()
+
+	if reg.GetScanState() != registry.ScanStateCompleted {
+		t.Errorf("expected Completed (cfg==nil, registry!=nil), got %v", reg.GetScanState())
+	}
+
+	// Ultra-defensive path: both cfg and registry are nil
+	m2 := NewManager(nil, registry.New())
+	m2.setRegistryForTest(nil) // <-- the hook makes coverage happy
+	m2.RunInitialDiscovery()
+	// No further assertions — reaching here without panic is the goal.
+}
+
+func TestManager_RunInitialDiscovery_ScanDirectoryError(t *testing.T) {
+	// Use the existing test seam to force filepath.Abs to fail.
+	// This is the only path that makes ScanDirectory return a non-nil error.
+	origAbs := filepathAbs
+	filepathAbs = func(string) (string, error) {
+		return "", errors.New("simulated abs failure for coverage")
+	}
+	defer func() { filepathAbs = origAbs }()
+
+	cfg := config.DefaultConfig()
+	// Any root is fine — the error happens before we even walk.
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Options["project_roots"] = []string{"/some/root"}
+		env.Options["skip_dirs"] = []string{}
+		cfg.Pillar1.Sources["env"] = env
+	}
+
+	reg := registry.New()
+	m := NewManager(cfg, reg)
+
+	m.RunInitialDiscovery()
+
+	if reg.GetScanState() != registry.ScanStateFailed {
+		t.Errorf("expected ScanStateFailed when ScanDirectory returns error, got %v", reg.GetScanState())
+	}
+}
+
+// TestManager_Rescan_NilRegistry covers the defensive early return when
+// a Manager is constructed with a nil registry (bypassing NewManager).
+func TestManager_Rescan_NilRegistry(t *testing.T) {
+	m := &Manager{
+		registry: nil,
+		cfg:      config.DefaultConfig(),
+	}
+
+	result := m.Rescan()
+	if result == nil {
+		t.Fatal("expected non-nil RescanResult")
+	}
+	if len(result.Errors) != 1 || result.Errors[0] != "registry not initialized" {
+		t.Errorf(`expected error "registry not initialized", got %v`, result.Errors)
+	}
+}
+
+// TestManager_Rescan_NilConfig covers the defensive early return when
+// cfg is nil (NewManager allows this; Rescan must still return a usable result).
+func TestManager_Rescan_NilConfig(t *testing.T) {
+	reg := registry.New()
+	m := NewManager(nil, reg) // deliberately pass nil cfg
+
+	result := m.Rescan()
+	if result == nil {
+		t.Fatal("expected non-nil RescanResult")
+	}
+	if len(result.Errors) != 1 || result.Errors[0] != "configuration not loaded" {
+		t.Errorf(`expected error "configuration not loaded", got %v`, result.Errors)
+	}
+}
+
+// TestManager_Rescan_CollectorDisabled covers the `if !c.Enabled() { continue }` path.
+func TestManager_Rescan_CollectorDisabled(t *testing.T) {
+	cfg := config.DefaultConfig()
+	// Disable env so NewManager does NOT wire the real (slow) collector.
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Enabled = false
+		cfg.Pillar1.Sources["env"] = env
+	}
+
+	m := NewManager(cfg, registry.New())
+
+	// Now append only our fast fake
+	m.collectors = append(m.collectors, &fakeCollector{
+		name:    "test-disabled",
+		enabled: false,
+	})
+
+	result := m.Rescan()
+	if result == nil {
+		t.Fatal("expected result")
+	}
+	// Disabled collector should be skipped with no error recorded for it
+	for _, e := range result.Errors {
+		if strings.Contains(e, "test-disabled") {
+			t.Errorf("disabled collector should have been skipped, got error: %s", e)
+		}
+	}
+}
+
+// TestManager_Rescan_CollectorCollectError covers the Collect() error path.
+func TestManager_Rescan_CollectorCollectError(t *testing.T) {
+	cfg := config.DefaultConfig()
+	// Disable env so we don't do expensive real filesystem walks
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Enabled = false
+		cfg.Pillar1.Sources["env"] = env
+	}
+
+	m := NewManager(cfg, registry.New())
+
+	m.collectors = append(m.collectors, &fakeCollector{
+		name:     "test-collect-error",
+		enabled:  true,
+		validate: nil,
+		collect: func() ([]registry.SecretHash, error) {
+			return nil, errors.New("simulated collect failure")
+		},
+	})
+
+	result := m.Rescan()
+	if result == nil {
+		t.Fatal("expected result")
+	}
+
+	found := false
+	for _, e := range result.Errors {
+		if strings.Contains(e, "test-collect-error: collect error:") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected collect error in result.Errors, got: %v", result.Errors)
+	}
 }

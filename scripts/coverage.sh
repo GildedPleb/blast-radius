@@ -135,12 +135,18 @@ summarize() {
     echo "Average coverage across $cnt packages: ${whole}.${dec}%"
     echo "PASS (coverage only — no 80 % gate)"
     echo ""
-    echo "=== Detailed function coverage (idiomatic Go coverage data) ==="
+    echo "=== Detailed function coverage ==="
     echo "   (only showing functions < 100%; from 'go tool cover -func')"
+    echo ""
     for p in $PACKAGES; do
-        echo ""
-        echo ">> Package: $p"
-        go tool cover -func="coverage.${p}.out" 2>/dev/null | grep -v '100.0%' || true
+        output=$(go tool cover -func="coverage.${p}.out" 2>/dev/null)
+
+        if echo "$output" | grep -q -v '100.0%'; then
+            echo "===> Package: $p"
+            echo "$output" | grep -v '100.0%'
+        else
+            echo "===> Package: $p COMPLETE"
+        fi
     done
 }
 
