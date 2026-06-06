@@ -92,15 +92,17 @@ func (f *fakeContext) Pillar3Config() config.Pillar3Config {
 	}
 }
 
-// BeginExclusiveOp returns a no-op release func and ok=true unless SetBusy(true)
-// was called on this context (used to exercise the "daemon busy" error path in
-// long-running handlers like scrub).
+var noopRelease = func() {}
+
+// BeginExclusiveOp for tests.
 func (f *fakeContext) BeginExclusiveOp(name string) (func(), bool) {
 	if f.busy {
-		return func() {}, false
+		return noopRelease, false
 	}
-	return func() {}, true
+	return noopRelease, true
 }
+
+func (f *fakeContext) SetBusy(b bool) { f.busy = b }
 
 func (f *fakeContext) Pillar5ClipboardStatus() map[string]any {
 	return map[string]any{

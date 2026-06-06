@@ -717,3 +717,168 @@ func toSecretHashes(raw ...[32]byte) []registry.SecretHash {
 	}
 	return out
 }
+
+func TestScrubHistoryHandler_Busy(t *testing.T) {
+	ctx := &fakeContext{}
+	ctx.SetBusy(true)
+
+	h := ScrubHistoryHandler{}
+	resp, err := h.Handle("", ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resp.(map[string]any)
+	if m["status"] != "error" {
+		t.Errorf("expected error status, got %v", m["status"])
+	}
+	msg := m["message"].(string)
+	if !strings.Contains(msg, "daemon busy") {
+		t.Errorf("expected \"daemon busy\" message, got %q", msg)
+	}
+}
+
+func TestScrubHistoryHandler_OverrideFileHappyPath(t *testing.T) {
+	// Covers the success path after os.Stat(overrideFile) succeeds.
+	// This hits: targets = []string{overrideFile} and the single-target fast path.
+	secret := "AKIAIOSFODNN7EXAMPLESECRETKEY1234567"
+	h := registry.HashValue([]byte(secret))
+
+	content := "# header\ncurl -H 'Authorization: Bearer " + secret + "' https://ex\nls\n"
+	histPath := withTempHistory(t, content)
+
+	// Spy to prove file= override completely bypasses discovery.
+	origDiscover := discoverHistoryTargetsFn
+	discoverCalled := false
+	discoverHistoryTargetsFn = func([]string, []string) []string {
+		discoverCalled = true
+		return nil
+	}
+	defer func() { discoverHistoryTargetsFn = origDiscover }()
+
+	ctx := &fakeContext{hashes: toSecretHashes(h)}
+
+	hdl := ScrubHistoryHandler{}
+	resp, err := hdl.Handle("file="+histPath, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := resp.(map[string]any)
+	if m["status"] != "ok" {
+		t.Fatalf("expected ok, got %v (message=%v)", m["status"], m["message"])
+	}
+	if discoverCalled {
+		t.Error("discovery seam should not be called when file= override is supplied")
+	}
+	if m["file"] != histPath {
+		t.Errorf("resp[file] = %v, want %s", m["file"], histPath)
+	}
+	var removed float64
+	switch v := m["lines_removed"].(type) {
+	case float64:
+		removed = v
+	case int:
+		removed = float64(v)
+	}
+	if removed != 1 {
+		t.Errorf("expected 1 line removed via override, got %v", removed)
+	}
+
+	// Verify the secret was actually removed from the file
+	after, _ := os.ReadFile(histPath)
+	if strings.Contains(string(after), secret) {
+		t.Errorf("secret still present after override scrub:\n%s", after)
+	}
+}
+
+func TestScrubHistoryHandler_ParseScrubArgsFullCoverage(t *testing.T) {
+	cfg := config.Pillar3Config{Mode: "delete", RedactPlaceholder: "[REDACTED]"}
+
+	// normal case + dry-run + full + mode= + --file=
+	mode, placeholder, override, dry, full := parseScrubArgs(
+		"dry-run full mode=redact --file=/tmp/with spaces/hist", cfg)
+
+	if mode != "redact" || placeholder != "[REDACTED]" || !dry || !full {
+		t.Errorf("unexpected parse result: mode=%s dry=%v full=%v", mode, dry, full)
+	}
+	if override != "/tmp/with spaces/hist" {
+		t.Errorf("overrideFile = %q", override)
+	}
+
+	// also test the plain "file=" form
+	_, _, override2, _, _ := parseScrubArgs("file=/another/path", cfg)
+	if override2 != "/another/path" {
+		t.Errorf("plain file= override = %q", override2)
+	}
+}
+
+func TestProcessHistoryTarget_ReadFileError(t *testing.T) {
+	// Directly exercises the os.ReadFile failure branch inside processHistoryTarget.
+	// Uses a non-existent path so ReadFile returns an error → skipped + "unreadable".
+	badPath := filepath.Join(t.TempDir(), "this-file-does-not-exist-98765")
+
+	res := processHistoryTarget(
+		badPath,
+		nil, // allHashes
+		"",  // currentRegFp
+		scrub.Mode("delete"),
+		"[REDACTED]",
+		false, // full
+		false, // dryRun
+	)
+
+	if !res.skipped {
+		t.Error("expected res.skipped == true")
+	}
+	if res.skippedReason != "unreadable" {
+		t.Errorf("expected skippedReason=%q, got %q", "unreadable", res.skippedReason)
+	}
+}
+
+func TestProcessHistoryTarget_WriteFailed(t *testing.T) {
+	dir := t.TempDir()
+	histPath := filepath.Join(dir, "test_history")
+
+	// Create a readable history file first
+	if err := os.WriteFile(histPath, []byte("export FOO=bar\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the directory unwritable so the .tmp file creation inside
+	// writeFinalHistoryAtomic fails.
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Skipf("cannot change directory permissions: %v", err)
+	}
+	defer os.Chmod(dir, 0700) // restore so t.TempDir() can clean up
+
+	res := processHistoryTarget(
+		histPath,
+		nil, // allHashes
+		"",  // currentRegFp
+		scrub.Mode("delete"),
+		"[REDACTED]",
+		false, // full
+		false, // dryRun
+	)
+
+	if res.skippedReason != "write-failed" {
+		t.Errorf("expected skippedReason=%q, got %q (res=%+v)", "write-failed", res.skippedReason, res)
+	}
+}
+
+func TestWriteFinalHistoryAtomic_RenameError(t *testing.T) {
+	dir := t.TempDir()
+	histPath := filepath.Join(dir, "hist")
+
+	// Pre-create histPath as a *directory* so Rename(tmp, histPath) fails
+	if err := os.Mkdir(histPath, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	kept := []string{"line1"}
+	receipt := "# receipt"
+
+	err := writeFinalHistoryAtomic(histPath, kept, receipt)
+	if err == nil {
+		t.Fatal("expected Rename to fail because target is a directory")
+	}
+}
