@@ -307,3 +307,58 @@ func TestRunEnvCheck_CommandFailsButReportsCount(t *testing.T) {
 		}
 	}
 }
+
+// TestRunEnvCheck_MetacharWarning covers the shell-metacharacter heuristic warning
+// (the logging.Printf path when cmd.Cmd contains ;|&`$(){}[]<>).
+// Behavior is unchanged (we still exec directly); this is purely a warning to the
+// operator that they should point at a wrapper script for real pipes/logic.
+func TestRunEnvCheck_MetacharWarning(t *testing.T) {
+	defer resetTestOverrides(t)
+	restore := silenceOutput()
+	defer restore()
+
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		return exec.Command("true")
+	}
+
+	cfg := defaultTestConfig()
+	cfg.Pillar4.Commands = []config.RuntimeCommand{
+		{Name: "meta-pipe", Cmd: "echo foo | bar"}, // contains |
+	}
+	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
+	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) { return nil, errForTest }
+
+	RunEnvCheck("meta-pipe")
+}
+
+// TestRunEnvCheck_EmptyCommand covers the early-return path when a pillar4
+// command definition has an empty (or whitespace-only) Cmd field.
+// strings.Fields yields len==0, we emit the specific error JSON and return
+// before any exec or daemon dial.
+func TestRunEnvCheck_EmptyCommand(t *testing.T) {
+	defer resetTestOverrides(t)
+
+	// Intentionally skip silenceOutput() so we can assert the exact JSON
+	// (same pattern as TestRunEnvCheck_CommandFailsButReportsCount).
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	cfg := defaultTestConfig()
+	cfg.Pillar4.Commands = []config.RuntimeCommand{{Name: "empty-cmd", Cmd: ""}}
+	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
+
+	RunEnvCheck("empty-cmd")
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	out := buf.String()
+
+	if !strings.Contains(out, `"status":"error"`) ||
+		!strings.Contains(out, `"message":"empty command (pillar4 primitive)"`) {
+		t.Errorf("expected empty command error JSON, got: %q", out)
+	}
+}

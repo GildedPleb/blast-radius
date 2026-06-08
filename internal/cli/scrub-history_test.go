@@ -13,6 +13,10 @@ func TestRunScrubHistory(t *testing.T) {
 	// no daemon
 	RunScrubHistory(nil)
 
+	// no daemon + --json (exercises the jsonOutput=true branch that prints
+	// the compact JSON error instead of the human daemonNotRunningMsg)
+	RunScrubHistory([]string{"--json"})
+
 	// success with removals (delete mode)
 	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","lines_removed":3,"file":"/tmp/hist"}`)
 	RunScrubHistory(nil)
@@ -45,6 +49,9 @@ func TestRunScrubHistory(t *testing.T) {
 	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"error","message":"something broke"}`)
 	RunScrubHistory([]string{"--json"})
 
+	sendDaemonCommandFn = mockSendDaemonCommand(`this is not valid json at all`)
+	RunScrubHistory([]string{"--json"})
+
 	// dry-run human output with preview examples (exercises more dry-run printing logic)
 	sendDaemonCommandFn = mockSendDaemonCommand(`{
 		"status":"ok",
@@ -63,6 +70,14 @@ func TestRunScrubHistory(t *testing.T) {
 	// --file= override (exercises the arg building path)
 	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","lines_removed":0}`)
 	RunScrubHistory([]string{"--file=/custom/history", "--mode=delete"})
+
+	// two-token --file VALUE and -f VALUE forms (exercises the exact uncovered
+	// parser branch: case t == "--file" || t == "-f": with value in tail[i+1])
+	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","lines_removed":1,"file":"/tmp/two token"}`)
+	RunScrubHistory([]string{"--file", "/tmp/two token", "--dry-run"})
+
+	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","lines_removed":0}`)
+	RunScrubHistory([]string{"-f", "/tmp/shortform"})
 
 	// spaced path in --file (two-token form and = form). This would have regressed
 	// before the parser fixes (Fields + HasPrefix on the tail would mangle the value
@@ -85,6 +100,12 @@ func TestRunScrubHistory(t *testing.T) {
 	// disabled in human (non-json) path; must not fall through to generic success message
 	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","message":"Pillar 3 (history hygiene) is disabled in config","file":""}`)
 	RunScrubHistory(nil)
+
+	// real run with lines_removed > 0 + mode_used=redact + secrets_found
+	// (exercises the inner "(redact mode; N secret occurrence(s) replaced)"
+	// printf that only lives inside the hasRemoved && removed > 0 branch)
+	sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","lines_removed":5,"file":"/tmp/hist","mode_used":"redact","secrets_found":7}`)
+	RunScrubHistory([]string{"--mode=redact"})
 
 	// --full/--reset and bare --mode (non-=) flag parser branches (previously 0 blocks)
 	RunScrubHistory([]string{"--full"})

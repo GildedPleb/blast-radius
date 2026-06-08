@@ -30,6 +30,7 @@ var (
 	osExecutable        = os.Executable
 	getDaemonLogPathFn  = getDaemonLogPath
 	sendDaemonCommandFn = realSendDaemonCommand
+	runDaemon           = RunDaemon
 	osExit              = os.Exit
 )
 
@@ -72,7 +73,7 @@ func Run(osArgs []string) {
 	// "daemon" is internal-only (launched by start via os/exec).
 	// It is intentionally not documented in help output for end users.
 	case "daemon":
-		RunDaemon()
+		runDaemon()
 	case "env":
 		name := ""
 		unexpected := []string{}

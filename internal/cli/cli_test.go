@@ -108,6 +108,23 @@ func TestRun_Dispatch(t *testing.T) {
 		Run([]string{"config", "foo"})
 	})
 
+	t.Run("empty-args", func(t *testing.T) {
+		Run([]string{})
+	})
+
+	t.Run("daemon-internal", func(t *testing.T) {
+		// We only want to cover the `case "daemon":` line in Run().
+		// The real RunDaemon() is a blocking server; we already overrode
+		// it to a no-op in resetTestOverrides, so this is instant + hermetic.
+		Run([]string{"daemon"})
+	})
+
+	t.Run("env-json-continue", func(t *testing.T) {
+		// hits the `if t == "--json" { continue }` (skips it when building `name`/`unexpected`)
+		Run([]string{"env", "--json"})
+		Run([]string{"env", "--json", "some-pillar"})
+	})
+
 	t.Run("clipboard", func(t *testing.T) {
 		execCommand = func(name string, arg ...string) *exec.Cmd {
 			return exec.Command("true")

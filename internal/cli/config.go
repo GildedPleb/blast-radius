@@ -6,6 +6,13 @@ import (
 	"github.com/GildedPleb/blast-radius/internal/config"
 )
 
+// testOverrides lets tests inject config load results.
+var testOverrides struct {
+	cfg     *config.Config
+	path    string
+	loadErr error
+}
+
 // RunConfig shows the current configuration location and a summary of key settings.
 // It is the "basic config surface" (no subcommands in the current design).
 func RunConfig(args []string) {
