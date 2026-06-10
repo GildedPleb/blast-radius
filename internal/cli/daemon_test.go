@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/daemon"
 )
 
 func TestRunDaemon(t *testing.T) {
@@ -20,7 +21,7 @@ func TestRunDaemon(t *testing.T) {
 	// launch inside d.Run, which could otherwise see a short-lived cfg and panic on nil m.cfg
 	// in async goroutine after test returns).
 	badPath := "/no-permission-blastradius-test-xyz123/deep/socket.sock"
-	config.SocketPathFn = func() string { return badPath }
+	daemon.SocketPathFn = func() string { return badPath }
 
 	cfg := defaultTestConfig()
 	configLoad = func() (*config.Config, string, error) {

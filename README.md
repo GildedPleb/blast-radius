@@ -23,6 +23,8 @@ Or run directly:
 go run ./cmd/blastradius status
 ```
 
+**First run:** The very first time you invoke any `blastradius` command (including bare `blastradius`), it creates an intentionally incomplete starter config at `~/.config/blastradius/config.yaml` (seeded with the pillar documentation + reference example values). The command will then hard-fail with exact "edit this key" guidance until the pillars it depends on contain substantive user values. `blastradius validate` (or `init`) is the full diagnostic / reset (`--reset`) onboarding tool. Simply having the file is never treated as "set up".
+
 ## Developing Locally
 
 The project provides a friendly, self-documenting Makefile.

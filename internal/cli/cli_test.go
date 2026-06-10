@@ -30,105 +30,85 @@ func TestIsHelp(t *testing.T) {
 }
 
 func TestRun_Dispatch(t *testing.T) {
-	resetTestOverrides(t)       // apply test DI overrides (noop osExit etc) immediately
-	defer resetTestOverrides(t) // ensure later tests also start from known state
-	// Silence commented to avoid global stdout swap side-effects in this broad dispatch test.
-	// (Other per-command tests use it safely.)
-	// restore := silenceOutput()
-	// defer restore()
+	resetTestOverrides(t)
+	defer resetTestOverrides(t)
 
-	// Exercise dispatch branches via t.Run so we can see exactly which (if any) causes a test failure.
+	// --- Basic dispatch & error paths ---
 	t.Run("unknown", func(t *testing.T) { Run([]string{"nonesuchcmd"}) })
-	t.Run("check-hash-missing", func(t *testing.T) { Run([]string{"check-hash"}) })
-	t.Run("check-hash-ok", func(t *testing.T) {
+	t.Run("empty-args", func(t *testing.T) { Run([]string{}) })
+	t.Run("daemon-internal", func(t *testing.T) { Run([]string{"daemon"}) })
+
+	t.Run("check-hash", func(t *testing.T) {
+		Run([]string{"check-hash"})
 		Run([]string{"check-hash", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	})
 
+	// --- Commands that need mocked daemon responses ---
 	t.Run("status", func(t *testing.T) {
-		sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","registry":{"tracked_hashes":0},"time":"2026-01-01T00:00:00Z"}`)
+		sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","registry":{"tracked_hashes":0}}`)
 		Run([]string{"status", "--json"})
 		Run([]string{"status"})
 	})
 
 	t.Run("rescan", func(t *testing.T) {
-		// No daemon: explicitly use a failing send so we exercise the "no daemon"
-		// path in RunRescan/parse *without* going through realSendDaemonCommand /
-		// openDaemonConn / real dial + readAuthTokenForSocket. This keeps the
-		// broad unsilenced dispatch test from having extra real-conn side effects
-		// (fd, auth reads, scheduling) that could affect later tests in the package
-		// (e.g. the pipe-based TestRealSendDaemonCommand).
-		prevSend := sendDaemonCommandFn
+		prev := sendDaemonCommandFn
 		sendDaemonCommandFn = func(string) (string, error) { return "", fmt.Errorf("no daemon") }
 		Run([]string{"rescan"})
 		Run([]string{"rescan", "--json"})
-		sendDaemonCommandFn = prevSend
+		sendDaemonCommandFn = prev
 
-		// With rich Pillar 1 response (mocked send)
 		sendDaemonCommandFn = mockSendDaemonCommand(richDaemonResponse)
 		Run([]string{"rescan"})
 		Run([]string{"rescan", "--json"})
 	})
 
-	t.Run("duplicates-crumbs-rescan-status", func(t *testing.T) {
+	t.Run("duplicates-crumbs-status", func(t *testing.T) {
 		sendDaemonCommandFn = mockSendDaemonCommand(richDaemonResponse)
 		Run([]string{"duplicates"})
 		Run([]string{"crumbs"})
 		Run([]string{"crumbs", "--json"})
-		Run([]string{"rescan"})
-		Run([]string{"rescan", "--json"})
 		Run([]string{"status"})
 		Run([]string{"status", "--json"})
 	})
 
-	t.Run("scrub-stop", func(t *testing.T) {
+	// --- Commands that were hitting ValidateReadiness early exit ---
+	// We bypass validation here purely for dispatch coverage.
+	t.Run("crumbs", func(t *testing.T) {
+		defer bypassValidateReadiness(t)()
+		Run([]string{"crumbs"})
+		Run([]string{"crumbs", "--json"})
+	})
+
+	t.Run("scrub-history", func(t *testing.T) {
+		defer bypassValidateReadiness(t)()
 		Run([]string{"scrub-history"})
-		Run([]string{"stop"})
+		Run([]string{"scrub_history"})
 	})
 
-	t.Run("printhelp", func(t *testing.T) { PrintHelp() })
-
-	// Additional dispatch branches for coverage (use mocks to stay fast, no 2s dial timeouts, no real launches)
-	t.Run("logs", func(t *testing.T) {
-		Run([]string{"logs"})
+	t.Run("validate-init", func(t *testing.T) {
+		defer bypassValidateReadiness(t)()
+		Run([]string{"validate"})
+		Run([]string{"init"})
+		Run([]string{"validate", "--reset"})
 	})
 
+	// --- Specific branch coverage (these are worth keeping detailed) ---
 	t.Run("env", func(t *testing.T) {
 		Run([]string{"env"})
 		Run([]string{"env", "default-env"})
 		Run([]string{"env", "nonexistent"})
-	})
-
-	t.Run("env-unexpected-args", func(t *testing.T) {
-		// exercises the "unexpected arguments for env" error path + return in Run
-		Run([]string{"env", "foo", "bar"})
-	})
-
-	t.Run("config", func(t *testing.T) {
-		Run([]string{"config"})
-		Run([]string{"config", "foo"})
-	})
-
-	t.Run("empty-args", func(t *testing.T) {
-		Run([]string{})
-	})
-
-	t.Run("daemon-internal", func(t *testing.T) {
-		// We only want to cover the `case "daemon":` line in Run().
-		// The real RunDaemon() is a blocking server; we already overrode
-		// it to a no-op in resetTestOverrides, so this is instant + hermetic.
-		Run([]string{"daemon"})
-	})
-
-	t.Run("env-json-continue", func(t *testing.T) {
-		// hits the `if t == "--json" { continue }` (skips it when building `name`/`unexpected`)
+		Run([]string{"env", "nonexistent-pillar"})
+		Run([]string{"env", "foo", "bar"}) // unexpected args error path
 		Run([]string{"env", "--json"})
 		Run([]string{"env", "--json", "some-pillar"})
 	})
 
+	t.Run("env-unexpected-args", func(t *testing.T) {
+		Run([]string{"env", "foo", "bar"})
+	})
+
 	t.Run("clipboard", func(t *testing.T) {
-		execCommand = func(name string, arg ...string) *exec.Cmd {
-			return exec.Command("true")
-		}
+		execCommand = func(name string, arg ...string) *exec.Cmd { return exec.Command("true") }
 		sendDaemonCommandFn = mockSendDaemonCommand(`{"known":false}`)
 		Run([]string{"clipboard"})
 		Run([]string{"clipboard", "check"})
@@ -140,24 +120,17 @@ func TestRun_Dispatch(t *testing.T) {
 		tmpHome := t.TempDir()
 		osUserHomeDir = func() (string, error) { return tmpHome, nil }
 		osExecutable = func() (string, error) { return "/tmp/fake-br", nil }
-		execCommand = func(name string, arg ...string) *exec.Cmd {
-			return exec.Command("true")
-		}
-		getDaemonLogPathFn = func() string {
-			return filepath.Join(tmpHome, "daemon.log")
-		}
+		execCommand = func(name string, arg ...string) *exec.Cmd { return exec.Command("true") }
+		getDaemonLogPathFn = func() string { return filepath.Join(tmpHome, "daemon.log") }
 		Run([]string{"start"})
 	})
 
-	// Extra start error paths for background launch coverage
 	t.Run("start-errors", func(t *testing.T) {
-		// osExecutable fails
 		osExecutable = func() (string, error) { return "", errForTest }
 		Run([]string{"start"})
 
-		// executable ok, but getDaemonLogPathFn returns uncreatable path
 		osExecutable = func() (string, error) { return "/tmp/fake-br", nil }
-		getDaemonLogPathFn = func() string { return "/nonexistent/deep/dir/that/cannot/be/created/daemon.log" }
+		getDaemonLogPathFn = func() string { return "/nonexistent/deep/dir/daemon.log" }
 		Run([]string{"start"})
 	})
 
@@ -165,14 +138,38 @@ func TestRun_Dispatch(t *testing.T) {
 		sendDaemonCommandFn = mockSendDaemonCommand(`{"status":"ok","total":0}`)
 		Run([]string{"crumbs"})
 		Run([]string{"crumbs", "--json"})
-
 		sendDaemonCommandFn = mockSendDaemonCommand(`not json`)
 		Run([]string{"crumbs"})
 	})
 
-	t.Run("env-extra", func(t *testing.T) {
-		// unknown pillar command via dispatcher (Pillar 4 primitive)
-		Run([]string{"env", "nonexistent-pillar"})
+	// --- First-touch + ValidateReadiness error paths ---
+	t.Run("first-touch-created", func(t *testing.T) {
+		prev := ensureConfig
+		ensureConfig = func() (string, bool, error) { return "/tmp/br-created.toml", true, nil }
+		Run([]string{"status"})
+		ensureConfig = prev
+	})
+
+	t.Run("validate-readiness-fails", func(t *testing.T) {
+		prev := validateReadiness
+		validateReadiness = func(string, *config.Config) error {
+			return fmt.Errorf("readiness check failed for testing")
+		}
+		Run([]string{"status"})
+		validateReadiness = prev
+	})
+
+	t.Run("logs-config-printhelp", func(t *testing.T) {
+		Run([]string{"logs"})
+		Run([]string{"config"})
+		Run([]string{"config", "foo"})
+		PrintHelp()
+	})
+
+	t.Run("stop-halt", func(t *testing.T) {
+		defer bypassValidateReadiness(t)()
+		Run([]string{"stop"})
+		Run([]string{"halt"})
 	})
 }
 

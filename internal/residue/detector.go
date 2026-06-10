@@ -146,7 +146,7 @@ func ScanFile(path string, reg *registry.Registry) (*ResidueFinding, error) {
 	// attacker model) rather than complicating with O_NOFOLLOW (portability) or
 	// extra fstat-after-open checks. P1 has an analogous (walk decision vs. later
 	// Open in collectHashesFromFile) window. Documented in CURRENT_STATE.md and
-	// config.example.yaml.
+	// internal/config/config.example.yaml.
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err

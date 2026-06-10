@@ -336,7 +336,7 @@ func TestRunScan_P1AuthorityStillWins_WithExplicitFilesPattern(t *testing.T) {
 }
 
 func TestRunScan_SurgicalResidueHunting_Example(t *testing.T) {
-	// This test mirrors the recommended pattern in config.example.yaml:
+	// This test mirrors the recommended pattern in internal/config/config.example.yaml:
 	// Instead of "**/*" on Downloads, only hunt for known dangerous residue patterns.
 	dir := t.TempDir()
 

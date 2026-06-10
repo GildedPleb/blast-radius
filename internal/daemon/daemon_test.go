@@ -135,9 +135,9 @@ func TestDaemon_Run_Errors(t *testing.T) {
 	t.Run("logging_init_fails", func(t *testing.T) {
 		tmp := t.TempDir()
 		sock := filepath.Join(tmp, "b.sock")
-		origSocket := config.SocketPathFn
-		config.SocketPathFn = func() string { return sock }
-		defer func() { config.SocketPathFn = origSocket }()
+		origSocket := SocketPathFn
+		SocketPathFn = func() string { return sock }
+		defer func() { SocketPathFn = origSocket }()
 
 		origLogPath := getDaemonLogPathFn
 		getDaemonLogPathFn = func() string { return filepath.Join(tmp, "log") }
@@ -157,9 +157,9 @@ func TestDaemon_Run_Errors(t *testing.T) {
 	t.Run("os_remove_stale_returns_non_notexist_err", func(t *testing.T) {
 		tmp := t.TempDir()
 		sock := filepath.Join(tmp, "s.sock")
-		origSocket := config.SocketPathFn
-		config.SocketPathFn = func() string { return sock }
-		defer func() { config.SocketPathFn = origSocket }()
+		origSocket := SocketPathFn
+		SocketPathFn = func() string { return sock }
+		defer func() { SocketPathFn = origSocket }()
 
 		origLogPath := getDaemonLogPathFn
 		getDaemonLogPathFn = func() string { return filepath.Join(tmp, "log") }
@@ -179,9 +179,9 @@ func TestDaemon_Run_Errors(t *testing.T) {
 	t.Run("os_mkdirall_fails", func(t *testing.T) {
 		tmp := t.TempDir()
 		sock := filepath.Join(tmp, "d.sock")
-		origSocket := config.SocketPathFn
-		config.SocketPathFn = func() string { return sock }
-		defer func() { config.SocketPathFn = origSocket }()
+		origSocket := SocketPathFn
+		SocketPathFn = func() string { return sock }
+		defer func() { SocketPathFn = origSocket }()
 
 		origLogPath := getDaemonLogPathFn
 		getDaemonLogPathFn = func() string { return filepath.Join(tmp, "log") }
@@ -201,9 +201,9 @@ func TestDaemon_Run_Errors(t *testing.T) {
 	t.Run("net_listen_fails", func(t *testing.T) {
 		tmp := t.TempDir()
 		sock := filepath.Join(tmp, "l.sock")
-		origSocket := config.SocketPathFn
-		config.SocketPathFn = func() string { return sock }
-		defer func() { config.SocketPathFn = origSocket }()
+		origSocket := SocketPathFn
+		SocketPathFn = func() string { return sock }
+		defer func() { SocketPathFn = origSocket }()
 
 		origLogPath := getDaemonLogPathFn
 		getDaemonLogPathFn = func() string { return filepath.Join(tmp, "log") }
@@ -223,9 +223,9 @@ func TestDaemon_Run_Errors(t *testing.T) {
 	t.Run("os_chmod_fails_after_listen", func(t *testing.T) {
 		tmp := t.TempDir()
 		sock := filepath.Join(tmp, "c.sock")
-		origSocket := config.SocketPathFn
-		config.SocketPathFn = func() string { return sock }
-		defer func() { config.SocketPathFn = origSocket }()
+		origSocket := SocketPathFn
+		SocketPathFn = func() string { return sock }
+		defer func() { SocketPathFn = origSocket }()
 
 		origLogPath := getDaemonLogPathFn
 		getDaemonLogPathFn = func() string { return filepath.Join(tmp, "log") }
@@ -253,9 +253,9 @@ func TestDaemon_Run_Errors(t *testing.T) {
 	t.Run("rand_read_fails_after_listen", func(t *testing.T) {
 		tmp := t.TempDir()
 		sock := filepath.Join(tmp, "r.sock")
-		origSocket := config.SocketPathFn
-		config.SocketPathFn = func() string { return sock }
-		defer func() { config.SocketPathFn = origSocket }()
+		origSocket := SocketPathFn
+		SocketPathFn = func() string { return sock }
+		defer func() { SocketPathFn = origSocket }()
 
 		origLogPath := getDaemonLogPathFn
 		getDaemonLogPathFn = func() string { return filepath.Join(tmp, "log") }
@@ -287,9 +287,9 @@ func TestDaemon_Run_Errors(t *testing.T) {
 	t.Run("write_auth_token_fails", func(t *testing.T) {
 		tmp := t.TempDir()
 		sock := filepath.Join(tmp, "w.sock")
-		origSocket := config.SocketPathFn
-		config.SocketPathFn = func() string { return sock }
-		defer func() { config.SocketPathFn = origSocket }()
+		origSocket := SocketPathFn
+		SocketPathFn = func() string { return sock }
+		defer func() { SocketPathFn = origSocket }()
 
 		origLogPath := getDaemonLogPathFn
 		getDaemonLogPathFn = func() string { return filepath.Join(tmp, "log") }
@@ -327,9 +327,9 @@ func TestDaemon_Run_SignalShutdown(t *testing.T) {
 	tmp := t.TempDir()
 	sock := filepath.Join(tmp, "signal.sock")
 
-	origSocket := config.SocketPathFn
-	config.SocketPathFn = func() string { return sock }
-	defer func() { config.SocketPathFn = origSocket }()
+	origSocket := SocketPathFn
+	SocketPathFn = func() string { return sock }
+	defer func() { SocketPathFn = origSocket }()
 
 	origLogPath := getDaemonLogPathFn
 	getDaemonLogPathFn = func() string { return filepath.Join(tmp, "daemon.log") }
@@ -1015,9 +1015,9 @@ func TestDaemon_Run_Success(t *testing.T) {
 	}
 
 	// Hermetic paths
-	origSocket := config.SocketPathFn
-	config.SocketPathFn = func() string { return sock }
-	defer func() { config.SocketPathFn = origSocket }()
+	origSocket := SocketPathFn
+	SocketPathFn = func() string { return sock }
+	defer func() { SocketPathFn = origSocket }()
 
 	origLogPath := getDaemonLogPathFn
 	getDaemonLogPathFn = func() string { return filepath.Join(tmp, "daemon.log") }
@@ -1079,7 +1079,8 @@ func TestDaemon_Run_Success(t *testing.T) {
 		env.Options["skip_dirs"] = []string{}
 		cfg.Pillar1.Sources["env"] = env
 	}
-	cfg.Pillar5.MonitorEnabled = true // ensure monitor go is started
+	cfg.Pillar5.Enabled = true
+	cfg.Pillar5.MonitorEnabled = true // ensure monitor go is started (both conditions required)
 
 	d := New(cfg, registry.New())
 

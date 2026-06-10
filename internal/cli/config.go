@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/daemon"
 )
 
 // testOverrides lets tests inject config load results.
@@ -33,7 +34,7 @@ func RunConfig(args []string) {
 		pathToPrint = "(test override)"
 	}
 	fmt.Printf("Config: %s\n", pathToPrint)
-	fmt.Printf("Socket: %s\n", config.SocketPath())
+	fmt.Printf("Socket: %s\n", daemon.SocketPath())
 
 	envOpts := cfg.GetEnvOptions()
 	if len(envOpts.ProjectRoots) > 0 {
@@ -56,5 +57,5 @@ func RunConfig(args []string) {
 
 	fmt.Println()
 	fmt.Println("Edit the YAML file and restart the daemon for most changes to take effect.")
-	fmt.Println("See config.example.yaml and docs/pillars/idiomatic_pillars.md for full documentation.")
+	fmt.Println("See internal/config/config.example.yaml and docs/pillars/idiomatic_pillars.md for full documentation.")
 }

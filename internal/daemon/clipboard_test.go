@@ -27,6 +27,8 @@ func newTestDaemon(t *testing.T) *Daemon {
 	return &Daemon{
 		cfg: &config.Config{
 			Pillar5: config.Pillar5Config{
+				Enabled:                 true, // enable the pillar so monitor/scan logic runs in tests
+				MonitorEnabled:          true,
 				RedactPlaceholder:       "[REDACTED]",
 				RedactTimeoutSeconds:    0,
 				FullClearTimeoutSeconds: 0,
@@ -435,7 +437,10 @@ func TestDaemon_RunClipboardMonitor_NonDarwinEarlyReturn(t *testing.T) {
 
 	d := &Daemon{
 		cfg: &config.Config{
-			Pillar5: config.Pillar5Config{MonitorEnabled: true},
+			Pillar5: config.Pillar5Config{
+				Enabled:        true,
+				MonitorEnabled: true,
+			},
 		},
 		shutdown: make(chan struct{}),
 	}
@@ -500,7 +505,12 @@ func TestDaemon_RunClipboardMonitor_PbpasteErrInTick(t *testing.T) {
 	overridePbpaste(t, func() ([]byte, error) { return nil, fmt.Errorf("pbpaste temp fail") })
 
 	d := &Daemon{
-		cfg:      &config.Config{},
+		cfg: &config.Config{
+			Pillar5: config.Pillar5Config{
+				Enabled:        true,
+				MonitorEnabled: true,
+			},
+		},
 		shutdown: make(chan struct{}),
 	}
 
@@ -530,7 +540,12 @@ func TestPillar5RunClipboardMonitorResetsPbpasteErrLogOnSuccess(t *testing.T) {
 	overridePbpaste(t, func() ([]byte, error) { return []byte("clean content"), nil })
 
 	d := &Daemon{
-		cfg:      &config.Config{},
+		cfg: &config.Config{
+			Pillar5: config.Pillar5Config{
+				Enabled:        true, // master flag must be on for background monitoring to occur
+				MonitorEnabled: true,
+			},
+		},
 		shutdown: make(chan struct{}),
 	}
 	d.lastPbpasteErrLog = time.Now()
@@ -565,6 +580,34 @@ func TestDaemon_RunClipboardMonitor_CfgNilEarlyReturn(t *testing.T) {
 	d.runClipboardMonitor()
 	if called {
 		t.Error("newMonitorTicker should not be called when cfg == nil")
+	}
+}
+
+// TestDaemon_RunClipboardMonitor_Pillar5DisabledEarlyReturn confirms that the
+// master pillar5.enabled flag (when false) completely prevents the background
+// copy-paste monitor from doing any polling or ticker work. This is the
+// explicit "do not let the daemon read my clipboard" control.
+func TestDaemon_RunClipboardMonitor_Pillar5DisabledEarlyReturn(t *testing.T) {
+	called := false
+	origNew := newMonitorTicker
+	newMonitorTicker = func(time.Duration) monitorTicker {
+		called = true
+		return &fakeTicker{ch: make(chan time.Time)}
+	}
+	defer func() { newMonitorTicker = origNew }()
+
+	d := &Daemon{
+		cfg: &config.Config{
+			Pillar5: config.Pillar5Config{
+				Enabled:        false, // the flag under test
+				MonitorEnabled: true,  // even if this is true, the pillar master wins
+			},
+		},
+		shutdown: make(chan struct{}),
+	}
+	d.runClipboardMonitor()
+	if called {
+		t.Error("newMonitorTicker must not be called when pillar5.enabled=false")
 	}
 }
 

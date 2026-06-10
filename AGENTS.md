@@ -2,13 +2,13 @@
 
 This document captures how to work effectively on Blast Radius. It is the first thing to read when joining or when an agent starts a task.
 
-**Project is alpha software.** No releases, no RCs, no external user base. Interfaces and behavior can still evolve. Present and document the software as it is *today* only.
+**Project is alpha software.** No releases, no RCs, no external user base. Interfaces and behavior can still evolve. Present and document the software as it is _today_ only.
 
 ## Core Presentation Rule (Non-Negotiable)
 
 **Never reference previous versions of the software, removed features, development phases, "2026 hardenings", "v1 complete + stages remain", legacy shims for compat, or retired plans in user-facing documentation, README, config comments, code comments that users or future agents will read, help text, or status output.**
 
-- Justify *current* design choices on their current merits (e.g., "The socket path is a hard-coded security invariant... to minimize attack surface"; "fsnotify reactivity is permanently out of scope because attack surface + complexity outweigh benefits. Manual `rescan` + startup discovery is the supported mechanism.").
+- Justify _current_ design choices on their current merits (e.g., "The socket path is a hard-coded security invariant... to minimize attack surface"; "fsnotify reactivity is permanently out of scope because attack surface + complexity outweigh benefits. Manual `rescan` + startup discovery is the supported mechanism.").
 - When editing docs or comments, ask: "Would this sentence make sense to someone who cloned the repo in 2027 with no knowledge of our history?"
 - Historical notes belong only in git history or private plan session notes (never committed to main docs/comments).
 
@@ -37,11 +37,11 @@ Everything else (duplicates, rescan, status, Zsh HUD) supports these pillars. Th
 7. Safe degradation on failure (clear status, never silent bad behavior).
 8. Respects ignore patterns + .gitignore + .blastradiusignore.
 9. **Pillar 4 / pillar4.commands** are **always** executed via direct `exec` (never `sh -c` or a shell). If you need pipes/complex logic, point at a wrapper script you control.
-10. **Pillar 1 has authority over Pillar 2** (Classifier enforces; documented loudly in config.example.yaml and code).
+10. **Pillar 1 has authority over Pillar 2** (Classifier enforces; documented loudly in internal/config/config.example.yaml and code).
 
 Violating any of these is a bug. Tests and reviews must check them.
 
-See `internal/config/config.go` (and normalize.go), `internal/daemon/{daemon,clipboard}.go` (AUTH + token + P5 monitor), `internal/cli/env.go`, `internal/policy/classifier.go`, and `config.example.yaml` for the implementations and loud comments.
+See `internal/config/config.go` (and normalize.go), `internal/daemon/{daemon,clipboard}.go` (AUTH + token + P5 monitor), `internal/cli/env.go`, `internal/policy/classifier.go`, and `internal/config/config.example.yaml` for the implementations and loud comments.
 
 ## Building, Testing, Developing
 
@@ -59,7 +59,7 @@ Common commands:
 - `make test-cover` — **strict CI gate**: per-package + 80% avg + 5s wall-time hard limit (forces `-j4` automatically via Makefile). Must pass.
 - `make check` — local safety gate: test + vet + fmt + test-cover.
 - `make check-fix` — same but with `fmt-fix` first.
-- `make clean` — removes all artifacts (binaries, coverage*.out, .coverage-failed, test binaries, go caches, etc.). All live in project root.
+- `make clean` — removes all artifacts (binaries, coverage\*.out, .coverage-failed, test binaries, go caches, etc.). All live in project root.
 - `make fmt`, `make fmt-fix`, `make vet`, `make tidy`, `make loc`.
 
 Raw Go still works:
@@ -78,17 +78,17 @@ All artifacts are cleaned by `make clean`. Never leave `.coverage-failed` or str
 ## Test Rules (Strict — Especially for Daemon)
 
 - Every test run uses `-timeout=5s` (suite level) or per-package limits.
-- **Daemon tests (internal/daemon/*_test.go and cross-package that exercise Run/HandleConnection):** NO SLEEPS, no real `time.Ticker`, no background `Run()` loops that can block, no real listeners with timeouts. Use `net.Pipe()` for handleConnection tests. Use the provided test seams/hooks (`pbpasteFunc`/`pbcopyFunc`, `osascriptFunc`, `afplayFunc`, `configLoad` overrides, `GetDaemonLogPathFnForTesting`, etc.). See the comment block in `internal/daemon/daemon_test.go:401` (and surrounding) and the var blocks in `daemon/*.go` (core hooks in daemon.go; P5 clipboard seams in clipboard.go) for the contract. These rules exist so `make test-cover` can stay under the 5s wall-time invariant even under `-j`.
+- **Daemon tests (internal/daemon/\*\_test.go and cross-package that exercise Run/HandleConnection):** NO SLEEPS, no real `time.Ticker`, no background `Run()` loops that can block, no real listeners with timeouts. Use `net.Pipe()` for handleConnection tests. Use the provided test seams/hooks (`pbpasteFunc`/`pbcopyFunc`, `osascriptFunc`, `afplayFunc`, `configLoad` overrides, `GetDaemonLogPathFnForTesting`, etc.). See the comment block in `internal/daemon/daemon_test.go:401` (and surrounding) and the var blocks in `daemon/*.go` (core hooks in daemon.go; P5 clipboard seams in clipboard.go) for the contract. These rules exist so `make test-cover` can stay under the 5s wall-time invariant even under `-j`.
 - CLI tests use `silenceOutput()`, `resetTestOverrides()`, `configLoad` / `sendDaemonCommandFn` / `execCommand` overrides (see `internal/cli/testhelpers_test.go` and `cli_test.go`).
 - Sources (Bitwarden) use `execBw` hook.
 - Hermeticity: never touch real `~/.config/blastradius` or `~/.local/state/blastradius` in tests. Force temp paths via hooks.
 - If a test is slow or flaky, it is a bug. Fix the test or the seam, do not increase timeouts.
 
-When adding a new package: add it to Makefile PACKAGES + PKG_* map, add a test file, ensure it participates in cover gate.
+When adding a new package: add it to Makefile PACKAGES + PKG\_\* map, add a test file, ensure it participates in cover gate.
 
 ## Documentation & Config Rules
 
-- Primary user docs: [README.md](README.md), [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) (current architecture snapshot), [docs/pillars/idiomatic_pillars.md](docs/pillars/idiomatic_pillars.md) (framing), [config.example.yaml](config.example.yaml) (loud, example-rich comments are part of the UX).
+- Primary user docs: [README.md](README.md), [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) (current architecture snapshot), [docs/pillars/idiomatic_pillars.md](docs/pillars/idiomatic_pillars.md) (framing), [config.example.yaml](internal/config/config.example.yaml) (loud, example-rich comments are part of the UX).
 - `status --json` is the stable machine-readable interface (Zsh and anything else should parse it).
 - `blastradius` (no args) and `blastradius help` go through `internal/cli/help.go:PrintHelp` (shows partial live config + commands).
 - `blastradius config` must show configuration (see its implementation).
@@ -157,6 +157,6 @@ A clean `git status` + green gates + the above greps + a newcomer can understand
 - No editor/AI prompt integration, no true OS clipboard events (polling pragmatic for alpha), no in-memory P3 cache (receipts provide durability; invalidation was judged too hard).
 - License: TBD (active development).
 
-When in doubt, make the change that makes the *current* software clearer and more self-documenting without adding historical baggage.
+When in doubt, make the change that makes the _current_ software clearer and more self-documenting without adding historical baggage.
 
 Update this file when project conventions change (e.g., new hard invariant, new test rule, new doc location).

@@ -38,6 +38,7 @@ func PrintHelp() {
 	fmt.Println("  clipboard            Pillar 5: status|check|clear|nuke|scrub|redact (macOS primitives + monitor-backed alerts + two-tier auto)")
 	fmt.Println("  crumbs               Pillar 2: locate forgotten vault exports & high-entropy dumps in high-risk dirs")
 	fmt.Println("  config               Show configuration")
+	fmt.Println("  validate [--reset]   Full config diagnosis + first-run onboarding / reset tool (runs all readiness checks)")
 	fmt.Println("  help                 Show this help message")
 	fmt.Println()
 	fmt.Println("Examples:")

@@ -1,20 +1,22 @@
 package config
 
 import (
+	"embed"
 	"os"
-	"path/filepath"
-
-	"gopkg.in/yaml.v3"
 )
 
-// Test hooks for improved testability (consistent with cli and daemon packages).
-var (
-	userHomeDir = os.UserHomeDir
-	osReadFile  = os.ReadFile
-	osWriteFile = os.WriteFile
-	osMkdirAll  = os.MkdirAll
-	yamlMarshal = yaml.Marshal
-)
+//go:embed config.example.yaml
+var configExampleFS embed.FS
+
+// initialConfigTemplate returns the exact content of config.example.yaml.
+//
+// We deliberately ignore the error from ReadFile. The file is embedded at
+// compile time via //go:embed. If it is missing, the build fails before this
+// code can ever run. There is no meaningful runtime error path to handle or test.
+func initialConfigTemplate() []byte {
+	data, _ := configExampleFS.ReadFile("config.example.yaml")
+	return data
+}
 
 // Config holds user configuration. It must NEVER contain secrets or discovered hashes.
 //
@@ -80,7 +82,7 @@ type RuntimeCommand struct {
 // files[] patterns that make sense for the kind of residue or exports that
 // actually appear in that location.
 //
-// See config.example.yaml for realistic examples (including /tmp, ~/tmp,
+// See internal/config/config.example.yaml for realistic examples (including /tmp, ~/tmp,
 // ~/Library/Logs, project trees, etc.).
 //
 // P1 authority rule (enforced by internal/policy.Classifier, not here):
@@ -107,7 +109,14 @@ type Pillar2Config struct {
 
 // Pillar4Config groups the commands available to the Pillar 4 primitive
 // function call (`blastradius env [name]` / RunEnvCheck).
+//
+// The top-level `enabled` field is the pillar-wide opt-in (consistent with
+// Pillar 2, 3, and now 5). Even if commands are listed, the primitive and
+// related validation will treat the pillar as inactive until enabled: true
+// is set. This gives users an explicit way to disable the `env` primitive
+// entirely.
 type Pillar4Config struct {
+	Enabled  bool             `yaml:"enabled"`
 	Commands []RuntimeCommand `yaml:"commands,omitempty"`
 }
 
@@ -116,6 +125,12 @@ type Pillar4Config struct {
 // and (when MonitorEnabled) the optional reactive background monitor providing
 // fast first-secret alerting plus two-tier auto (redact after timeout, then full
 // clear after a further or independent timeout).
+//
+// The top-level `enabled` field is the pillar-wide opt-in switch (consistent
+// convention across pillars). When false, the background monitor will not run
+// and validation for `blastradius clipboard` commands will guide the user to
+// enable it. This is the explicit control if you do not want the daemon (or
+// CLI paths) touching/reading your clipboard contents at all.
 //
 // RedactTimeoutSeconds: after a secret is detected and the clipboard content
 // remains stable, automatically redact known secrets (P3-style placeholder
@@ -130,6 +145,8 @@ type Pillar4Config struct {
 // Defaults to "[REDACTED]". Can be set independently of pillar3 for clipboard
 // hygiene preferences.
 type Pillar5Config struct {
+	Enabled bool `yaml:"enabled"`
+
 	RedactTimeoutSeconds    int `yaml:"redact_timeout_seconds,omitempty"`
 	FullClearTimeoutSeconds int `yaml:"full_clear_timeout_seconds,omitempty"`
 
@@ -141,6 +158,7 @@ type Pillar5Config struct {
 	// Monitor controls the background watcher that enables reactive alerts
 	// and the two-tier auto actions. When false the explicit primitives
 	// (check, scrub, redact, clear) still work via `blastradius clipboard` commands.
+	// The pillar-level Enabled above is the master switch for the whole feature.
 	MonitorEnabled bool `yaml:"monitor_enabled,omitempty"`
 
 	// AlertsEnabled controls whether the monitor fires user-visible alerts
@@ -212,8 +230,9 @@ type BitwardenOptions struct {
 
 // DefaultConfig returns a safe default configuration.
 //
-// All defaults live under the pillarN: sections (single source of truth). The
-// supported shape is the pillar-organized structure shown in config.example.yaml.
+// All defaults live under the pillarN: sections. The supported shape matches
+// config.example.yaml. Universal safe lists are defined in defaults.go so they
+// stay in sync between DefaultConfig() and other consumers.
 func DefaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 
@@ -224,30 +243,10 @@ func DefaultConfig() *Config {
 				"env": {
 					Enabled: true,
 					Options: map[string]any{
-						"project_roots": []string{home},
-						"skip_dirs": []string{
-							"node_modules",
-							".git",
-							"vendor",
-							"dist",
-							"build",
-							".next",
-							"target",
-							"out",
-							".cache",
-							"coverage",
-							".venv",
-							"__pycache__",
-						},
-						"ignore_files": []string{".gitignore", ".blastradiusignore"},
-						"ignore_patterns": []string{
-							"PATH", "HOME", "PWD", "USER", "SHELL", "TERM",
-							"LANG", "LC_*", "EDITOR", "VISUAL", "PAGER",
-							"COLORTERM", "DISPLAY", "XDG_*",
-							"DBUS_*", "DESKTOP_SESSION", "GNOME_*", "KDE_*",
-							"SSH_*", "GPG_*", "LESS*", "MORE",
-							"PS1", "PS2", "PROMPT*", "HIST*", "HISTSIZE",
-						},
+						"project_roots":   []string{home},
+						"skip_dirs":       DefaultSkipDirs,
+						"ignore_files":    DefaultIgnoreFiles,
+						"ignore_patterns": DefaultIgnorePatterns,
 					},
 				},
 				"bitwarden": {
@@ -258,80 +257,30 @@ func DefaultConfig() *Config {
 		},
 		Pillar2: Pillar2Config{
 			Enabled: false,
-			// Default surfaces (new dirs[] shape only)
-			Dirs: []Pillar2Dir{
-				{Path: "~/Downloads", Files: []string{"**/*"}},
-				{Path: "~/Documents", Files: []string{"**/*"}},
-				{Path: "~/Desktop", Files: []string{"**/*"}},
-			},
+			Dirs:    DefaultPillar2Dirs,
 		},
 		Pillar3: Pillar3Config{
-			Enabled:           true,
+			Enabled:           false,
 			Mode:              "delete",
 			RedactPlaceholder: "[REDACTED]",
 			HistoryFiles:      nil,
-			HistoryRoots:      nil, // discovery treats nil/empty as "use $HOME only"
+			HistoryRoots:      nil,
 		},
 		Pillar4: Pillar4Config{
+			Enabled: false,
 			Commands: []RuntimeCommand{
 				{Name: "default-env", Cmd: "printenv", Enabled: true},
 			},
 		},
 		Pillar5: Pillar5Config{
+			Enabled:                 false,
 			RedactTimeoutSeconds:    30,
 			FullClearTimeoutSeconds: 60,
 			RedactPlaceholder:       "[REDACTED]",
-			MonitorEnabled:          true,
-			AlertsEnabled:           true,
+			MonitorEnabled:          false,
+			AlertsEnabled:           false,
 		},
 	}
-}
-
-// Load reads configuration from the standard location.
-// If the file does not exist, returns defaults.
-// It also returns the path it attempted to load from.
-func Load() (cfg *Config, configPath string, err error) {
-	cfg = DefaultConfig()
-
-	home, err := userHomeDir()
-	if err != nil {
-		return cfg, "", nil
-	}
-
-	configPath = filepath.Join(home, ".config", "blastradius", "config.yaml")
-
-	data, err := osReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return cfg, configPath, nil
-		}
-		return nil, configPath, err
-	}
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, configPath, err
-	}
-
-	// Pillar 2 — fill sensible defaults if the user only partially populated the block.
-	if !cfg.Pillar2.Enabled && len(cfg.Pillar2.Dirs) == 0 {
-		def := DefaultConfig().Pillar2
-		cfg.Pillar2.Dirs = def.Dirs
-	}
-
-	// Pillar 3 (History Hygiene) — ensure mode and placeholder have sensible values
-	// even if the user only partially populates the pillar3 block.
-	normalizePillar3(cfg)
-
-	// Pillar 1 logical sources: ensure the map exists and both known v1 sources
-	// have entries. This gives collectors a stable place to look for options
-	// (especially ignore_patterns) even when the user only partially configured.
-	normalizePillar1Sources(cfg)
-
-	// Pillar 5 (Clipboard Hygiene) — ensure two-tier timeouts and redact_placeholder
-	// have sensible defaults even on partial user config.
-	normalizePillar5(cfg)
-
-	return cfg, configPath, nil
 }
 
 // See normalize.go for the normalization helpers and EffectiveRedactPlaceholder.
@@ -414,56 +363,4 @@ func (c *Config) GetEnvOptions() EnvOptions {
 	}
 
 	return opts
-}
-
-// Save writes the configuration (for future use).
-func (c *Config) Save() error {
-	home, err := userHomeDir()
-	if err != nil {
-		return err
-	}
-
-	dir := filepath.Join(home, ".config", "blastradius")
-	if err := osMkdirAll(dir, 0700); err != nil {
-		return err
-	}
-
-	path := filepath.Join(dir, "config.yaml")
-
-	data, err := yamlMarshal(c)
-	if err != nil {
-		return err
-	}
-
-	return osWriteFile(path, data, 0600)
-}
-
-// --- Hard-coded socket path (security invariant) ---
-
-const socketFileName = "blastradius.sock"
-
-// SocketPathFn is the function used to resolve the socket path.
-// It is overridable by tests for hermetic per-test socket locations.
-// Production code should call SocketPath() instead of using this directly.
-var SocketPathFn = defaultSocketPath
-
-// defaultSocketPath returns the canonical secure location under the user's
-// XDG state directory. This path is a hard security invariant for production.
-func defaultSocketPath() string {
-	home, err := userHomeDir()
-	if err != nil || home == "" {
-		// Extremely rare fallback. In practice this should never be hit.
-		return "/tmp/blastradius.sock"
-	}
-	return filepath.Join(home, ".local", "state", "blastradius", socketFileName)
-}
-
-// SocketPath returns the location of the Unix domain socket used for
-// daemon <-> CLI communication.
-//
-// This is intentionally not configurable by users. The path is a hard
-// security invariant (private directory + strict permissions + capability token).
-// Allowing overrides would re-introduce the attack surface we worked to eliminate.
-func SocketPath() string {
-	return SocketPathFn()
 }

@@ -32,6 +32,11 @@ var (
 	sendDaemonCommandFn = realSendDaemonCommand
 	runDaemon           = RunDaemon
 	osExit              = os.Exit
+
+	// ensureConfig is overridable for tests. Production calls the real
+	// config.EnsureConfigFile (first-touch template creation).
+	ensureConfig      = config.EnsureConfigFile
+	validateReadiness = config.ValidateReadiness
 )
 
 // Run is the single coordinator entrypoint for all CLI commands. It owns
@@ -43,12 +48,35 @@ var (
 // subcommand used for detached lifecycle management).
 func Run(osArgs []string) {
 	if len(osArgs) == 0 {
+		// Bare invocation still participates in first-touch creation (frictionless)
+		// but is intentionally lenient for the readiness gate (help is always safe).
+		_, _, _ = ensureConfig()
 		PrintHelp()
 		return
 	}
 
 	cmd := osArgs[0]
 	tail := osArgs[1:]
+
+	// First-touch creation (writes the intentionally incomplete template with
+	// virgin example data values exactly once). The triggering command then
+	// runs the contextual ValidateReadiness gate below.
+	if p, created, cerr := ensureConfig(); cerr == nil && created {
+		fmt.Printf("Created initial config template at %s\n", p)
+	}
+
+	// Contextual hard validation for every command.
+	// ValidateReadiness is deliberately shallow (data equality against the
+	// known virgin emitted values for the pillars this cmd needs) and already
+	// returns nil for lenient commands (help, config, logs, etc.).
+	// Instructional comments / banner text in the file have no effect.
+	if cfg, _, lerr := configLoad(); lerr == nil {
+		if verr := validateReadiness(cmd, cfg); verr != nil {
+			fmt.Fprintln(os.Stderr, verr.Error())
+			osExit(1)
+			return
+		}
+	}
 
 	switch cmd {
 	case "start":
@@ -102,6 +130,8 @@ func Run(osArgs []string) {
 	case "rescan":
 		jsonOutput := len(tail) > 0 && tail[0] == "--json"
 		RunRescan(jsonOutput)
+	case "validate", "init":
+		RunValidate(tail)
 	default:
 		fmt.Printf("Unknown command: %s\n\n", cmd)
 		PrintHelp()

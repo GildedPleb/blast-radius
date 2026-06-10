@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/daemon"
 )
 
 func TestRunEnvCheck(t *testing.T) {
@@ -39,7 +40,10 @@ func TestRunEnvCheck(t *testing.T) {
 
 	// valid pillar cmd + exec success + dial fail (override dial to be instant, no 2s timeout)
 	cfgWithCmd := defaultTestConfig()
-	cfgWithCmd.Pillar4.Commands = []config.RuntimeCommand{{Name: "default-env", Cmd: "printenv"}}
+	cfgWithCmd.Pillar4 = config.Pillar4Config{
+		Enabled:  true,
+		Commands: []config.RuntimeCommand{{Name: "default-env", Cmd: "printenv"}},
+	}
 	configLoad = func() (*config.Config, string, error) { return &cfgWithCmd, "/tmp/c", nil }
 	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) { return nil, errForTest }
 	execCommand = func(name string, arg ...string) *exec.Cmd { return exec.Command("true") }
@@ -68,7 +72,10 @@ func TestRunEnvCheck_HappyPath(t *testing.T) {
 	}
 
 	cfg := defaultTestConfig()
-	cfg.Pillar4.Commands = []config.RuntimeCommand{{Name: "default-env", Cmd: "printenv"}}
+	cfg.Pillar4 = config.Pillar4Config{
+		Enabled:  true,
+		Commands: []config.RuntimeCommand{{Name: "default-env", Cmd: "printenv"}},
+	}
 	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
 
 	// Use a pipe so we can simulate the daemon's CHECK_HASH responses
@@ -132,8 +139,11 @@ func TestRunEnvCheck_DirectExec(t *testing.T) {
 	}
 
 	cfg := defaultTestConfig()
-	cfg.Pillar4.Commands = []config.RuntimeCommand{
-		{Name: "direct-echo", Cmd: "echo hello world"},
+	cfg.Pillar4 = config.Pillar4Config{
+		Enabled: true,
+		Commands: []config.RuntimeCommand{
+			{Name: "direct-echo", Cmd: "echo hello world"},
+		},
 	}
 	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
 	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) { return nil, errForTest }
@@ -160,7 +170,10 @@ func TestRunEnvCheck_NoCandidates(t *testing.T) {
 	}
 
 	cfg := defaultTestConfig()
-	cfg.Pillar4.Commands = []config.RuntimeCommand{{Name: "no-secrets", Cmd: "printenv"}}
+	cfg.Pillar4 = config.Pillar4Config{
+		Enabled:  true,
+		Commands: []config.RuntimeCommand{{Name: "no-secrets", Cmd: "printenv"}},
+	}
 	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
 
 	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) { return nil, errForTest }
@@ -180,12 +193,15 @@ func TestRunEnvCheck_AuthReadFailure(t *testing.T) {
 	}
 
 	cfg := defaultTestConfig()
-	cfg.Pillar4.Commands = []config.RuntimeCommand{{Name: "auth-fail", Cmd: "printenv"}}
+	cfg.Pillar4 = config.Pillar4Config{
+		Enabled:  true,
+		Commands: []config.RuntimeCommand{{Name: "auth-fail", Cmd: "printenv"}},
+	}
 	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
 
 	// Force read of .auth to fail by pointing socket to a dir without .auth file
 	badSocketDir := t.TempDir() + "/noauth.sock"
-	config.SocketPathFn = func() string { return badSocketDir }
+	daemon.SocketPathFn = func() string { return badSocketDir }
 
 	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) {
 		c, s := net.Pipe()
@@ -223,7 +239,10 @@ func TestRunEnvCheck_CommandFailsButReportsCount(t *testing.T) {
 	}
 
 	cfg := defaultTestConfig()
-	cfg.Pillar4.Commands = []config.RuntimeCommand{{Name: "fail-env", Cmd: "printenv"}}
+	cfg.Pillar4 = config.Pillar4Config{
+		Enabled:  true,
+		Commands: []config.RuntimeCommand{{Name: "fail-env", Cmd: "printenv"}},
+	}
 	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
 
 	// Successful dial + pipe server that will reply to CHECK_HASH.
@@ -322,8 +341,11 @@ func TestRunEnvCheck_MetacharWarning(t *testing.T) {
 	}
 
 	cfg := defaultTestConfig()
-	cfg.Pillar4.Commands = []config.RuntimeCommand{
-		{Name: "meta-pipe", Cmd: "echo foo | bar"}, // contains |
+	cfg.Pillar4 = config.Pillar4Config{
+		Enabled: true,
+		Commands: []config.RuntimeCommand{
+			{Name: "meta-pipe", Cmd: "echo foo | bar"}, // contains |
+		},
 	}
 	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
 	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) { return nil, errForTest }
@@ -345,7 +367,10 @@ func TestRunEnvCheck_EmptyCommand(t *testing.T) {
 	os.Stdout = w
 
 	cfg := defaultTestConfig()
-	cfg.Pillar4.Commands = []config.RuntimeCommand{{Name: "empty-cmd", Cmd: ""}}
+	cfg.Pillar4 = config.Pillar4Config{
+		Enabled:  true,
+		Commands: []config.RuntimeCommand{{Name: "empty-cmd", Cmd: ""}},
+	}
 	configLoad = func() (*config.Config, string, error) { return &cfg, "", nil }
 
 	RunEnvCheck("empty-cmd")

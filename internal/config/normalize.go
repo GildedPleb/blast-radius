@@ -99,10 +99,21 @@ func normalizePillar3(cfg *Config) {
 	cfg.Pillar3 = p
 }
 
+// normalizePillar4 ensures the Pillar4.Commands slice is never nil after unmarshal
+// (consistent with how other list fields are handled). The pillar-level Enabled
+// is left exactly as provided by the user YAML (or zero/false if the key was
+// absent). This supports the explicit opt-in model used in the initial template.
+func normalizePillar4(cfg *Config) {
+	if cfg.Pillar4.Commands == nil {
+		cfg.Pillar4.Commands = []RuntimeCommand{}
+	}
+}
+
 // normalizePillar5 ensures the two independent timeouts (redact + full clear)
 // and the redact_placeholder for the Pillar 5 clipboard monitor have sensible values
 // after unmarshal of partial user config. Monitor/alert enableds respect explicit
 // false from YAML; defaults come from DefaultConfig() before unmarshal.
+// The new pillar-level Enabled is left as written (false if absent in YAML).
 func normalizePillar5(cfg *Config) {
 	if cfg.Pillar5.RedactTimeoutSeconds < 0 {
 		cfg.Pillar5.RedactTimeoutSeconds = 0 // 0 disables that tier

@@ -43,15 +43,15 @@ The system remains strictly **hash-only, minimal-metadata, local-only** with saf
 
 ## Current Capabilities
 
-| Area                        | Status    | Key Deliverables |
-| --------------------------- | --------- | ---------------- |
-| Foundations                 | ✅        | Singleton daemon via Unix domain socket (hard-coded path + 0600 + capability token auth), thin CLI coordinator, YAML config (pillar-organized, non-sensitive), safe degradation. |
-| Discovery + Registry (P1)   | ✅        | Logical collector model (`env` + `bitwarden`), recursive scan under `project_roots` respecting `env_file_patterns` / ignores / skips, SHA-256 only, opaque ProjectIDs, `duplicates`, on-demand `rescan`, collector results in status. |
-| Zsh HUD                     | ✅        | Thin prompt segment (`blastradius_prompt_info`) + convenience wrappers (`blastradius_status`, `blastradius_*` for other commands). Prompt is fast and safe for every invocation. |
-| History Hygiene (P3)        | ✅        | `scrub-history` (delete/redact, `--dry-run`/`--json`/`--file`/`--full`), broad LCD + rotated/backup discovery under home + `history_roots`, v2 regfp receipts for incremental + mutation detection, atomic temp+0600+rename writes. |
-| Runtime Hygiene (P4)        | ✅        | `blastradius env [name]` primitive: direct exec (hard invariant), unified detection against P1 registry, `secrets_found` count only (never values), logs to daemon, `--json`, `pillar4.commands` + `enabled`. |
-| Clipboard Hygiene (P5)      | ✅        | Primitives (`check`/`scrub`/`redact`/`clear`/`nuke`), optional macOS polling monitor (fast first-secret alert + two-tier auto with independent `redact_timeout_seconds` / `full_clear_timeout_seconds`), state in `status`, placeholder preference (P5 > P3 > default). |
-| Illegitimate Residue (P2)   | ✅        | `crumbs` command + JSON, `residue` (detector + manager), per-dir `dirs[]` + `files[]` model, daemon handler + status summary, `policy.Classifier` enforcing P1 authority (P1-claimed files never crumbs). Walks + ScanFile skip symlinks (no follow). Narrow TOCTOU between Lstat symlink checks and later reads is documented (primary containment is surfaces + Classifier). |
+| Area                      | Status | Key Deliverables                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Foundations               | ✅     | Singleton daemon via Unix domain socket (hard-coded path + 0600 + capability token auth), thin CLI coordinator, YAML config (pillar-organized, non-sensitive), safe degradation.                                                                                                                                                                                               |
+| Discovery + Registry (P1) | ✅     | Logical collector model (`env` + `bitwarden`), recursive scan under `project_roots` respecting `env_file_patterns` / ignores / skips, SHA-256 only, opaque ProjectIDs, `duplicates`, on-demand `rescan`, collector results in status.                                                                                                                                          |
+| Zsh HUD                   | ✅     | Thin prompt segment (`blastradius_prompt_info`) + convenience wrappers (`blastradius_status`, `blastradius_*` for other commands). Prompt is fast and safe for every invocation.                                                                                                                                                                                               |
+| History Hygiene (P3)      | ✅     | `scrub-history` (delete/redact, `--dry-run`/`--json`/`--file`/`--full`), broad LCD + rotated/backup discovery under home + `history_roots`, v2 regfp receipts for incremental + mutation detection, atomic temp+0600+rename writes.                                                                                                                                            |
+| Runtime Hygiene (P4)      | ✅     | `blastradius env [name]` primitive: direct exec (hard invariant), unified detection against P1 registry, `secrets_found` count only (never values), logs to daemon, `--json`, `pillar4.commands` + `enabled`.                                                                                                                                                                  |
+| Clipboard Hygiene (P5)    | ✅     | Primitives (`check`/`scrub`/`redact`/`clear`/`nuke`), optional macOS polling monitor (fast first-secret alert + two-tier auto with independent `redact_timeout_seconds` / `full_clear_timeout_seconds`), state in `status`, placeholder preference (P5 > P3 > default).                                                                                                        |
+| Illegitimate Residue (P2) | ✅     | `crumbs` command + JSON, `residue` (detector + manager), per-dir `dirs[]` + `files[]` model, daemon handler + status summary, `policy.Classifier` enforcing P1 authority (P1-claimed files never crumbs). Walks + ScanFile skip symlinks (no follow). Narrow TOCTOU between Lstat symlink checks and later reads is documented (primary containment is surfaces + Classifier). |
 
 ---
 
@@ -109,19 +109,19 @@ internal/
 
 ## Core Invariants (Current)
 
-| #   | Invariant                                                                                                                              | Status |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| 1   | Registry never contains plaintext                                                                                                      | ✅     |
-| 2   | No secret material ever written to disk                                                                                                | ✅     |
-| 3   | IPC over Unix domain socket (hard-coded path `~/.local/state/blastradius/blastradius.sock`, 0700 dir + 0600 socket + capability token) | ✅     |
-| 4   | True singleton daemon                                                                                                                  | ✅     |
-| 5   | Minimal metadata (opaque ProjectIDs)                                                                                                   | ✅     |
-| 6   | Persisted config is non-sensitive                                                                                                      | ✅     |
-| 7   | Safe degradation on failure                                                                                                            | ✅     |
-| 8   | Respects ignore patterns                                                                                                               | ✅     |
+| #   | Invariant                                                                                                                                            | Status |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 1   | Registry never contains plaintext                                                                                                                    | ✅     |
+| 2   | No secret material ever written to disk                                                                                                              | ✅     |
+| 3   | IPC over Unix domain socket (hard-coded path `~/.local/state/blastradius/blastradius.sock`, 0700 dir + 0600 socket + capability token)               | ✅     |
+| 4   | True singleton daemon                                                                                                                                | ✅     |
+| 5   | Minimal metadata (opaque ProjectIDs)                                                                                                                 | ✅     |
+| 6   | Persisted config is non-sensitive                                                                                                                    | ✅     |
+| 7   | Safe degradation on failure                                                                                                                          | ✅     |
+| 8   | Respects ignore patterns                                                                                                                             | ✅     |
 | 9   | Pillar 4 / `pillar4.commands` always use direct `exec` only (no shell) — hard security invariant; bare names resolved via LookPath (best-effort abs) | ✅     |
 
-The socket path and direct-exec rule are hard invariants (not user-configurable) to reduce attack surface. Additional runtime hardening: bare external commands (bw, pbpaste, pbcopy, osascript, afplay, and P4 bare names) are resolved via LookPath to absolute paths where possible; P1/P2 walks and residue file scans explicitly skip symlinks (no follow). Narrow TOCTOU windows between those Lstat checks and subsequent opens/reads are accepted and documented (local attacker model; declared surfaces + Classifier are primary). Old top-level discovery keys and `shell:` / `auto_on_prompt` keys under commands are not accepted (and are silently ignored by the YAML unmarshaler if present in user config). The supported shape is the pillar-organized structure in `config.example.yaml`.
+The socket path and direct-exec rule are hard invariants (not user-configurable) to reduce attack surface. Additional runtime hardening: bare external commands (bw, pbpaste, pbcopy, osascript, afplay, and P4 bare names) are resolved via LookPath to absolute paths where possible; P1/P2 walks and residue file scans explicitly skip symlinks (no follow). Narrow TOCTOU windows between those Lstat checks and subsequent opens/reads are accepted and documented (local attacker model; declared surfaces + Classifier are primary). Old top-level discovery keys and `shell:` / `auto_on_prompt` keys under commands are not accepted (and are silently ignored by the YAML unmarshaler if present in user config). The supported shape is the pillar-organized structure in `internal/config/config.example.yaml`.
 
 ---
 
@@ -140,12 +140,15 @@ blastradius rescan           # Pillar 1: trigger manual on-demand rescan
 blastradius env [--json] [name]  # Pillar 4 primitive: run cmd (direct exec), search output for secrets, report count (no values)
 blastradius clipboard        # Pillar 5: status|check|clear|nuke|scrub|redact (primitives + monitor-backed alerts + two-tier auto)
 blastradius config           # Show configuration
+blastradius validate [--reset]   # Full config diagnosis + first-run onboarding / reset tool (contextual readiness checks across pillars)
 ```
 
 Zsh integration (source `zsh/blastradius.zsh`):
 
 - `blastradius_prompt_info` — compact prompt segment (Pillar 1 count)
 - `blastradius_status` + thin wrappers for other commands
+
+**First-run / config initialization:** The first time any command (including bare `blastradius`) is invoked and no config file exists at the XDG path, the tool auto-creates an intentionally incomplete starter template containing the pillar comments + reference example values. The triggering command (and all subsequent ones) then runs a _contextual_ shallow readiness check and hard-fails with precise "edit <exact key>" guidance if the pillars it needs still contain only the virgin template data. Readiness is decided solely by substantive content (customized values or explicit source disabling); there is no meta setup flag. `blastradius validate [--reset]` is the dedicated full-diagnosis and reset tool. Partial usage (disabled pillars, empty roots, Bitwarden-only, etc.) is supported and documented in the generated template and internal/config/config.example.yaml.
 
 ---
 
@@ -184,7 +187,7 @@ go build -o blastradius ./cmd/blastradius
 ./blastradius status
 ```
 
-Config: `~/.config/blastradius/config.yaml` (see `config.example.yaml`)
+Config: `~/.config/blastradius/config.yaml` (see `internal/config/config.example.yaml`)
 
 ---
 

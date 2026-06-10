@@ -133,12 +133,23 @@ func (d *Daemon) runClipboardMonitor() {
 	if d.cfg == nil {
 		return
 	}
+
+	p5 := d.cfg.Pillar5
+
+	// Master pillar gate. If pillar5.enabled is false at daemon startup (the
+	// snapshot time), we never poll the clipboard in the background. This is
+	// the explicit opt-out so that nothing in the daemon will read copy-paste
+	// content unless the user has set enabled: true.
+	if !p5.Enabled {
+		logging.Println("Pillar5 monitor: pillar5.enabled=false; background clipboard monitoring disabled (no pbpaste polling will occur from the daemon)")
+		return
+	}
+
 	if runtimeGOOS != "darwin" {
 		logging.Println("Pillar5 monitor: pbpaste/pbcopy is macOS-only; disabling")
 		return
 	}
 
-	p5 := d.cfg.Pillar5
 	tkr := newMonitorTicker(clipboardMonitorInterval)
 	defer tkr.Stop()
 

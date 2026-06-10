@@ -376,7 +376,7 @@ func TestSafeLocation_MoreBranches(t *testing.T) {
 
 // Editor/backup residue patterns (swp, ~, .bak, etc.) are no longer
 // auto-detected by a global flag. Users who want this behavior should
-// express it explicitly using dirs[].files[] patterns (see config.example.yaml).
+// express it explicitly using dirs[].files[] patterns (see internal/config/config.example.yaml).
 
 // Additional ScanFile coverage for previously weak branches (keep decisions, confidence, format+name combinations).
 func TestScanFile_SuspiciousNameOnly(t *testing.T) {

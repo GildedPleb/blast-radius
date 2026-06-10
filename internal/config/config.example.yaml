@@ -18,6 +18,35 @@
 # broad permissions, and "fuck you, don't put secrets in dangerous places."
 
 # ------------------------------------------------------------------------------
+# FIRST-RUN / AUTO-INIT BEHAVIOR
+# ------------------------------------------------------------------------------
+# On the very first invocation of any command (including bare "blastradius"),
+# if ~/.config/blastradius/config.yaml does not exist, the tool auto-creates
+# an intentionally incomplete starter template at that path. The starter
+# contains the pillar framing you are reading plus the reference example
+# values (especially under pillar1.sources.env.options.project_roots).
+#
+# Immediately after creation (and on every subsequent use), the command
+# performs a contextual, shallow readiness check. It hard-fails with
+# precise, actionable guidance if the parts of the config *it* needs still
+# contain only the initial template data.
+#
+# Readiness is determined *solely by substantive content* (real user values
+# in the required sections, or explicit disabling of a source + use of
+# another). There is no setup_complete, reviewed, or equivalent meta flag,
+# and simply having the file does not count as "set up".
+#
+# `blastradius validate` (alias: `init`) is the dedicated full-diagnosis +
+# onboarding + reset (`--reset`) tool. It walks every pillar and tells you
+# exactly what to edit to make specific commands work.
+#
+# Partial / sensible-default usage is fully supported (Bitwarden-only,
+# empty project_roots for the $HOME fallback, Pillar 2 disabled, etc.).
+# The error messages + the comments in this file (and the generated
+# template) provide the education.
+# ------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
 # Core (top-level only)
 # ------------------------------------------------------------------------------
 # Only truly cross-cutting, non-pillar-specific settings live here.
@@ -57,15 +86,18 @@ pillar1:
         #
         # Use ~ for home-relative paths. These are the *only* places
         # Pillar 1 will ever look for legitimate secrets.
-        project_roots:
-          - "~/projects"
-          - "~/work"
+        # project_roots is deliberately LEFT EMPTY, forcing the user to set it correctly for their setup
+        project_roots: []
+          # - "~/projects"
+          # - "~/work"
           # - "~/src"
           # - "/Volumes/work"   # external volumes are fine
 
         # Directory basenames that are *never* descended into.
         # This is both a performance win and a noise-reduction win.
         # These supplement a small built-in safe list.
+        # These are *not* user-specific. They are universal safe
+        # skips that nobody should be storing secrets inside.
         skip_dirs:
           - "node_modules"
           - ".git"
@@ -79,7 +111,7 @@ pillar1:
           - "coverage"
           - ".venv"
           - "__pycache__"
-          # Add anything else that is huge or full of generated secrets.
+          # Add anything else that is huge.
 
         # Files whose ignore rules (gitignore syntax) will be respected
         # during the walk. Later files win for conflicting rules.
@@ -394,7 +426,7 @@ pillar2:
 # ==============================================================================
 
 pillar3:
-  enabled: true
+  enabled: false
   mode: "redact"                 # or "delete" for removing whole entries
   redact_placeholder: "[REDACTED]"
   # history_roots:                # additional bases for LCD + auto-rotated discovery
@@ -432,10 +464,10 @@ pillar3:
 # discovery or residue scanners (P1/P2) — declared roots + per-surface patterns
 # + Classifier are authoritative.
 #
-# `enabled: true` marks commands for future prompt/automation use.
 # ==============================================================================
 
 pillar4:
+  enabled: false
   commands:
     - name: "default-env"
       cmd: "printenv"
@@ -472,6 +504,7 @@ pillar4:
 # ==============================================================================
 
 pillar5:
+  enabled: false
   # Two-tier auto after a secret is detected and clipboard content is stable.
   # redact_timeout_seconds: auto-redact known secrets in the clipboard content
   #   (replaces secret values with placeholder, keeps the rest of what you copied).
@@ -499,17 +532,9 @@ pillar5:
   # (config is snapshotted at start; no runtime reload for this in alpha).
   # The internal poll interval is a cheap 750ms (hard-coded for alpha; logged
   # at daemon startup under "Pillar5 monitor started (interval=...)").
-  monitor_enabled: true
+  monitor_enabled: false
 
   # Whether the monitor should surface alerts (notification + optional sound)
   # the moment a secret is detected. The monitor still tracks state for `status`
   # even if this is false.
-  alerts_enabled: true
-
-# ------------------------------------------------------------------------------
-# That's it. Everything else is either a hard-coded security invariant
-# or lives inside the five pillars above.
-#
-# After editing, a `blastradius status` (with the daemon running) is the
-# quickest way to see that your config was loaded the way you intended.
-# ------------------------------------------------------------------------------
+  alerts_enabled: false

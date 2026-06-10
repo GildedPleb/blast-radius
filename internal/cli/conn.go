@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/daemon"
 	"github.com/GildedPleb/blast-radius/internal/logging"
 	"github.com/GildedPleb/blast-radius/internal/registry"
 )
@@ -55,7 +55,7 @@ func openDaemonConn() (net.Conn, error) {
 	if _, _, err := configLoad(); err != nil {
 		return nil, err
 	}
-	socketPath := config.SocketPath()
+	socketPath := daemon.SocketPath()
 	conn, err := netDialTimeout("unix", socketPath, socketConnectTimeout)
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func openDaemonConn() (net.Conn, error) {
 // Callers treat write failures as "count may be incomplete" (same as before).
 // It uses the package seam readAuthTokenForSocket so tests can override.
 func openDaemonConnBestEffort() (net.Conn, error) {
-	socketPath := config.SocketPath()
+	socketPath := daemon.SocketPath()
 	conn, err := netDialTimeout("unix", socketPath, socketConnectTimeout)
 	if err != nil {
 		return nil, err

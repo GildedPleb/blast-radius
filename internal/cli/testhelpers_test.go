@@ -33,7 +33,7 @@ func resetTestOverrides(t testing.TB) {
 	configLoad = func() (*config.Config, string, error) {
 		return &cfg, "", nil
 	}
-	config.SocketPathFn = func() string { return tempSocket }
+	daemon.SocketPathFn = func() string { return tempSocket }
 
 	netDialTimeout = net.DialTimeout
 	execCommand = exec.Command
@@ -45,6 +45,13 @@ func resetTestOverrides(t testing.TB) {
 	runDaemon = func() {}
 	osExit = func(code int) {}                          // silent no-op during tests
 	readAuthTokenForSocket = realReadAuthTokenForSocket // reset to real (tests that need fake override it)
+
+	// Prevent first-run template creation and readiness gates from touching the
+	// real filesystem or interfering with the canned configLoad in tests.
+	ensureConfig = func() (string, bool, error) { return "", false, nil }
+
+	// Safe no-op for any test that exercises RunValidate(..., "--reset")
+	removeConfigFile = func() error { return nil }
 
 	// Also force the *real* daemon package's logging path (used inside d.Run())
 	// to a per-test temp location. This is required for hermeticity of any test
@@ -80,21 +87,40 @@ func mockSendDaemonCommand(respLine string) func(string) (string, error) {
 // still hits the "unknown pillar4 primitive command" error path (no exec side effects).
 // Socket path is now a hard-coded invariant; tests override it via
 // config.SocketPathFn in resetTestOverrides.
+//
+// Note: Pillar4.Enabled and Pillar5.Enabled are true here so that tests exercising
+// the env primitive or clipboard commands do not trip the new pillar-level enabled
+// validation (they can still override the whole configLoad when they need specific
+// enabled=false cases).
 func defaultTestConfig() config.Config {
 	return config.Config{
 		Pillar3: config.Pillar3Config{
 			Enabled: false,
 			Mode:    "redact",
 		},
+		Pillar4: config.Pillar4Config{
+			Enabled: true,
+			// Commands deliberately left empty for certain error-path tests
+		},
 		Pillar5: config.Pillar5Config{
+			Enabled:                 true,
 			MonitorEnabled:          false,
 			AlertsEnabled:           false,
 			RedactTimeoutSeconds:    30,
 			FullClearTimeoutSeconds: 60,
 		},
-		// P2.Dirs left nil/empty (surfaces=0), P4.Commands left empty on purpose,
-		// P1 uses GetEnvOptions which tolerates zero.
+		// P2.Dirs left nil/empty (surfaces=0), P1 uses GetEnvOptions which tolerates zero.
 	}
+}
+
+// bypassValidateReadiness temporarily makes ValidateReadiness always pass.
+// Use this only for dispatch coverage tests. Real command tests should use
+// proper config or the real ValidateReadiness behavior.
+func bypassValidateReadiness(t *testing.T) func() {
+	t.Helper()
+	prev := validateReadiness
+	validateReadiness = func(string, *config.Config) error { return nil }
+	return func() { validateReadiness = prev }
 }
 
 // richDaemonResponse is a full response that exercises the new Pillar 1 collector_results,

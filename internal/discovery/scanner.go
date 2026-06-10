@@ -104,7 +104,7 @@ func (s *Scanner) visitEnvFiles(root string, onFile func(path string) error) err
 			// collectHashesFromFile have a narrow race window where a local writer could
 			// replace the entry with a symlink. Primary containment is the declared roots +
 			// patterns + Classifier. See matching note in residue/detector.go. Documented
-			// in CURRENT_STATE.md + config.example.yaml.
+			// in CURRENT_STATE.md + internal/config/config.example.yaml.
 			return nil
 		}
 

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/GildedPleb/blast-radius/internal/config"
+	"github.com/GildedPleb/blast-radius/internal/daemon"
 )
 
 // Use a single, reliably-detected secret everywhere we need candidates.
@@ -236,7 +237,7 @@ func TestRunClipboard_CheckWithCandidatesButAuthSkipped(t *testing.T) {
 	}
 
 	bad := t.TempDir() + "/nosibling.sock"
-	config.SocketPathFn = func() string { return bad }
+	daemon.SocketPathFn = func() string { return bad }
 
 	client, server := net.Pipe()
 	netDialTimeout = func(n, a string, d time.Duration) (net.Conn, error) { return client, nil }

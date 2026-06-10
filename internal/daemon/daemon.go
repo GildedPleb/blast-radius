@@ -228,7 +228,7 @@ func (d *Daemon) Pillar5ClipboardStatus() map[string]any {
 		"last_change":    lastChangeStr,
 		"redacted":       d.clipboardRedacted,
 		"cleared":        d.clipboardCleared,
-		"monitor_active": d.cfg != nil && d.cfg.Pillar5.MonitorEnabled,
+		"monitor_active": d.cfg != nil && d.cfg.Pillar5.Enabled && d.cfg.Pillar5.MonitorEnabled,
 	}
 }
 
@@ -240,7 +240,7 @@ func (d *Daemon) Run() error {
 		return fmt.Errorf("failed to initialize logging: %w", err)
 	}
 
-	socketPath := config.SocketPath()
+	socketPath := SocketPath()
 	log.Printf("Daemon starting. Listening on %s (0600 + token auth)", socketPath)
 	log.Printf("Log file: %s", logPath)
 
@@ -298,6 +298,34 @@ func (d *Daemon) Run() error {
 		afterRunSetupForTesting(d)
 	}
 
+	// -------------------------------------------------------------------------
+	// Background work that is gated by pillar enabled flags (from the cfg
+	// snapshot taken at New() / daemon start).
+	//
+	// IMPORTANT: The *entire* config (including all pX.enabled values and their
+	// sub-options) is snapshotted once when the daemon starts. There is no
+	// runtime reload. Changing any pillar's enabled flag (or related toggles
+	// such as pillar5.monitor_enabled) requires restarting the daemon for the
+	// new behavior to take effect.
+	//
+	// - Pillar 1 per-source enabled (env / bitwarden): controls whether
+	//   collectors are wired in NewManager and whether initial discovery /
+	//   rescan actually run them. See discovery/manager.go.
+	// - Pillar 2 enabled: RunCrumbsScan / residue manager early-returns with
+	//   "pillar2.enabled is false" marker (no scanning performed).
+	// - Pillar 3 enabled: checked in the SCRUB_HISTORY handler; early "disabled"
+	//   response, no history processing.
+	// - Pillar 4 enabled: enforced at the CLI layer for the `env` primitive
+	//   (no direct daemon background behavior; the primitive is on-demand exec
+	//   + CHECK_HASH against the P1 registry).
+	// - Pillar 5 enabled + monitor_enabled: see the detailed comment below.
+	//
+	// This design keeps the daemon simple (true singleton, no hot-reload
+	// complexity or extra attack surface). The `blastradius validate` and
+	// `blastradius status` surfaces, plus the loud comments in the generated
+	// initial config, make the "edit + restart" requirement obvious.
+	// -------------------------------------------------------------------------
+
 	// Run initial discovery on startup — runs in background.
 	// Guarded so that a zero &Daemon{} (used in NilGuards for accessor coverage)
 	// does not panic; real usage always goes through New() which wires discovery.
@@ -306,10 +334,22 @@ func (d *Daemon) Run() error {
 	}
 
 	// Pillar 5 reactive monitor: clipboard change detection, fast first-secret
-	// alerting, two-tier auto (redact then full clear). Only starts if
-	// monitor_enabled in config. Safe no-op otherwise.
+	// alerting, two-tier auto (redact then full clear).
+	//
+	// The monitor goroutine is ONLY started when BOTH:
+	//   - pillar5.enabled == true (the pillar-wide opt-in, added for explicit
+	//     control over whether the daemon ever touches the clipboard at all), AND
+	//   - pillar5.monitor_enabled == true (the sub-toggle for the background
+	//     polling + auto actions; explicit primitives still work via CLI even
+	//     if monitor is off, subject to the pillar enabled).
+	//
+	// This is evaluated once at daemon startup using the config snapshot.
+	// Changing pillar5.enabled (or monitor_enabled/alerts_enabled) requires
+	// a daemon restart to take effect. See also the loud comments in the
+	// initial config template.
+	//
 	// Guarded for the same nil-safety reason as discovery (see NilGuards).
-	if d.cfg != nil && d.cfg.Pillar5.MonitorEnabled {
+	if d.cfg != nil && d.cfg.Pillar5.Enabled && d.cfg.Pillar5.MonitorEnabled {
 		go d.runClipboardMonitor()
 	}
 
