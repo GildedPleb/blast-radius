@@ -3,6 +3,7 @@ package discovery
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,7 +66,7 @@ func NewManager(cfg *config.Config, reg *registry.Registry) *Manager {
 		env.SetScanFunc(func() ([]registry.SecretHash, error) {
 			roots := m.cfg.GetEnvOptions().ProjectRoots
 			if len(roots) == 0 {
-				roots = []string{"~"}
+				return nil, fmt.Errorf("env source has no project_roots configured (this should have been caught by ValidateReadiness; run `blastradius validate` to diagnose and fix)")
 			}
 			return m.scanner.CollectEnvHashes(roots)
 		})
@@ -116,7 +117,9 @@ func (m *Manager) RunInitialDiscovery() {
 	envOpts := m.cfg.GetEnvOptions()
 	roots := envOpts.ProjectRoots
 	if len(roots) == 0 {
-		roots = []string{"~"}
+		logging.Printf("ERROR: env source has no project_roots configured (this should have been caught by ValidateReadiness)")
+		m.registry.SetScanState(registry.ScanStateFailed)
+		return
 	}
 
 	var hadError bool
@@ -295,7 +298,8 @@ func (m *Manager) Rescan() *RescanResult {
 	envOpts := m.cfg.GetEnvOptions()
 	result.RootsScanned = envOpts.ProjectRoots
 	if len(result.RootsScanned) == 0 {
-		result.RootsScanned = []string{"~"}
+		result.Errors = append(result.Errors, "env source has no project_roots configured (this should have been caught by ValidateReadiness)")
+		// Still return what we have (empty) so the result isn't misleading
 	}
 
 	m.lastMu.Lock()

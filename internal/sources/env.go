@@ -52,12 +52,10 @@ func (e *EnvCollector) Validate() error {
 
 	roots := e.cfg.GetEnvOptions().ProjectRoots
 	if len(roots) == 0 {
-		// Fall back to home directory behavior (current default)
-		roots = []string{"~"}
+		return errors.New("env source has no project_roots configured (this should have been caught by ValidateReadiness; run `blastradius validate` to diagnose and fix)")
 	}
 
-	// Do a basic existence/readability check on at least one root.
-	// This catches the most common misconfiguration early with a clear error.
+	// Do a basic existence/readability check on the configured roots.
 	for _, r := range roots {
 		expanded := expandForValidation(r)
 		if _, err := os.Stat(expanded); err != nil {

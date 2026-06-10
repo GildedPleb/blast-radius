@@ -384,8 +384,8 @@ func TestManager_Rescan_EmptyRootsCollector(t *testing.T) {
 	t.Setenv("HOME", fakeHome)
 
 	cfg := config.DefaultConfig()
-	// env enabled by default; explicitly set empty project_roots so the
-	// closure inside SetScanFunc takes the len==0 path.
+	// env enabled by default; explicitly set empty project_roots to
+	// exercise the error path we now return from the EnvCollector closure.
 	if env, ok := cfg.Pillar1.Sources["env"]; ok {
 		env.Options["project_roots"] = []string{}
 		env.Options["skip_dirs"] = []string{}
@@ -400,17 +400,29 @@ func TestManager_Rescan_EmptyRootsCollector(t *testing.T) {
 		t.Fatal("Rescan returned nil")
 	}
 
-	// With empty fake $HOME we expect the collector to contribute 0 hashes
-	// and Validate+Collect to succeed (no errors). RootsScanned should
-	// also reflect the fallback to "~".
+	// We now expect the collector to return an error instead of silently
+	// falling back to "~". RootsScanned should be empty.
 	if result.AfterHashes != 0 {
-		t.Errorf("expected 0 hashes (empty fake $HOME), got %d", result.AfterHashes)
+		t.Errorf("expected 0 hashes, got %d", result.AfterHashes)
 	}
-	if len(result.Errors) != 0 {
-		t.Errorf("expected no collector errors, got: %v", result.Errors)
+	if len(result.Errors) == 0 {
+		t.Error("expected collector errors when project_roots is empty, got none")
 	}
-	if len(result.RootsScanned) != 1 || result.RootsScanned[0] != "~" {
-		t.Errorf("expected RootsScanned=[~] after empty-roots fallback, got %v", result.RootsScanned)
+
+	// Check that our new error message is present
+	foundEmptyRootsError := false
+	for _, errMsg := range result.Errors {
+		if strings.Contains(errMsg, "env source has no project_roots configured") {
+			foundEmptyRootsError = true
+			break
+		}
+	}
+	if !foundEmptyRootsError {
+		t.Errorf("expected error mentioning empty project_roots, got: %v", result.Errors)
+	}
+
+	if len(result.RootsScanned) != 0 {
+		t.Errorf("expected empty RootsScanned when project_roots was empty, got: %v", result.RootsScanned)
 	}
 	if result.CollectorResults["env"] != 0 {
 		t.Errorf("expected env collector to report 0 hashes, got %d", result.CollectorResults["env"])
@@ -589,5 +601,45 @@ func TestManager_Rescan_CollectorCollectError(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected collect error in result.Errors, got: %v", result.Errors)
+	}
+}
+
+// TestManager_EnvScanFunc_EmptyRoots_Coverage forces execution of the exact
+// defensive error return inside the scan func closure that NewManager wires
+// for the env collector (the line that was showing as uncovered).
+// We bypass Rescan's Validate() on purpose so we are guaranteed to reach
+// the Collect() -> scanFunc path regardless of what Validate does with
+// empty roots. This is acceptable for a coverage-only test of defensive code.
+func TestManager_EnvScanFunc_EmptyRoots_Coverage(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+
+	cfg := config.DefaultConfig()
+	if env, ok := cfg.Pillar1.Sources["env"]; ok {
+		env.Options["project_roots"] = []string{}
+		env.Options["skip_dirs"] = []string{}
+		cfg.Pillar1.Sources["env"] = env
+	}
+
+	reg := registry.New()
+	m := NewManager(cfg, reg)
+
+	if len(m.collectors) == 0 {
+		t.Fatal("NewManager did not wire the env collector (is it disabled in DefaultConfig?)")
+	}
+
+	// The [0] collector is the one NewManager created + SetScanFunc'ed with
+	// the real closure that closes over m.cfg + m.scanner (the one we need covered).
+	collector := m.collectors[0]
+
+	hashes, err := collector.Collect()
+	if err == nil {
+		t.Fatal("expected error from the scan func when project_roots is empty")
+	}
+	if !strings.Contains(err.Error(), "env source has no project_roots configured") {
+		t.Errorf("expected the specific project_roots error message, got: %v", err)
+	}
+	if len(hashes) != 0 {
+		t.Errorf("expected 0 hashes on the error path, got %d", len(hashes))
 	}
 }

@@ -179,6 +179,48 @@ func TestEnvCollector_Validate(t *testing.T) {
 			t.Errorf("got 'does not exist' error, wanted 'cannot access': %v", err)
 		}
 	})
+
+	t.Run("success - valid existing project root", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{
+			Pillar1: config.Pillar1Config{
+				Sources: map[string]config.SourceConfig{
+					"env": {
+						Enabled: true,
+						Options: map[string]any{
+							"project_roots": []string{tmpDir},
+						},
+					},
+				},
+			},
+		}
+		c := NewEnvCollector(cfg)
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error for valid root: %v", err)
+		}
+	})
+
+	t.Run("success - tilde-expanded root exists (exercises expandForValidation happy path)", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+
+		cfg := &config.Config{
+			Pillar1: config.Pillar1Config{
+				Sources: map[string]config.SourceConfig{
+					"env": {
+						Enabled: true,
+						Options: map[string]any{
+							"project_roots": []string{"~/"},
+						},
+					},
+				},
+			},
+		}
+		c := NewEnvCollector(cfg)
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error for ~/ root: %v", err)
+		}
+	})
 }
 
 func TestEnvCollector_Collect(t *testing.T) {
