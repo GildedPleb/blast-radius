@@ -171,6 +171,68 @@ func TestRun_Dispatch(t *testing.T) {
 		Run([]string{"stop"})
 		Run([]string{"halt"})
 	})
+
+	// --- New coverage: config load failure paths (the lerr != nil branch) ---
+	t.Run("config-load-error-fatal-for-normal-commands", func(t *testing.T) {
+		resetTestOverrides(t)
+		defer resetTestOverrides(t)
+
+		configLoad = func() (*config.Config, string, error) {
+			return nil, "/home/user/.config/blastradius/config.yaml", errForTest
+		}
+
+		exitCalled := false
+		osExit = func(code int) {
+			exitCalled = true
+			if code != 1 {
+				t.Errorf("expected osExit(1), got %d", code)
+			}
+		}
+
+		// Any normal command should hit the fatal path
+		Run([]string{"status"})
+		Run([]string{"crumbs"})
+		Run([]string{"rescan"})
+
+		if !exitCalled {
+			t.Error("expected osExit(1) on config load error for normal commands")
+		}
+	})
+
+	t.Run("config-load-error-allows-validate-reset-recovery", func(t *testing.T) {
+		resetTestOverrides(t)
+		defer resetTestOverrides(t)
+
+		configLoad = func() (*config.Config, string, error) {
+			return nil, "/home/user/.config/blastradius/config.yaml", errForTest
+		}
+
+		// This should NOT call osExit(1) — it should fall through to RunValidate
+		// (which will print the warning and continue)
+		Run([]string{"validate", "--reset"})
+		Run([]string{"init", "--reset"})
+	})
+
+	t.Run("config-load-error-still-fatal-on-validate-without-reset", func(t *testing.T) {
+		resetTestOverrides(t)
+		defer resetTestOverrides(t)
+
+		configLoad = func() (*config.Config, string, error) {
+			return nil, "/bad/config.yaml", errForTest
+		}
+
+		exitCalled := false
+		osExit = func(code int) {
+			exitCalled = true
+		}
+
+		Run([]string{"validate"})    // no --reset → should fatal
+		Run([]string{"init", "foo"}) // no --reset → should fatal
+
+		if !exitCalled {
+			t.Error("expected osExit on validate/init without --reset when config is unreadable")
+		}
+	})
 }
 
 // TestRealSendDaemonCommand exercises the unmocked path using DI hooks and net.Pipe

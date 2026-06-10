@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,6 +40,13 @@ var (
 	validateReadiness = config.ValidateReadiness
 )
 
+// hasResetFlag reports whether --reset appears anywhere in the args.
+// This is the single source of truth for the recovery path that must
+// still work even when the config file is completely unparseable.
+func hasResetFlag(args []string) bool {
+	return slices.Contains(args, "--reset")
+}
+
 // Run is the single coordinator entrypoint for all CLI commands. It owns
 // command dispatch, special-case flag handling (e.g. status --json, check-hash),
 // and routing to the individual Run* implementations.
@@ -70,12 +78,23 @@ func Run(osArgs []string) {
 	// known virgin emitted values for the pillars this cmd needs) and already
 	// returns nil for lenient commands (help, config, logs, etc.).
 	// Instructional comments / banner text in the file have no effect.
-	if cfg, _, lerr := configLoad(); lerr == nil {
-		if verr := validateReadiness(cmd, cfg); verr != nil {
-			fmt.Fprintln(os.Stderr, verr.Error())
+	cfg, configPath, lerr := configLoad()
+	if lerr != nil {
+		// Only allow validate/init --reset through as a recovery path.
+		// Everything else must die if we can't even read the config.
+		if (cmd == "validate" || cmd == "init") && hasResetFlag(tail) {
+			// fall through to RunValidate which already handles --reset + load error
+		} else {
+			fmt.Fprintf(os.Stderr, "FATAL: failed to load config from %s: %v\n", configPath, lerr)
+			fmt.Fprintln(os.Stderr, "The config file is unreadable. Fix the YAML or run:")
+			fmt.Fprintln(os.Stderr, "    blastradius validate --reset")
 			osExit(1)
 			return
 		}
+	} else if verr := validateReadiness(cmd, cfg); verr != nil {
+		fmt.Fprintln(os.Stderr, verr.Error())
+		osExit(1)
+		return
 	}
 
 	switch cmd {

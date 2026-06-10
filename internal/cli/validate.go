@@ -22,12 +22,7 @@ var removeConfigFile = config.RemoveConfigFile
 // when every pillar reports substantive user content for the sections that
 // have requirements.
 func RunValidate(tail []string) {
-	reset := false
-	for _, a := range tail {
-		if a == "--reset" {
-			reset = true
-		}
-	}
+	reset := hasResetFlag(tail)
 
 	if reset {
 		if err := removeConfigFile(); err != nil {
