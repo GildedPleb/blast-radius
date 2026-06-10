@@ -2,8 +2,6 @@
 - Test Audit
 - CLI audit
 - Config audit
-- detection test suite/audit
-- discovery testing suite/audit
 - logger audit: get all logs fucking golden!
 - Bitwarden collector is still early. The Collect() implementation is functional but basic. It doesn't yet handle folders, organizations, attachments, TOTP secrets well, or have sophisticated error handling around bw states. This is the least complete area of P1.
 - Versioning/compat gate for hard-coded external collectors (P1 bitwarden `bw` first): perform a version check (via `bw --version` or equivalent, after LookPath) inside Validate (and defensively before Collect work) so known-unsupported / too-old / known-bad versions produce a clean actionable error ("bitwarden: bw version X is not supported; upgrade...") instead of silent under-collection, parse failures, or weird state.
@@ -27,3 +25,5 @@
 - Automatically create and populate a config.yaml.
 - Surface all useful commands to ZSH prompt functions. provide sensible defaults, sensible settings, and otherwise good recommendations for best practices. also we want to look at making it fun like a fun version where there's clever emojis that alert to items in a new and interesting way that actually maps to the usage. For instance, a lot of people will set up git in their directory in a particular way. they'll set up time and date in a particular way They'll set up their cube config status in a particular way. and for all of these things they have particular settings around the fonts, the symbols, the emojis they use. and so what we want to do is capture a new, unique, recognizable kind of branding for this.
 - Add a bunch of useful commands to pillar 4 as sensible suggestions but not defaults to the config file. We have a little bit, but it'd be worthwhile to add a whole bunch more.
+
+- Add dynamic test coverage badge to README that always shows the real trusted number from our existing coverage system. Use a GitHub Actions workflow on push to main that runs make cover, parses the per-package average produced by scripts/coverage.sh (never plain go test -cover ./...), and updates a gist JSON via schneegans/dynamic-badges-action@v1.8.0 so the shields.io endpoint badge in the README reflects current reality (with automatic color scaling). One-time setup: create a gist + GIST_TOKEN repo secret; badge URL points at the gist JSON.
